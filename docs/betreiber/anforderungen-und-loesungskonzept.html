@@ -66,7 +66,7 @@
 </ol>
 
 <h2>1. Worum es geht</h2>
-<p>Die Beachhalle wird im Winter stundenweise an Privatpersonen, Vereine und Mitglieder vermietet. Heute kostet das viel Handarbeit: Anfragen beantworten, Belegung pflegen, Rechnungen schreiben, Licht und Heizung rechtzeitig schalten, Schlüssel übergeben.</p>
+<p>Ende 2027 eröffnet eine neue Beachhalle, die im Winter stundenweise an Privatpersonen, Vereine und Mitglieder vermietet wird. Ohne System würde der Betrieb viel Handarbeit bedeuten: Anfragen beantworten, Belegung pflegen, Rechnungen schreiben, Licht und Heizung rechtzeitig schalten, Schlüssel übergeben. Beachhub soll von der Eröffnung an diese Aufgaben übernehmen. Da die Halle neu gebaut wird, kann die Technik (Tür, Tastenfeld, Sensoren, Heizungsanbindung) von Anfang an passend geplant werden.</p>
 <p>Beachhub übernimmt diese Arbeit:</p>
 <ul>
   <li>Kunden buchen freie Felder selbst im Internet, bezahlen online oder erhalten eine Monatsrechnung.</li>
@@ -125,7 +125,7 @@
 <p>Das Hauptsystem holt sich regelmäßig die Anfragen aus dem Portal, entscheidet, und schickt dem Portal den aktuellen Stand zurück. Dieser Stand ist digital unterschrieben, damit das Portal erkennt, dass er wirklich vom Hauptsystem kommt.</p>
 
 <h3>Die Halle</h3>
-<p>Ein kleiner Rechner in der Halle, der mit der vorhandenen Haussteuerung (Home Assistant) zusammenarbeitet. Er holt sich vom Hauptsystem den Belegungsplan der nächsten sieben Tage und steuert damit Licht, Heizung und Tür. Er kennt keine Kundennamen, nur Zeiten und die Zahlencodes in verschlüsselter Form.</p>
+<p>Ein kleiner Rechner in der Halle, der mit der Haussteuerung Home Assistant zusammenarbeitet, die für die neue Halle eingeplant wird. Er holt sich vom Hauptsystem den Belegungsplan der nächsten sieben Tage und steuert damit Licht, Heizung und Tür. Er kennt keine Kundennamen, nur Zeiten und die Zahlencodes in verschlüsselter Form.</p>
 <div class="box">
   <div class="t">Wichtig: Die Halle funktioniert ohne Internet weiter</div>
   Fällt die Verbindung aus, arbeitet die Halle mit dem zuletzt geholten Plan weiter: mindestens 72 Stunden, in der Praxis bis zu sieben Tage. Alles, was in dieser Zeit passiert (Zahlencode eingegeben, Feld belegt), wird gespeichert und später nachgemeldet. Der Betreiber wird nach einer Stunde ohne Verbindung per E-Mail informiert.
@@ -223,10 +223,10 @@
   <tr><td>Handbetrieb</td><td>Ein Schalter setzt die Automatik aus, etwa für Turniere oder Wartung. Beim Zurückschalten wird der Sollzustand sofort hergestellt.</td></tr>
   <tr><td>Ausfall</td><td>Ohne Internet läuft alles nach dem letzten Plan weiter. Neue Buchungen aus dieser Zeit kennt die Halle nicht; sie werden dem Betreiber in der Verwaltung markiert.</td></tr>
 </table>
-<p>Die Steuerung selbst übernimmt die vorhandene Haussteuerung Home Assistant. Beachhub sagt ihr nur, was wann geschaltet werden soll, und hört auf ihre Sensoren. Welche Geräte in der Halle verbaut sind (Tastenfeld, Türöffner, Sensoren, Heizungsanbindung), muss vor der Umsetzung geklärt werden; siehe Abschnitt 12.</p>
+<p>Die Steuerung selbst übernimmt die Haussteuerung Home Assistant. Beachhub sagt ihr nur, was wann geschaltet werden soll, und hört auf ihre Sensoren. Welche Geräte in der neuen Halle verbaut werden (Tastenfeld, Türöffner, Sensoren, Heizungsanbindung), sollte in der Bauplanung mit Blick auf die Anbindung an Home Assistant festgelegt werden; siehe Abschnitt 12.</p>
 
 <h2>8. Spielergruppen: ein Service für die Kunden</h2>
-<p>Viele Buchungen, besonders Dauerbuchungen, werden von einer Person für eine Gruppe gemacht. Die Kosten sollen auf die Mitspieler verteilt werden, und die Mitspieler wollen sich für Termine an- und abmelden. Beachhub bietet dafür im Portal eine Gruppenverwaltung nach dem Vorbild des bestehenden SportAbo-Managers.</p>
+<p>Viele Buchungen, besonders Dauerbuchungen, werden von einer Person für eine Gruppe gemacht. Die Kosten sollen auf die Mitspieler verteilt werden, und die Mitspieler wollen sich für Termine an- und abmelden. Beachhub bietet dafür im Portal eine Gruppenverwaltung nach dem Vorbild des SportAbo-Managers, einer bereits vorhandenen Anwendung des Entwicklungsteams.</p>
 <ul>
   <li>Der Kunde, der gebucht hat, lädt Mitspieler per E-Mail ein. Diese melden sich ebenfalls ohne Passwort an und sehen die Termine der Gruppe.</li>
   <li>Mitspieler sagen zu oder ab, mit Fristen, Warteliste und optionaler Begleitung. Gäste können sich über einen Link eintragen.</li>
@@ -270,7 +270,7 @@
   <tr><td>4</td><td>Spielergruppen im Portal</td><td>Weniger Rückfragen von Gruppen, Mehrwert für Dauerkunden</td></tr>
   <tr><td>5</td><td>Anwesenheitserkennung, Meldungen, Klärungslisten, Export, Feinschliff</td><td>Kontrolle über Nutzung ohne Buchung, weniger Nacharbeit</td></tr>
 </table>
-<p>Jede Stufe ist für sich nutzbar. Die Reihenfolge stellt sicher, dass die Daten von Anfang an am richtigen Ort liegen.</p>
+<p>Jede Stufe ist für sich nutzbar. Die Reihenfolge stellt sicher, dass die Daten von Anfang an am richtigen Ort liegen. Ziel ist, dass die Stufen 1 bis 3 zur Eröffnung Ende 2027 in Betrieb sind; Stufe 1 kann schon vorher für die Planung der ersten Saison (Dauerbuchungen, Preise) genutzt werden.</p>
 
 <div class="pb"></div>
 <h2>12. Entscheidungen des Betreibers</h2>
@@ -285,10 +285,10 @@
   <tr><td>☐</td><td>Umsatzsteuersatz auf Feldmiete, Kleinunternehmerregelung? Bitte mit Steuerberater klären</td><td>19 %</td><td></td></tr>
   <tr><td>☐</td><td>Monatsrechnung: an welchem Tag erstellen, welches Zahlungsziel?</td><td>3. des Folgemonats, 14 Tage</td><td></td></tr>
   <tr><td>☐</td><td>Dürfen Kunden Dauerbuchungen im Portal anfragen?</td><td>Ja, als Wunsch an den Betreiber</td><td></td></tr>
-  <tr><td>☐</td><td>Heizung: hallenweit oder je Zone? Welche Heizung, ist sie an Home Assistant angebunden?</td><td>Hallenweit</td><td></td></tr>
+  <tr><td>☐</td><td>Heizung: hallenweit oder je Zone? Welche Heizung wird verbaut, lässt sie sich an Home Assistant anbinden?</td><td>Hallenweit</td><td></td></tr>
   <tr><td>☐</td><td>Heizvorlauf, Spieltemperatur, Grundtemperatur</td><td>60 Minuten, Werte vom Betreiber</td><td></td></tr>
-  <tr><td>☐</td><td>Zutritt: Welches Tastenfeld, welcher Türöffner? Vorhanden oder anzuschaffen? Anbindung an Home Assistant?</td><td>Tastenfeld und Türöffner mit Home-Assistant-Anbindung</td><td></td></tr>
-  <tr><td>☐</td><td>Anwesenheitssensoren je Feld: vorhanden oder anzuschaffen?</td><td>Anschaffen, ein Sensor je Feld</td><td></td></tr>
+  <tr><td>☐</td><td>Zutritt: Welches Tastenfeld, welcher Türöffner werden verbaut? Anbindung an Home Assistant in der Bauplanung berücksichtigen</td><td>Tastenfeld und Türöffner mit Home-Assistant-Anbindung</td><td></td></tr>
+  <tr><td>☐</td><td>Anwesenheitssensoren je Feld in der Bauplanung vorsehen</td><td>Ein Sensor je Feld</td><td></td></tr>
   <tr><td>☐</td><td>Stripe-Konto des Betreibers anlegen (Gewerbenachweis, Bankkonto)</td><td>Vor Stufe 2</td><td></td></tr>
   <tr><td>☐</td><td>Betreiber-Meldungen nur per E-Mail oder zusätzlich per Push/Messenger?</td><td>Stufe 1 nur E-Mail</td><td></td></tr>
   <tr><td>☐</td><td>Datenschutzerklärung, Auftragsverarbeitung, Verarbeitungsverzeichnis</td><td>Betreiber, vor Stufe 2</td><td></td></tr>
@@ -305,7 +305,7 @@
   <tr><td>Nachbuchung</td><td>Ein anderer Kunde bucht einen nach der Frist stornierten Slot; die Stornierung wird dadurch kostenfrei.</td></tr>
   <tr><td>Zahlencode (PIN)</td><td>Sechsstelliger Code je Buchung für die Tür, gültig nur im Zeitfenster der Buchung.</td></tr>
   <tr><td>Guthaben</td><td>Betrag, den ein Kunde beim Betreiber gut hat und der mit der nächsten Buchung verrechnet wird.</td></tr>
-  <tr><td>Home Assistant</td><td>Die vorhandene Haussteuerung in der Halle, die Geräte schaltet und Sensoren ausliest.</td></tr>
+  <tr><td>Home Assistant</td><td>Die Haussteuerung der Halle, die Geräte schaltet und Sensoren ausliest.</td></tr>
   <tr><td>VPN</td><td>Gesicherte private Verbindung, über die nur der Betreiber das Hauptsystem erreicht.</td></tr>
   <tr><td>Stripe</td><td>Zahlungsdienstleister für die Online-Zahlung.</td></tr>
   <tr><td>Handbetrieb</td><td>Zustand der Halle, in dem die Automatik ausgesetzt ist.</td></tr>

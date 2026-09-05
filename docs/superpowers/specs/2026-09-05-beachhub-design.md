@@ -4,7 +4,7 @@ Stand: 2026-09-05 · Status: Entwurf zur Abstimmung · Zielgruppe: Entwicklungst
 
 ## 1. Ziel
 
-Beachhub bucht, rechnet ab und steuert eine Beachvolleyballhalle im Winterbetrieb.
+Beachhub bucht, rechnet ab und steuert eine neue Beachvolleyballhalle im Winterbetrieb, die Ende 2027 eröffnet. Das System soll ab Eröffnung im Einsatz sein; die Hallentechnik (Tür, Tastenfeld, Sensoren, Heizung) wird während der Bauphase mit Blick auf die Anbindung an Home Assistant festgelegt.
 Kunden buchen Felder über ein Internetportal, der Betreiber verwaltet Felder, Preise,
 Dauerbuchungen und Rechnungen, und die Halle schaltet Licht, Heizung und Tür
 automatisch passend zu den Buchungen – auch dann, wenn die Internetverbindung
@@ -279,7 +279,7 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
 
 **Ereignistypen:** `pin_akzeptiert`, `pin_abgelehnt`, `tastenfeld_gesperrt`, `praesenz_start`, `praesenz_ende`, `praesenz_ohne_buchung`, `tuer_offen_ausserhalb`, `licht_geschaltet`, `heizung_gesetzt`, `ha_nicht_erreichbar`, `aktor_fehler`, `plan_verworfen`, `handbetrieb_an/aus`, `dienst_gestartet`.
 
-**Home Assistant.** Der Hallendienst nutzt die HA-REST-API (Dienste aufrufen) und den HA-WebSocket (Zustandsänderungen abonnieren) mit einem Long-Lived Access Token. Keine Custom Component. Erwartete HA-Entitäten je Konfiguration: `light.*` je Feld, `climate.*` je Heizzone, `lock.*`/`switch.*` für den Türöffner, `binary_sensor.*` für Präsenz je Feld und Türkontakt, ein Eingabekanal für das Tastenfeld (z. B. `event.*` oder MQTT-Topic). Der Sollzustand wird alle 30 s aus dem Plan neu berechnet und mit dem Ist abgeglichen (idempotente Steuerung). Präsenzalarm-Erkennung in HA selbst nur als Rückfall, falls der Dienst ausfällt (einfache HA-Automation: Licht aus außerhalb Betriebszeit).
+**Home Assistant.** Home Assistant wird für die neue Halle eingeplant (noch nicht vorhanden). Der Hallendienst nutzt die HA-REST-API (Dienste aufrufen) und den HA-WebSocket (Zustandsänderungen abonnieren) mit einem Long-Lived Access Token. Keine Custom Component. Erwartete HA-Entitäten je Konfiguration: `light.*` je Feld, `climate.*` je Heizzone, `lock.*`/`switch.*` für den Türöffner, `binary_sensor.*` für Präsenz je Feld und Türkontakt, ein Eingabekanal für das Tastenfeld (z. B. `event.*` oder MQTT-Topic). Der Sollzustand wird alle 30 s aus dem Plan neu berechnet und mit dem Ist abgeglichen (idempotente Steuerung). Präsenzalarm-Erkennung in HA selbst nur als Rückfall, falls der Dienst ausfällt (einfache HA-Automation: Licht aus außerhalb Betriebszeit).
 
 **Sicherheit Halle.** Kein Kundenname, keine E-Mail. PIN nur als Argon2id-Hash. Master-PIN lokal in der Konfiguration. Bei Diebstahl des Hallenrechners sind ausschließlich Buchungszeiten und Hashes betroffen.
 
@@ -338,10 +338,10 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
 
 | Nr | Annahme / Frage | Vorschlag |
 |---|---|---|
-| O-1 | Heizung: hallenweit oder je Zone? Heizungstyp und HA-Anbindung vorhanden? | Hallenweit, `climate`-Entität |
+| O-1 | Heizung: hallenweit oder je Zone? Welcher Heizungstyp wird verbaut, HA-Anbindung möglich? | Hallenweit, `climate`-Entität |
 | O-2 | Heizvorlauf 60 min, Spieltemperatur/Grundtemperatur | 60 min, Werte vom Betreiber |
-| O-3 | Zutritt: Tastenfeld-Hardware und Türöffner, HA-Integration vorhanden? | Tastenfeld mit HA-Anbindung (z. B. Zigbee/MQTT), elektrischer Türöffner als `switch` |
-| O-4 | Präsenzsensoren je Feld: vorhanden oder anzuschaffen? | mmWave-Sensoren je Feld |
+| O-3 | Zutritt: Welches Tastenfeld und welcher Türöffner werden verbaut? HA-Integration in Bauplanung | Tastenfeld mit HA-Anbindung (z. B. Zigbee/MQTT), elektrischer Türöffner als `switch` |
+| O-4 | Präsenzsensoren je Feld in der Bauplanung vorsehen | mmWave-Sensoren je Feld |
 | O-5 | Buchungsfenster 14 Tage, Mindestvorlauf 60 min | Werte bestätigen |
 | O-6 | Stornofrist 24 h | bestätigen |
 | O-7 | Zahlungsfrist 15 min | bestätigen |
