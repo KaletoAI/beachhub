@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Beachhub – Anforderungen und Lösungskonzept</title>
+<style>
+  @page { size: A4; margin: 22mm 20mm 22mm 20mm;
+    @bottom-center { content: "Beachhub · Anforderungen und Lösungskonzept · Seite " counter(page) " von " counter(pages); font-size: 9pt; color: #777; font-family: "DejaVu Sans", sans-serif; } }
+  @page :first { @bottom-center { content: none; } }
+  body { font-family: "DejaVu Sans", "Liberation Sans", Arial, sans-serif; font-size: 10.5pt; line-height: 1.5; color: #1f2933; }
+  h1 { font-size: 26pt; margin: 0 0 4pt 0; color: #0b4f6c; }
+  h2 { font-size: 16pt; color: #0b4f6c; margin: 22pt 0 8pt 0; padding-bottom: 3pt; border-bottom: 1.5pt solid #0b4f6c; page-break-after: avoid; }
+  h3 { font-size: 12pt; color: #1f2933; margin: 14pt 0 4pt 0; page-break-after: avoid; }
+  p { margin: 0 0 7pt 0; }
+  ul, ol { margin: 0 0 8pt 0; padding-left: 18pt; }
+  li { margin-bottom: 3pt; }
+  table { border-collapse: collapse; width: 100%; margin: 6pt 0 10pt 0; font-size: 9.5pt; page-break-inside: avoid; }
+  th, td { border: 0.6pt solid #b8c2cc; padding: 4pt 6pt; vertical-align: top; text-align: left; }
+  th { background: #e6eef3; }
+  .cover { text-align: left; padding-top: 60mm; }
+  .cover .sub { font-size: 14pt; color: #52606d; margin-bottom: 30pt; }
+  .cover .meta { font-size: 10pt; color: #52606d; margin-top: 60pt; }
+  .box { border: 0.8pt solid #0b4f6c; background: #f2f7fa; padding: 8pt 10pt; margin: 8pt 0 10pt 0; page-break-inside: avoid; }
+  .box.warn { border-color: #b7791f; background: #fdf6e7; }
+  .box .t { font-weight: bold; color: #0b4f6c; margin-bottom: 3pt; }
+  .box.warn .t { color: #8a5a10; }
+  .pb { page-break-before: always; }
+  .small { font-size: 9pt; color: #52606d; }
+  .check td:first-child { width: 22pt; text-align: center; font-size: 12pt; }
+  .steps li { margin-bottom: 5pt; }
+  figure { margin: 8pt 0 12pt 0; page-break-inside: avoid; }
+  figcaption { font-size: 9pt; color: #52606d; margin-top: 3pt; }
+  .toc li { margin-bottom: 2pt; }
+</style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Beachhub</h1>
+  <div class="sub">Anforderungen und Lösungskonzept für Buchung, Abrechnung und Steuerung der Beachhalle</div>
+  <p>Dieses Dokument beschreibt, was das neue System für die Beachhalle leisten soll und wie es aufgebaut wird. Es richtet sich an den Betreiber der Halle als Auftraggeber. Es enthält bewusst keine technischen Details; diese stehen in einer separaten Spezifikation für die Entwickler.</p>
+  <p>Am Ende steht eine Liste von Entscheidungen, die der Betreiber treffen muss, bevor die Umsetzung beginnt.</p>
+  <div class="meta">
+    Stand: 5. September 2026<br>
+    Status: Entwurf zur Abstimmung<br>
+    Ausgabe: Version 0.1
+  </div>
+</div>
+
+<div class="pb"></div>
+<h2>Inhalt</h2>
+<ol class="toc">
+  <li>Worum es geht</li>
+  <li>Die drei Bausteine</li>
+  <li>So bucht ein Kunde</li>
+  <li>Regeln für Buchung, Storno und Zahlung</li>
+  <li>Rechnungen und Guthaben</li>
+  <li>Was der Betreiber im System tut</li>
+  <li>Die Halle: Licht, Heizung, Tür und Anwesenheit</li>
+  <li>Spielergruppen: ein Service für die Kunden</li>
+  <li>Sicherheit und Datenschutz</li>
+  <li>Was das System bewusst nicht tut</li>
+  <li>Umsetzung in Stufen</li>
+  <li>Entscheidungen des Betreibers</li>
+  <li>Begriffe</li>
+</ol>
+
+<h2>1. Worum es geht</h2>
+<p>Die Beachhalle wird im Winter stundenweise an Privatpersonen, Vereine und Mitglieder vermietet. Heute kostet das viel Handarbeit: Anfragen beantworten, Belegung pflegen, Rechnungen schreiben, Licht und Heizung rechtzeitig schalten, Schlüssel übergeben.</p>
+<p>Beachhub übernimmt diese Arbeit:</p>
+<ul>
+  <li>Kunden buchen freie Felder selbst im Internet, bezahlen online oder erhalten eine Monatsrechnung.</li>
+  <li>Der Betreiber sieht die Belegung, legt Dauerbuchungen und Sperren an und erhält fertige Rechnungen.</li>
+  <li>Die Halle heizt vor, schaltet das Licht pro Feld und öffnet die Tür per Zahlencode, passend zu den Buchungen. Das funktioniert auch, wenn das Internet in der Halle tagelang ausfällt.</li>
+  <li>Kunden, die als Gruppe spielen, können Mitspieler einladen, Zusagen sammeln und die Kosten untereinander aufteilen. Für den Betreiber bleibt trotzdem nur ein Ansprechpartner pro Buchung.</li>
+</ul>
+
+<h2>2. Die drei Bausteine</h2>
+<p>Das System besteht aus drei Teilen, die an unterschiedlichen Orten laufen. Der Grund für die Aufteilung ist Sicherheit: Nur das Buchungsportal ist aus dem Internet erreichbar, und dort liegen so wenige Daten wie möglich.</p>
+
+<figure>
+<svg width="100%" viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg" font-family="DejaVu Sans, Arial, sans-serif" font-size="12">
+  <defs><marker id="a" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#0b4f6c"/></marker></defs>
+  <!-- Kunde -->
+  <rect x="10" y="80" width="110" height="60" rx="6" fill="#fff" stroke="#52606d"/>
+  <text x="65" y="105" text-anchor="middle" font-weight="bold">Kunde</text>
+  <text x="65" y="122" text-anchor="middle" font-size="10">Browser, Handy</text>
+  <!-- Portal -->
+  <rect x="170" y="60" width="160" height="100" rx="6" fill="#e6eef3" stroke="#0b4f6c" stroke-width="1.5"/>
+  <text x="250" y="85" text-anchor="middle" font-weight="bold">Buchungsportal</text>
+  <text x="250" y="103" text-anchor="middle" font-size="10">im Internet</text>
+  <text x="250" y="120" text-anchor="middle" font-size="10">Konten, Anfragen,</text>
+  <text x="250" y="135" text-anchor="middle" font-size="10">Belegungsanzeige, Gruppen</text>
+  <!-- Core -->
+  <rect x="380" y="60" width="160" height="100" rx="6" fill="#d9e8f0" stroke="#0b4f6c" stroke-width="2"/>
+  <text x="460" y="85" text-anchor="middle" font-weight="bold">Hauptsystem</text>
+  <text x="460" y="103" text-anchor="middle" font-size="10">in der Cloud, abgeschottet</text>
+  <text x="460" y="120" text-anchor="middle" font-size="10">alle Daten, Preise,</text>
+  <text x="460" y="135" text-anchor="middle" font-size="10">Rechnungen, Verwaltung</text>
+  <!-- Halle -->
+  <rect x="590" y="60" width="120" height="100" rx="6" fill="#e6eef3" stroke="#0b4f6c" stroke-width="1.5"/>
+  <text x="650" y="85" text-anchor="middle" font-weight="bold">Halle</text>
+  <text x="650" y="103" text-anchor="middle" font-size="10">Rechner vor Ort</text>
+  <text x="650" y="120" text-anchor="middle" font-size="10">Licht, Heizung,</text>
+  <text x="650" y="135" text-anchor="middle" font-size="10">Tür, Sensoren</text>
+  <!-- arrows -->
+  <line x1="120" y1="110" x2="170" y2="110" stroke="#0b4f6c" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="380" y1="110" x2="330" y2="110" stroke="#0b4f6c" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="355" y="98" text-anchor="middle" font-size="9" fill="#52606d">holt ab,</text>
+  <text x="355" y="128" text-anchor="middle" font-size="9" fill="#52606d">liefert</text>
+  <line x1="590" y1="110" x2="540" y2="110" stroke="#0b4f6c" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="565" y="98" text-anchor="middle" font-size="9" fill="#52606d">holt</text>
+  <text x="565" y="128" text-anchor="middle" font-size="9" fill="#52606d">Plan</text>
+  <text x="360" y="200" text-anchor="middle" font-size="10" fill="#52606d">Pfeile zeigen, wer die Verbindung aufbaut. Zum Hauptsystem baut niemand eine Verbindung auf.</text>
+</svg>
+<figcaption>Abbildung 1: Die drei Bausteine und wer mit wem spricht.</figcaption>
+</figure>
+
+<h3>Das Buchungsportal</h3>
+<p>Die Webseite, auf der Kunden buchen, ihre Buchungen sehen, stornieren und ihre Spielergruppen verwalten. Sie speichert nur, was dafür nötig ist: E-Mail-Adresse, Anzeigename, die eigenen Buchungen und die Gruppendaten. Keine Postadressen, keine Zahlungsdaten, keine Rechnungen.</p>
+<p>Das Portal entscheidet nichts selbst. Jede Buchung ist zunächst eine Anfrage, die das Hauptsystem prüft und beantwortet. Der Kunde sieht das als „Anfrage gesendet“ und wenige Sekunden später als Bestätigung.</p>
+
+<h3>Das Hauptsystem</h3>
+<p>Das Herz des Systems. Es läuft auf einem gemieteten Server in einem deutschen Rechenzentrum und ist aus dem Internet nicht erreichbar. Nur der Betreiber kommt über eine gesicherte Verbindung (VPN) an die Verwaltungsoberfläche. Hier liegen alle Daten: Kunden, Preise, Buchungen, Rechnungen, Zahlungen, Zahlencodes und das Protokoll aller Änderungen.</p>
+<p>Das Hauptsystem holt sich regelmäßig die Anfragen aus dem Portal, entscheidet, und schickt dem Portal den aktuellen Stand zurück. Dieser Stand ist digital unterschrieben, damit das Portal erkennt, dass er wirklich vom Hauptsystem kommt.</p>
+
+<h3>Die Halle</h3>
+<p>Ein kleiner Rechner in der Halle, der mit der vorhandenen Haussteuerung (Home Assistant) zusammenarbeitet. Er holt sich vom Hauptsystem den Belegungsplan der nächsten sieben Tage und steuert damit Licht, Heizung und Tür. Er kennt keine Kundennamen, nur Zeiten und die Zahlencodes in verschlüsselter Form.</p>
+<div class="box">
+  <div class="t">Wichtig: Die Halle funktioniert ohne Internet weiter</div>
+  Fällt die Verbindung aus, arbeitet die Halle mit dem zuletzt geholten Plan weiter: mindestens 72 Stunden, in der Praxis bis zu sieben Tage. Alles, was in dieser Zeit passiert (Zahlencode eingegeben, Feld belegt), wird gespeichert und später nachgemeldet. Der Betreiber wird nach einer Stunde ohne Verbindung per E-Mail informiert.
+</div>
+
+<h2>3. So bucht ein Kunde</h2>
+<ol class="steps">
+  <li><b>Anmelden ohne Passwort.</b> Der Kunde gibt seine E-Mail-Adresse ein und bekommt einen Anmeldelink zugeschickt. Es gibt keine Passwörter, die vergessen oder gestohlen werden können.</li>
+  <li><b>Freies Feld wählen.</b> Der Belegungsplan zeigt je Feld die freien Zeiten. Fremde Buchungen erscheinen nur als „belegt“, ohne Namen. Buchbar sind Zeiten innerhalb des Buchungsfensters (z. B. die nächsten 14 Tage).</li>
+  <li><b>Preis sehen und anfragen.</b> Der Preis richtet sich nach Feld, Uhrzeit, Wochentag und Kundengruppe. Der Kunde sieht ihn vor dem Klick.</li>
+  <li><b>Bestätigung.</b> Das Hauptsystem prüft, ob der Slot wirklich frei ist, und reserviert ihn. Privatkunden werden zur Online-Zahlung weitergeleitet und haben dafür 15 Minuten Zeit. Rechnungskunden (z. B. Vereine) sind sofort bestätigt.</li>
+  <li><b>Zahlencode.</b> Mit der Bestätigung erhält der Kunde per E-Mail seinen Zahlencode für die Tür. Er gilt nur für seinen Termin, ab 15 Minuten vor Beginn bis zum Ende. Einen Tag vorher kommt eine Erinnerung.</li>
+  <li><b>Spielen.</b> Beim Betreten ist die Halle vorgeheizt, das Licht des gebuchten Feldes geht kurz vor Beginn an und nach dem Ende aus.</li>
+</ol>
+
+<h2>4. Regeln für Buchung, Storno und Zahlung</h2>
+<p>Alle Fristen und Werte in diesem Abschnitt sind Vorschläge. Sie werden vom Betreiber in der Verwaltungsoberfläche eingestellt und können jederzeit geändert werden, ohne dass Entwickler nötig sind.</p>
+
+<h3>Felder und Zeiten</h3>
+<ul>
+  <li>Die Anzahl der Felder ist einstellbar (Start: 3).</li>
+  <li>Je Feld wird festgelegt, in welchem Raster gebucht wird: zum Beispiel volle Stunden, halbe Stunden, oder feste Zeitfenster wie 19–21 Uhr und 21–23 Uhr. Das Raster kann je Wochentag unterschiedlich sein.</li>
+  <li>Die Halle hat Betriebszeiten je Wochentag, eine Saison (von/bis) und Ausnahmetage (Feiertage, Sonderöffnung). Außerhalb ist nichts buchbar.</li>
+</ul>
+
+<h3>Buchungsarten</h3>
+<table>
+  <tr><th>Art</th><th>Wer legt sie an</th><th>Beschreibung</th></tr>
+  <tr><td>Einzelbuchung</td><td>Kunde im Portal oder Betreiber</td><td>Ein Feld, ein zusammenhängender Zeitraum. Nur innerhalb des Buchungsfensters buchbar.</td></tr>
+  <tr><td>Dauerbuchung</td><td>Nur der Betreiber</td><td>Zum Beispiel „Verein X, jeden Dienstag 19–21 Uhr, Oktober bis März“. Wird beliebig weit im Voraus angelegt. Kunden können eine Dauerbuchung im Portal anfragen; der Betreiber legt sie an. Alle Termine haben denselben Zahlencode.</td></tr>
+  <tr><td>Sperre</td><td>Nur der Betreiber</td><td>Turnier, Wartung, Eigenbedarf. Blockiert Felder ohne Kosten. Kunden sehen nur „nicht verfügbar“.</td></tr>
+</table>
+
+<h3>Buchungsfenster</h3>
+<p>Freie Slots werden für Kunden erst ab einem bestimmten Vorlauf sichtbar, zum Beispiel 14 Tage vor dem Termin, und bis zu einer Mindestfrist davor, zum Beispiel eine Stunde. So bleibt Raum für Dauerbuchungen und Sperren, die der Betreiber früher plant.</p>
+
+<h3>Preise</h3>
+<p>Preise werden als Regeln hinterlegt: nach Feld, Wochentag, Uhrzeit und Kundengruppe (Privat, Verein, Mitglied). Die genaueste passende Regel gilt. Der Preis wird bei der Buchung festgeschrieben; spätere Preisänderungen betreffen bestehende Buchungen nicht.</p>
+
+<h3>Storno</h3>
+<div class="box">
+  <div class="t">Die Stornoregel</div>
+  <ul>
+    <li>Bis zur Stornofrist (Vorschlag: 24 Stunden vor Beginn) ist die Stornierung kostenfrei.</li>
+    <li>Nach der Frist bleibt der Preis fällig. Der Slot wird trotzdem sofort wieder freigegeben.</li>
+    <li>Bucht ein anderer Kunde den freigewordenen Slot bis zum Termin, wird die Stornierung nachträglich kostenfrei. Wer online bezahlt hatte, bekommt den Betrag als Guthaben; bei Rechnungskunden entfällt die Position auf der Monatsrechnung. Beide Kunden werden per E-Mail informiert.</li>
+    <li>Der Betreiber kann jede Stornierung aus Kulanz auf kostenfrei setzen.</li>
+  </ul>
+</div>
+
+<h3>Nicht erschienen</h3>
+<p>Wird zu einer Buchung weder der Zahlencode eingegeben noch Anwesenheit auf dem Feld erkannt, gilt der Termin als „nicht erschienen“. Der Preis bleibt fällig. Es gibt keine zusätzliche Gebühr, der Betreiber sieht es nur in der Übersicht.</p>
+
+<h3>Zahlung</h3>
+<ul>
+  <li><b>Privatkunden zahlen online</b> direkt bei der Buchung über den Zahlungsdienstleister Stripe. Möglich sind Karte, PayPal, Apple Pay, Google Pay und Sofortüberweisung. Das Geld geht auf das Stripe-Konto des Betreibers und wird automatisch aufs Bankkonto ausgezahlt. Kosten: keine Grundgebühr, etwa 1,5 % plus 0,25 € je Kartenzahlung.</li>
+  <li><b>Vereine und Dauerkunden erhalten eine Monatsrechnung</b> per E-Mail und überweisen. Der Betreiber hakt den Zahlungseingang ab.</li>
+  <li>Welcher Kunde wie zahlt, legt der Betreiber über die Kundengruppe fest. Neue Kunden sind zunächst Privatkunden mit Online-Zahlung.</li>
+</ul>
+<div class="box warn">
+  <div class="t">Das System bewegt kein Geld</div>
+  Beachhub löst keine Rückerstattungen, Überweisungen oder Lastschriften aus. Guthaben wird mit der nächsten Buchung verrechnet. Wünscht ein Kunde die Auszahlung, überweist der Betreiber selbst und hakt es im System ab.
+</div>
+
+<h2>5. Rechnungen und Guthaben</h2>
+<ul>
+  <li>Rechnungen entsprechen den gesetzlichen Vorgaben (§ 14 UStG): fortlaufende Nummer, Leistungszeitraum, Netto, Umsatzsteuer, Brutto, Betreiberdaten.</li>
+  <li>Online-Zahler erhalten je Buchung eine Rechnung mit der Bestätigung. Rechnungskunden erhalten automatisch eine Sammelrechnung pro Monat mit allen Terminen (durchgeführt, nicht erschienen, kostenpflichtig storniert).</li>
+  <li>Rechnungen werden unveränderbar archiviert. Korrekturen laufen über Stornorechnung und Neuausstellung.</li>
+  <li>Kunden laden ihre Rechnungen im Portal herunter. Das Portal speichert sie nicht dauerhaft; sie werden bei Bedarf vom Hauptsystem bereitgestellt.</li>
+  <li>Für die Buchhaltung gibt es einen Export aller Rechnungen als Tabelle (CSV).</li>
+  <li>Jeder Kunde hat ein Guthabenkonto im Hauptsystem, das bei kostenfrei gewordenen Stornos und Überzahlungen gefüllt und bei der nächsten Buchung verrechnet wird.</li>
+</ul>
+
+<h2>6. Was der Betreiber im System tut</h2>
+<p>Die Verwaltungsoberfläche ist Teil des Hauptsystems und nur über die gesicherte VPN-Verbindung erreichbar, mit Benutzername, Passwort und zweitem Faktor (App-Code).</p>
+<table>
+  <tr><th>Bereich</th><th>Was dort möglich ist</th></tr>
+  <tr><td>Belegungsplan</td><td>Kalender je Feld (Tag/Woche). Buchungen, Dauerbuchungen und Sperren per Klick anlegen, ändern, stornieren. Ohne Buchungsfenster, ohne Zahlungsschritt.</td></tr>
+  <tr><td>Stammdaten</td><td>Felder, Raster, Betriebszeiten, Saison, Ausnahmetage, Kundengruppen, Preisregeln, alle Fristen und Vorläufe.</td></tr>
+  <tr><td>Kunden</td><td>Liste und Suche, Kundengruppe und Zahlungsart ändern, Guthaben buchen, Auszahlung abhaken, Historie.</td></tr>
+  <tr><td>Rechnungen</td><td>Übersicht, PDF, auf bezahlt setzen, Stornorechnung, Monatslauf, CSV-Export.</td></tr>
+  <tr><td>Halle</td><td>Live-Zustand von Licht, Heizung, Tür je Feld; letzter Kontakt; Ereignisse; Handbetrieb ein/aus.</td></tr>
+  <tr><td>Klärung</td><td>Offene Stornos, die noch nachgebucht werden können; unzuordenbare Zahlungen; Anwesenheit ohne Buchung; Änderungsprotokoll.</td></tr>
+</table>
+<p>Der Betreiber erhält E-Mails bei: Halle ohne Verbindung, Anwesenheit ohne Buchung, Tür außerhalb einer Buchung, Störung der Haussteuerung, fehlgeschlagener Zahlung, Anfrage einer Dauerbuchung.</p>
+
+<h2>7. Die Halle: Licht, Heizung, Tür und Anwesenheit</h2>
+<table>
+  <tr><th>Was</th><th>Verhalten (Werte einstellbar)</th></tr>
+  <tr><td>Heizung</td><td>Eine Stunde vor der ersten Buchung eines Blocks auf Spieltemperatur, nach der letzten zurück auf Grundtemperatur. Zwischen aufeinanderfolgenden Buchungen bleibt sie an.</td></tr>
+  <tr><td>Licht</td><td>Je Feld: 5 Minuten vor Beginn an, 5 Minuten nach Ende aus. Folgt eine Buchung direkt, bleibt es an.</td></tr>
+  <tr><td>Tür</td><td>Der Zahlencode der Buchung öffnet ab 15 Minuten vor Beginn bis zum Ende. Ein Betreiber-Code öffnet immer. Nach fünf Fehleingaben sperrt das Tastenfeld 15 Minuten und meldet es.</td></tr>
+  <tr><td>Anwesenheit</td><td>Sensoren je Feld erkennen, ob gespielt wird. Ein Termin gilt als durchgeführt, wenn der Zahlencode eingegeben oder Anwesenheit erkannt wurde. Spiel ohne Buchung wird nach 10 Minuten gemeldet.</td></tr>
+  <tr><td>Handbetrieb</td><td>Ein Schalter setzt die Automatik aus, etwa für Turniere oder Wartung. Beim Zurückschalten wird der Sollzustand sofort hergestellt.</td></tr>
+  <tr><td>Ausfall</td><td>Ohne Internet läuft alles nach dem letzten Plan weiter. Neue Buchungen aus dieser Zeit kennt die Halle nicht; sie werden dem Betreiber in der Verwaltung markiert.</td></tr>
+</table>
+<p>Die Steuerung selbst übernimmt die vorhandene Haussteuerung Home Assistant. Beachhub sagt ihr nur, was wann geschaltet werden soll, und hört auf ihre Sensoren. Welche Geräte in der Halle verbaut sind (Tastenfeld, Türöffner, Sensoren, Heizungsanbindung), muss vor der Umsetzung geklärt werden; siehe Abschnitt 12.</p>
+
+<h2>8. Spielergruppen: ein Service für die Kunden</h2>
+<p>Viele Buchungen, besonders Dauerbuchungen, werden von einer Person für eine Gruppe gemacht. Die Kosten sollen auf die Mitspieler verteilt werden, und die Mitspieler wollen sich für Termine an- und abmelden. Beachhub bietet dafür im Portal eine Gruppenverwaltung nach dem Vorbild des bestehenden SportAbo-Managers.</p>
+<ul>
+  <li>Der Kunde, der gebucht hat, lädt Mitspieler per E-Mail ein. Diese melden sich ebenfalls ohne Passwort an und sehen die Termine der Gruppe.</li>
+  <li>Mitspieler sagen zu oder ab, mit Fristen, Warteliste und optionaler Begleitung. Gäste können sich über einen Link eintragen.</li>
+  <li>Nach jedem Termin verteilt das Portal die Kosten auf die Anwesenden. Jeder Mitspieler hat ein Guthabenkonto in der Gruppe; der Kunde bucht Einzahlungen ein. Einzelne Mitspieler können als Mitverwalter erweiterte Rechte bekommen.</li>
+</ul>
+<div class="box">
+  <div class="t">Klare Trennung von der Abrechnung des Betreibers</div>
+  Die Gruppenverwaltung ist reine Buchführung unter Freunden und existiert nur im Portal. Das Hauptsystem weiß nichts von Mitspielern, Zusagen oder Gruppenkassen. Für den Betreiber gibt es weiterhin genau einen Kunden pro Buchung, der die Rechnung erhält und verantwortlich bleibt. Ob genügend Mitspieler zugesagt haben, ändert nichts an der Buchung; stornieren muss der Kunde bewusst selbst.
+</div>
+
+<h2>9. Sicherheit und Datenschutz</h2>
+<table>
+  <tr><th>Ort</th><th>Welche Daten liegen dort</th><th>Schutz</th></tr>
+  <tr><td>Buchungsportal (Internet)</td><td>E-Mail, Anzeigename, Kundengruppe, eigene Buchungen mit Zahlencode, Gruppendaten (Mitspieler-E-Mails, Zusagen, Gruppenkasse)</td><td>Verschlüsselte Verbindung, Anmeldung ohne Passwort, Schutz gegen Missbrauch, keine Zahlungsdaten (die bleiben bei Stripe), keine Adressen, keine Rechnungen</td></tr>
+  <tr><td>Hauptsystem (Cloud)</td><td>Alle Daten inklusive Adressen, Rechnungen, Zahlungshistorie, Änderungsprotokoll</td><td>Aus dem Internet unsichtbar, nur per VPN, verschlüsselte Festplatte, tägliche verschlüsselte Sicherung an einen zweiten Ort, Wiederherstellung wird vor Saisonstart getestet</td></tr>
+  <tr><td>Halle</td><td>Buchungszeiten, Zahlencodes nur verschlüsselt</td><td>Keine Personendaten. Bei Diebstahl des Rechners sind keine Kundendaten betroffen</td></tr>
+</table>
+<ul>
+  <li>Alle Verbindungen zwischen den Bausteinen werden nur vom Hauptsystem beziehungsweise von der Halle aus aufgebaut. Ein Angreifer im Internet findet keinen Weg zum Hauptsystem.</li>
+  <li>Alles, was das Hauptsystem an Portal und Halle liefert, ist digital unterschrieben. Gefälschte oder veraltete Daten werden verworfen und gemeldet.</li>
+  <li>Kunden können ihr Konto löschen. Gruppendaten werden sofort gelöscht; Kundendaten werden anonymisiert. Rechnungen müssen gesetzlich zehn Jahre aufbewahrt werden und bleiben so lange erhalten.</li>
+  <li>Datenschutzerklärung, Verträge zur Auftragsverarbeitung mit dem Rechenzentrum und mit Stripe sowie das Verarbeitungsverzeichnis erstellt der Betreiber. Das System liefert die technischen Angaben dafür.</li>
+</ul>
+
+<h2>10. Was das System bewusst nicht tut</h2>
+<ul>
+  <li>Kein Geld bewegen: keine Erstattungen, Überweisungen, Lastschriften. Auszahlungen macht der Betreiber.</li>
+  <li>Keine Buchhaltung: Umsatzsteuervoranmeldung, Kontenabgleich und Mahnwesen laufen außerhalb. Es gibt einen Export.</li>
+  <li>Keine Buchung mehrerer Felder auf einmal durch Kunden (Turniere legt der Betreiber an).</li>
+  <li>Keine Strafgebühren bei Nichterscheinen, nur die Information.</li>
+  <li>Kein Ersatz für die Haussteuerung: Beachhub steuert Home Assistant, ersetzt es nicht.</li>
+  <li>Keine Verwaltung von Mitgliedschaften, Beiträgen oder Kursen.</li>
+</ul>
+
+<h2>11. Umsetzung in Stufen</h2>
+<table>
+  <tr><th>Stufe</th><th>Ergebnis</th><th>Nutzen für den Betreiber</th></tr>
+  <tr><td>1</td><td>Hauptsystem mit Verwaltungsoberfläche: Felder, Zeiten, Preise, Kunden, Belegungsplan, Sperren, Dauerbuchungen, Rechnungen</td><td>Belegung und Rechnungen laufen bereits über das System, Buchungen trägt der Betreiber noch selbst ein</td></tr>
+  <tr><td>2</td><td>Buchungsportal mit Anmeldung, Buchung, Storno und Online-Zahlung</td><td>Kunden buchen und bezahlen selbst</td></tr>
+  <tr><td>3</td><td>Hallensteuerung: Licht, Heizung, Tür per Zahlencode, Betrieb ohne Internet</td><td>Keine Schlüsselübergabe, kein manuelles Schalten</td></tr>
+  <tr><td>4</td><td>Spielergruppen im Portal</td><td>Weniger Rückfragen von Gruppen, Mehrwert für Dauerkunden</td></tr>
+  <tr><td>5</td><td>Anwesenheitserkennung, Meldungen, Klärungslisten, Export, Feinschliff</td><td>Kontrolle über Nutzung ohne Buchung, weniger Nacharbeit</td></tr>
+</table>
+<p>Jede Stufe ist für sich nutzbar. Die Reihenfolge stellt sicher, dass die Daten von Anfang an am richtigen Ort liegen.</p>
+
+<div class="pb"></div>
+<h2>12. Entscheidungen des Betreibers</h2>
+<p>Diese Punkte müssen vor Beginn der jeweiligen Stufe geklärt sein. Die Vorschläge sind die Werte, mit denen die Entwickler sonst starten.</p>
+<table class="check">
+  <tr><th></th><th>Frage</th><th>Vorschlag</th><th>Entscheidung</th></tr>
+  <tr><td>☐</td><td>Buchungsfenster: Wie viele Tage im Voraus sind freie Slots buchbar? Mindestvorlauf vor Beginn?</td><td>14 Tage, 60 Minuten</td><td></td></tr>
+  <tr><td>☐</td><td>Stornofrist für kostenfreie Stornierung</td><td>24 Stunden</td><td></td></tr>
+  <tr><td>☐</td><td>Frist für Online-Zahlung nach Reservierung</td><td>15 Minuten</td><td></td></tr>
+  <tr><td>☐</td><td>Teilweise Nachbuchung (z. B. eine von zwei Stunden): anteilig kostenfrei?</td><td>Ja</td><td></td></tr>
+  <tr><td>☐</td><td>Kundengruppen und ihre Zahlungsart</td><td>Privat (online), Verein (Rechnung), Mitglied (online)</td><td></td></tr>
+  <tr><td>☐</td><td>Umsatzsteuersatz auf Feldmiete, Kleinunternehmerregelung? Bitte mit Steuerberater klären</td><td>19 %</td><td></td></tr>
+  <tr><td>☐</td><td>Monatsrechnung: an welchem Tag erstellen, welches Zahlungsziel?</td><td>3. des Folgemonats, 14 Tage</td><td></td></tr>
+  <tr><td>☐</td><td>Dürfen Kunden Dauerbuchungen im Portal anfragen?</td><td>Ja, als Wunsch an den Betreiber</td><td></td></tr>
+  <tr><td>☐</td><td>Heizung: hallenweit oder je Zone? Welche Heizung, ist sie an Home Assistant angebunden?</td><td>Hallenweit</td><td></td></tr>
+  <tr><td>☐</td><td>Heizvorlauf, Spieltemperatur, Grundtemperatur</td><td>60 Minuten, Werte vom Betreiber</td><td></td></tr>
+  <tr><td>☐</td><td>Zutritt: Welches Tastenfeld, welcher Türöffner? Vorhanden oder anzuschaffen? Anbindung an Home Assistant?</td><td>Tastenfeld und Türöffner mit Home-Assistant-Anbindung</td><td></td></tr>
+  <tr><td>☐</td><td>Anwesenheitssensoren je Feld: vorhanden oder anzuschaffen?</td><td>Anschaffen, ein Sensor je Feld</td><td></td></tr>
+  <tr><td>☐</td><td>Stripe-Konto des Betreibers anlegen (Gewerbenachweis, Bankkonto)</td><td>Vor Stufe 2</td><td></td></tr>
+  <tr><td>☐</td><td>Betreiber-Meldungen nur per E-Mail oder zusätzlich per Push/Messenger?</td><td>Stufe 1 nur E-Mail</td><td></td></tr>
+  <tr><td>☐</td><td>Datenschutzerklärung, Auftragsverarbeitung, Verarbeitungsverzeichnis</td><td>Betreiber, vor Stufe 2</td><td></td></tr>
+  <tr><td>☐</td><td>Server-Anbieter und Standort für das Hauptsystem</td><td>Hetzner, Deutschland</td><td></td></tr>
+</table>
+
+<h2>13. Begriffe</h2>
+<table>
+  <tr><th>Begriff</th><th>Bedeutung</th></tr>
+  <tr><td>Slot</td><td>Die kleinste buchbare Zeiteinheit eines Feldes, z. B. eine Stunde.</td></tr>
+  <tr><td>Buchungsfenster</td><td>Zeitraum vor einem Termin, in dem Kunden freie Slots buchen können.</td></tr>
+  <tr><td>Dauerbuchung</td><td>Wiederkehrende Buchung über eine Saison, vom Betreiber angelegt.</td></tr>
+  <tr><td>Sperre</td><td>Vom Betreiber blockierter Zeitraum ohne Kunde.</td></tr>
+  <tr><td>Nachbuchung</td><td>Ein anderer Kunde bucht einen nach der Frist stornierten Slot; die Stornierung wird dadurch kostenfrei.</td></tr>
+  <tr><td>Zahlencode (PIN)</td><td>Sechsstelliger Code je Buchung für die Tür, gültig nur im Zeitfenster der Buchung.</td></tr>
+  <tr><td>Guthaben</td><td>Betrag, den ein Kunde beim Betreiber gut hat und der mit der nächsten Buchung verrechnet wird.</td></tr>
+  <tr><td>Home Assistant</td><td>Die vorhandene Haussteuerung in der Halle, die Geräte schaltet und Sensoren ausliest.</td></tr>
+  <tr><td>VPN</td><td>Gesicherte private Verbindung, über die nur der Betreiber das Hauptsystem erreicht.</td></tr>
+  <tr><td>Stripe</td><td>Zahlungsdienstleister für die Online-Zahlung.</td></tr>
+  <tr><td>Handbetrieb</td><td>Zustand der Halle, in dem die Automatik ausgesetzt ist.</td></tr>
+</table>
+<p class="small">Die technische Spezifikation für die Entwickler liegt im Projektarchiv unter docs/superpowers/specs/2026-09-05-beachhub-design.md.</p>
+
+</body>
+</html>
