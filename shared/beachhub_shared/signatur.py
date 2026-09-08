@@ -23,13 +23,15 @@ def lade_privatschluessel(pfad: Path) -> str:
 
 
 def signiere(inhalt: dict[str, Any], privat_hex: str) -> str:
+    """Signiere ein Dictionary. Raises ValueError bei fehlerhaftem Privatschlüssel."""
     sk = SigningKey(bytes.fromhex(privat_hex))
     return sk.sign(dumps(inhalt)).signature.hex()
 
 
 def pruefe(inhalt: dict[str, Any], signatur_hex: str, oeffentlich_hex: str) -> bool:
-    vk = VerifyKey(bytes.fromhex(oeffentlich_hex))
+    """Verifiziere eine Signatur. Gibt False für fehlerhafte Eingabe, niemals Exception."""
     try:
+        vk = VerifyKey(bytes.fromhex(oeffentlich_hex))
         vk.verify(dumps(inhalt), bytes.fromhex(signatur_hex))
     except (BadSignatureError, ValueError):
         return False

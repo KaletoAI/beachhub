@@ -35,3 +35,13 @@ def test_schluessel_laden_und_ableiten(tmp_path: Path) -> None:
     pfad.write_text(priv + "\n")
     assert lade_privatschluessel(pfad) == priv
     assert oeffentlicher_schluessel(priv) == pub
+
+
+def test_malformierte_eingaben_ergeben_false() -> None:
+    priv, pub = erzeuge_schluesselpaar()
+    # Bad hex in signature and key
+    assert pruefe({"a": 1}, "not-hex", "not-hex") is False
+    # Wrong length for signature and key
+    assert pruefe({"a": 1}, "aa" * 64, "ab" * 10) is False
+    # Wrong length for signature only
+    assert pruefe({"a": 1}, "aa" * 10, pub) is False
