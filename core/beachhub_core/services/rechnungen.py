@@ -8,6 +8,7 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from beachhub_shared.zeit import lokal, lokales_datum
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
@@ -30,13 +31,9 @@ class RechnungsFehler(Exception):  # noqa: N818
 
 
 def naechste_nummer(db: Session, jahr: int) -> str:
+    db.execute(insert(Nummernkreis).values(jahr=jahr, letzte_nummer=0).on_conflict_do_nothing())
     kreis = db.scalar(select(Nummernkreis).where(Nummernkreis.jahr == jahr).with_for_update())
-    if kreis is None:
-        kreis = Nummernkreis(jahr=jahr, letzte_nummer=0)
-        db.add(kreis)
-        db.flush()
-        kreis = db.scalar(select(Nummernkreis).where(Nummernkreis.jahr == jahr).with_for_update())
-        assert kreis is not None
+    assert kreis is not None
     kreis.letzte_nummer += 1
     db.flush()
     return f"{jahr}-{kreis.letzte_nummer:05d}"
@@ -70,6 +67,8 @@ def _neue_rechnung(
     leistung_von: date,
     leistung_bis: date,
     status: str,
+    *,
+    quelle: str,
 ) -> Rechnung:
     heute = clock.today(db)
     satz = konfiguration.hole(db, "ust_satz")
@@ -112,7 +111,7 @@ def _neue_rechnung(
     db.refresh(r)
     audit.protokolliere(
         db,
-        quelle="system",
+        quelle=quelle,
         objekt_typ="rechnung",
         objekt_id=r.id,
         vorher=None,
@@ -133,6 +132,7 @@ def erzeuge_einzelrechnung(db: Session, buchung: Buchung, *, quelle: str = "syst
         d,
         d,
         "bezahlt",
+        quelle=quelle,
     )
 
 
@@ -174,6 +174,7 @@ def abrechenbare_buchungen(
 
 
 def erzeuge_sammelrechnung(db: Session, kunde: Kunde, jahr: int, monat: int) -> Rechnung | None:
+    db.execute(select(Kunde).where(Kunde.id == kunde.id).with_for_update())
     posten = abrechenbare_buchungen(db, kunde, jahr, monat)
     if not posten:
         return None
@@ -193,6 +194,7 @@ def erzeuge_sammelrechnung(db: Session, kunde: Kunde, jahr: int, monat: int) -> 
         date(jahr, monat, 1),
         date(jahr, monat, monthrange(jahr, monat)[1]),
         "offen",
+        quelle="system",
     )
 
 
@@ -241,6 +243,7 @@ def storniere(
         rechnung.leistung_von,
         rechnung.leistung_bis,
         "bezahlt",
+        quelle="admin",
     )
     vorher = audit.als_dict(rechnung)
     rechnung.status, rechnung.storniert_durch_id = "storniert", s.id

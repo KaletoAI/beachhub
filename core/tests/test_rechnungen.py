@@ -3,9 +3,19 @@ from decimal import Decimal
 
 import pytest
 from beachhub_core import clock
-from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Rechnung, Tarif
+from beachhub_core.models import (
+    Audit,
+    Betriebszeit,
+    Feld,
+    FeldRaster,
+    Kundengruppe,
+    Rechnung,
+    RechnungPosition,
+    Tarif,
+)
 from beachhub_core.services import buchungen, konfiguration, kunden, rechnungen, storno
 from beachhub_shared.zeit import kombiniere
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 
@@ -145,3 +155,53 @@ def test_csv_export(db: Session, welt) -> None:
     zeilen = csv.strip().splitlines()
     assert zeilen[0].startswith("nummer;datum;kunde;art;status;netto;ust;brutto")
     assert len(zeilen) == 2 and ";30,00" in zeilen[1]
+
+
+def test_buchung_kann_nicht_doppelt_berechnet_werden(db: Session, welt) -> None:
+    f, a, _ = welt
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=a.id,
+        beginn=kombiniere(date(2027, 12, 1), time(19)),
+        ende=kombiniere(date(2027, 12, 1), time(20)),
+    )
+    r = rechnungen.erzeuge_einzelrechnung(db, b)
+    db.commit()
+    db.add(
+        RechnungPosition(
+            rechnung_id=r.id,
+            reihenfolge=99,
+            buchung_id=b.id,
+            text="doppelt",
+            menge=1,
+            einzelpreis_brutto=Decimal("30.00"),
+            ust_satz=Decimal("19.00"),
+            brutto=Decimal("30.00"),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db.flush()
+    db.rollback()
+
+
+def test_setze_bezahlt_und_nicht_offen(db: Session, welt) -> None:
+    f, _, v1 = welt
+    buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=v1.id,
+        beginn=kombiniere(date(2027, 12, 1), time(19)),
+        ende=kombiniere(date(2027, 12, 1), time(20)),
+    )
+    db.commit()
+    clock.set_override(db, date(2028, 1, 3))
+    r = rechnungen.erzeuge_sammelrechnung(db, v1, 2027, 12)
+    db.commit()
+    assert r is not None
+    rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    db.commit()
+    assert r.status == "bezahlt" and r.bezahlt_am is not None
+    with pytest.raises(rechnungen.RechnungsFehler, match="nicht_offen"):
+        rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    assert db.query(Audit).filter_by(objekt_typ="rechnung", objekt_id=r.id).count() > 0

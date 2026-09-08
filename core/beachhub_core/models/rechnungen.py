@@ -3,7 +3,8 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DECIMAL, Date, DateTime, ForeignKey, Integer, String
+from sqlalchemy import DECIMAL, Date, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -63,3 +64,12 @@ class RechnungPosition(UUIDMixin, Base):
     ust_satz: Mapped[Decimal] = mapped_column(DECIMAL(5, 2), nullable=False)
     brutto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     rechnung: Mapped[Rechnung] = relationship(back_populates="positionen")
+
+    __table_args__ = (
+        Index(
+            "ux_rechnung_position_buchung",
+            "buchung_id",
+            unique=True,
+            postgresql_where=sql_text("buchung_id IS NOT NULL"),
+        ),
+    )
