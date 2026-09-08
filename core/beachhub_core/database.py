@@ -6,16 +6,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from beachhub_core.config import settings
 
-# client_encoding=utf8 wird explizit erzwungen: auf manchen (insbesondere lokalen) Postgres-
-# Clustern mit initdb-Locale "C" ist die Server-Encoding SQL_ASCII, wodurch psycopg3 rohe
-# Bytes statt str liefert. Mit erzwungenem UTF-8-Client bleibt Kodieren/Dekodieren symmetrisch
-# und verlustfrei; gegen einen regulär UTF8-kodierten Server (CI, Docker-Image) ist das ein No-Op.
-engine: Engine = create_engine(
-    settings.database_url,
-    pool_pre_ping=True,
-    future=True,
-    connect_args={"client_encoding": "utf8"},
-)
+engine: Engine = create_engine(settings.database_url, pool_pre_ping=True, future=True)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
