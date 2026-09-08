@@ -10,6 +10,7 @@ from beachhub_core.models.stammdaten import (
     Tarif,
 )
 from beachhub_core.models.system import (
+    AdminSession,
     AdminUser,
     AppSetting,
     Audit,
@@ -18,6 +19,7 @@ from beachhub_core.models.system import (
 )
 
 __all__ = [
+    "AdminSession",
     "AdminUser",
     "AppSetting",
     "Audit",

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Beachhub{% endblock %} · Beachhub</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <a class="brand" href="/admin">Beachhub</a>
+  {% if admin %}
+  <nav>
+    <a href="/admin/belegung">Belegung</a>
+    <a href="/admin/kunden">Kunden</a>
+    <a href="/admin/rechnungen">Rechnungen</a>
+    <a href="/admin/felder">Stammdaten</a>
+    <a href="/admin/system">System</a>
+  </nav>
+  <form method="post" action="/admin/logout" class="inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="link">{{ admin.name }} · Abmelden</button>
+  </form>
+  {% endif %}
+</header>
+<main>
+  {% if flash %}<div class="flash {{ flash.art }}">{{ flash.text }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

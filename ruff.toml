@@ -5,3 +5,6 @@ select = ["E", "F", "I", "B", "UP", "N", "S"]
 ignore = ["S101"]  # assert in Tests
 [lint.per-file-ignores]
 "*/tests/*" = ["S105", "S106"]
+[lint.flake8-bugbear]
+# FastAPIs Depends()/Query()/... werden bei jedem Request neu ausgewertet – für B008 unbedenklich.
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Security"]

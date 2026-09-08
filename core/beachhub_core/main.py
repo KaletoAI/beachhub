@@ -3,13 +3,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from beachhub_core.auth import verify_csrf
 from beachhub_core.config import settings
+from beachhub_core.routes import admin_auth, dashboard
 from beachhub_core.services import storno as _storno  # noqa: F401 – verdrahtet Hooks beim Start
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -49,6 +51,17 @@ app.add_middleware(SecurityHeadersMiddleware)
 static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+csrf = [Depends(verify_csrf)]
+app.include_router(admin_auth.router, prefix="/admin", dependencies=csrf)
+app.include_router(dashboard.router, prefix="/admin", dependencies=csrf)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):  # type: ignore[no-untyped-def]
+    if exc.status_code == 303 and exc.headers and "Location" in exc.headers:
+        return RedirectResponse(exc.headers["Location"], status_code=303)
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
 
 
 @app.get("/health")

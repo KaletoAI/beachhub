@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Anmeldung{% endblock %}
+{% block content %}
+<h1>Anmeldung</h1>
+{% if fehler %}<p class="fehler">Anmeldung fehlgeschlagen.</p>{% endif %}
+<form method="post" action="/admin/login" class="karte schmal">
+  <label>Name <input name="name" required autocomplete="username"></label>
+  <label>Passwort <input name="passwort" type="password" required autocomplete="current-password"></label>
+  <label>Code aus der Authenticator-App <input name="code" inputmode="numeric" pattern="[0-9 ]*" required autocomplete="one-time-code"></label>
+  <button>Anmelden</button>
+</form>
+{% endblock %}

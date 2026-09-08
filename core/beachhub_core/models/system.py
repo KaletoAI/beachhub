@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,6 +23,19 @@ class AdminUser(UUIDMixin, ZeitstempelMixin, Base):
     totp_secret: Mapped[str] = mapped_column(String(64), nullable=False)
     rolle: Mapped[str] = mapped_column(String(10), default="admin", nullable=False)  # admin|lesend
     aktiv: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+
+
+class AdminSession(UUIDMixin, Base):
+    __tablename__ = "admin_session"
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    admin_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("admin_user.id"), nullable=False
+    )
+    csrf_token: Mapped[str] = mapped_column(String(64), nullable=False)
+    erstellt_am: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )
+    laeuft_ab: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
 class Audit(UUIDMixin, Base):
