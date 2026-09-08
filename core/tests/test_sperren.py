@@ -98,3 +98,45 @@ def test_behalten_laesst_buchung_stehen(db: Session, welt) -> None:
     sperren.loesche(db, s[0], admin_user_id=None)
     db.commit()
     assert db.query(Sperre).count() == 1
+
+
+def test_ueberlappende_sperre_wirft_fachfehler(db: Session, welt) -> None:
+    f1, f2, k, storniert = welt
+    # Create initial Sperre on f1 19–21
+    _ = sperren.lege_an(
+        db,
+        feld_ids=[f1.id],
+        beginn=kombiniere(D, time(19)),
+        ende=kombiniere(D, time(21)),
+        grund="Initial",
+        admin_user_id=None,
+        entscheidungen={},
+    )
+    db.commit()
+    assert db.query(Sperre).count() == 1
+    # Try to create overlapping Sperre on f1 20–22, should raise ueberlappt
+    with pytest.raises(sperren.SperrenFehler, match="ueberlappt"):
+        sperren.lege_an(
+            db,
+            feld_ids=[f1.id],
+            beginn=kombiniere(D, time(20)),
+            ende=kombiniere(D, time(22)),
+            grund="Overlapping",
+            admin_user_id=None,
+            entscheidungen={},
+        )
+    db.commit()
+    assert db.query(Sperre).count() == 1
+    # Try to create hall-wide Sperre overlapping the field Sperre, should also raise
+    with pytest.raises(sperren.SperrenFehler, match="ueberlappt"):
+        sperren.lege_an(
+            db,
+            feld_ids=None,
+            beginn=kombiniere(D, time(20)),
+            ende=kombiniere(D, time(22)),
+            grund="Hall-wide overlapping",
+            admin_user_id=None,
+            entscheidungen={},
+        )
+    db.commit()
+    assert db.query(Sperre).count() == 1

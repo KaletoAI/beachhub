@@ -1,9 +1,9 @@
 import uuid
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any, cast
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from beachhub_core.models import Buchung, Sperre
@@ -46,15 +46,20 @@ def lege_an(
 ) -> list[Sperre]:
     if ende <= beginn:
         raise SperrenFehler("zeitraum_ungueltig")
+    # Check for overlapping Sperren before writing anything
+    overlap_query = select(Sperre).where(Sperre.beginn < ende, Sperre.ende > beginn)
+    if feld_ids is not None:
+        overlap_query = overlap_query.where(
+            or_(Sperre.feld_id.in_(feld_ids), Sperre.feld_id.is_(None))
+        )
+    if db.scalars(overlap_query).first() is not None:
+        raise SperrenFehler("ueberlappt")
     betroffen = betroffene_buchungen(db, feld_ids=feld_ids, beginn=beginn, ende=ende)
     for b in betroffen:
         if entscheidungen.get(b.id) not in ("behalten", "stornieren"):
             raise SperrenFehler("entscheidung_fehlt")
     ergebnis: list[Sperre] = []
-    if feld_ids is not None:
-        fids: list[uuid.UUID | None] = cast(list[uuid.UUID | None], feld_ids)
-    else:
-        fids = cast(list[uuid.UUID | None], [None])
+    fids: list[uuid.UUID | None] = list(feld_ids) if feld_ids is not None else [None]
     for fid in fids:
         s = Sperre(feld_id=fid, beginn=beginn, ende=ende, grund=grund)
         db.add(s)
