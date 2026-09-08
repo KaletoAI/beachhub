@@ -30,6 +30,11 @@ def buche(
         raise GuthabenFehler("art_unbekannt")
     if art in ABGEHEND and betrag >= 0:
         raise GuthabenFehler("betrag_muss_negativ_sein")
+
+    # Lock the customer row to prevent concurrent balance modifications
+    db.execute(select(Kunde).where(Kunde.id == kunde.id).with_for_update())
+    db.refresh(kunde)
+
     if kunde.guthaben + betrag < 0:
         raise GuthabenFehler("nicht_gedeckt")
     vorher = kunde.guthaben

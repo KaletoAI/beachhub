@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DECIMAL, DateTime, ForeignKey, String
+from sqlalchemy import DECIMAL, CheckConstraint, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -12,6 +12,8 @@ from beachhub_core.models.stammdaten import Kundengruppe
 
 class Kunde(UUIDMixin, ZeitstempelMixin, Base):
     __tablename__ = "kunde"
+    __table_args__ = (CheckConstraint("guthaben >= 0", name="kunde_guthaben_nicht_negativ"),)
+
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     email: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     adresse_strasse: Mapped[str] = mapped_column(String(200), default="", nullable=False)

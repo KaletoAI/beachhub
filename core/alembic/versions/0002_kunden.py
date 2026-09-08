@@ -43,6 +43,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email"),
         sa.UniqueConstraint("portal_konto_id"),
+        sa.CheckConstraint("guthaben >= 0", name="kunde_guthaben_nicht_negativ"),
     )
     op.create_table(
         "guthaben_buchung",

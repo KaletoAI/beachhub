@@ -56,6 +56,12 @@ def lege_an(
 
 
 def aendere(db: Session, kunde: Kunde, *, admin_user_id: uuid.UUID | None, **felder: Any) -> Kunde:
+    # Check for email duplicate before any mutations
+    if "email" in felder:
+        neue_email = felder["email"].strip().lower()
+        if db.scalar(select(Kunde).where(Kunde.email == neue_email, Kunde.id != kunde.id)):
+            raise KundenFehler("email_vergeben")
+
     vorher = audit.als_dict(kunde)
     for name, wert in felder.items():
         if name == "email":

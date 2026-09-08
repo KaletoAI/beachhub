@@ -1,8 +1,10 @@
 from decimal import Decimal
 
 import pytest
-from beachhub_core.models import Audit, GuthabenBuchung, Kundengruppe
+from beachhub_core.models import Audit, GuthabenBuchung, Kunde, Kundengruppe
 from beachhub_core.services import guthaben, kunden
+from sqlalchemy import update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 
@@ -59,3 +61,25 @@ def test_anonymisieren(db: Session, gruppen) -> None:
     kunden.anonymisiere(db, k)
     db.commit()
     assert k.name == "Gelöschter Kunde" and "@" not in k.email and k.anonymisiert_am is not None
+
+
+def test_aendern_auf_vergebene_email_wirft(db: Session, gruppen) -> None:
+    p, _ = gruppen
+    _ = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=p.id)
+    k2 = kunden.lege_an(db, name="B", email="b@x.de", kundengruppe_id=p.id)
+    db.commit()
+    with pytest.raises(kunden.KundenFehler, match="email_vergeben"):
+        kunden.aendere(db, k2, admin_user_id=None, email="A@x.de")
+    db.rollback()
+    db.refresh(k2)
+    assert k2.email == "b@x.de"
+
+
+def test_check_constraint_verhindert_negatives_guthaben(db: Session, gruppen) -> None:
+    p, _ = gruppen
+    k = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=p.id)
+    db.commit()
+    with pytest.raises(IntegrityError):
+        db.execute(update(Kunde).values(guthaben=Decimal("-1")).where(Kunde.id == k.id))
+        db.commit()
+    db.rollback()

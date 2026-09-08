@@ -1,4 +1,5 @@
 from beachhub_core.models.base import Base, UUIDMixin, ZeitstempelMixin, utcnow
+from beachhub_core.models.kunden import GuthabenBuchung, Kunde
 from beachhub_core.models.stammdaten import (
     Ausnahmetag,
     Betriebszeit,
@@ -7,7 +8,6 @@ from beachhub_core.models.stammdaten import (
     Kundengruppe,
     Tarif,
 )
-from beachhub_core.models.kunden import GuthabenBuchung, Kunde
 from beachhub_core.models.system import (
     AdminUser,
     AppSetting,
