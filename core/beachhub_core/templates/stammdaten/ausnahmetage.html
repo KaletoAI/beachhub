@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Ausnahmetage{% endblock %}
+{% block content %}
+<h1>Ausnahmetage</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="karte">
+<table>
+  <tr><th>Datum</th><th>Geschlossen</th><th>Öffnet</th><th>Schließt</th><th>Grund</th><th></th></tr>
+  {% for t in tage %}<tr>
+    <td>{{ t.datum|datum }}</td>
+    <td>{% if t.geschlossen %}<span class="badge">geschlossen</span>{% else %}<span class="badge">sonderöffnung</span>{% endif %}</td>
+    <td>{{ t.oeffnet|uhrzeit if t.oeffnet else "–" }}</td>
+    <td>{{ t.schliesst|uhrzeit if t.schliesst else "–" }}</td>
+    <td>{{ t.grund }}</td>
+    <td><form method="post" action="/admin/ausnahmetage/{{ t.id }}/loeschen" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">löschen</button></form></td>
+  </tr>{% endfor %}
+</table>
+</div>
+<form method="post" action="/admin/ausnahmetage" class="karte schmal">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Datum <input name="datum" type="date" required></label>
+  <label>Art <select name="geschlossen"><option value="1">geschlossen</option><option value="0">Sonderöffnung</option></select></label>
+  <label>Öffnet <input name="oeffnet" type="time"></label>
+  <label>Schließt <input name="schliesst" type="time"></label>
+  <label>Grund <input name="grund"></label>
+  <button>Ausnahmetag anlegen</button>
+</form>
+{% endblock %}

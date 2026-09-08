@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Betriebszeiten{% endblock %}
+{% block content %}
+<h1>Betriebszeiten</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="karte">
+<table>
+  <tr><th>Wochentag</th><th>Öffnet</th><th>Schließt</th><th>Gültig von</th><th>Gültig bis</th><th></th></tr>
+  {% for z in zeiten %}<tr>
+    <td>{{ wochentage[z.wochentag] }}</td>
+    <td>{{ z.oeffnet|uhrzeit }}</td>
+    <td>{{ z.schliesst|uhrzeit }}</td>
+    <td>{{ z.gueltig_von|datum if z.gueltig_von else "–" }}</td>
+    <td>{{ z.gueltig_bis|datum if z.gueltig_bis else "–" }}</td>
+    <td><form method="post" action="/admin/betriebszeiten/{{ z.id }}/loeschen" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">löschen</button></form></td>
+  </tr>{% endfor %}
+</table>
+</div>
+<form method="post" action="/admin/betriebszeiten" class="karte schmal">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Wochentag <select name="wochentag">{% for w in wochentage %}<option value="{{ loop.index0 }}">{{ w }}</option>{% endfor %}</select></label>
+  <label>Öffnet <input name="oeffnet" type="time" required></label>
+  <label>Schließt <input name="schliesst" type="time" required></label>
+  <label>Gültig von <input name="gueltig_von" type="date"></label>
+  <label>Gültig bis <input name="gueltig_bis" type="date"></label>
+  <button>Betriebszeit anlegen</button>
+</form>
+{% endblock %}

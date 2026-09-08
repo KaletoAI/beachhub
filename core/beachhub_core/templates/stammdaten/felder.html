@@ -1,0 +1,22 @@
+{% extends "base.html" %}{% block title %}Felder{% endblock %}
+{% block content %}
+<h1>Felder</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="karte">
+<table>
+  <tr><th>Name</th><th>Aktiv</th><th>Raster</th><th></th></tr>
+  {% for f in felder %}<tr>
+    <td>{{ f.name }}</td>
+    <td>{% if f.aktiv %}<span class="badge">aktiv</span>{% else %}<span class="badge">inaktiv</span>{% endif %}</td>
+    <td>{{ f.raster|length }}</td>
+    <td><a href="/admin/felder/{{ f.id }}">bearbeiten</a></td>
+  </tr>{% endfor %}
+</table>
+</div>
+<form method="post" action="/admin/felder" class="karte schmal">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="name" required></label>
+  <label>Reihenfolge <input name="reihenfolge" type="number" value="0"></label>
+  <button>Feld anlegen</button>
+</form>
+{% endblock %}

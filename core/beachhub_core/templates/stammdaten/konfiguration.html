@@ -1,0 +1,12 @@
+{% extends "base.html" %}{% block title %}Konfiguration{% endblock %}
+{% block content %}
+<h1>Konfiguration</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<form method="post" action="/admin/konfiguration" class="karte schmal">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {% for k, wert in werte.items() %}
+  <label>{{ k }} <input name="{{ k }}" value="{{ wert }}" placeholder="{{ defaults[k][1] }}"></label>
+  {% endfor %}
+  <button>Speichern</button>
+</form>
+{% endblock %}

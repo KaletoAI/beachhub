@@ -12,6 +12,7 @@ h1 { font-size:1.5rem; margin:.5rem 0 1rem; }
 .schmal { max-width: 420px; }
 label { display:block; margin-bottom:.75rem; }
 input, select, textarea { width:100%; padding:.45rem .6rem; border:1px solid var(--rand); border-radius:6px; background:var(--bg); color:inherit; font:inherit; }
+input[type="checkbox"] { width:auto; }
 button { background:var(--akzent); color:#fff; border:0; border-radius:6px; padding:.5rem 1rem; font:inherit; cursor:pointer; }
 button.link { background:none; color:var(--akzent); padding:0; }
 button.gefahr { background:var(--fehler); }

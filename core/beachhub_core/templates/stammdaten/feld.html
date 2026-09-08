@@ -1,0 +1,35 @@
+{% extends "base.html" %}{% block title %}{{ feld.name }}{% endblock %}
+{% block content %}
+<h1>{{ feld.name }}</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="zeile">
+<form method="post" action="/admin/felder/{{ feld.id }}" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="name" value="{{ feld.name }}" required></label>
+  <label>Reihenfolge <input name="reihenfolge" type="number" value="{{ feld.reihenfolge }}"></label>
+  <label><input type="checkbox" name="aktiv" value="1" {% if feld.aktiv %}checked{% endif %}> aktiv</label>
+  <label>Home-Assistant-Licht <input name="ha_licht_entity" value="{{ feld.ha_licht_entity or '' }}" placeholder="light.feld_1"></label>
+  <label>Home-Assistant-Präsenz <input name="ha_praesenz_entity" value="{{ feld.ha_praesenz_entity or '' }}" placeholder="binary_sensor.feld_1"></label>
+  <label>Heizzone <input name="heizzone" value="{{ feld.heizzone or '' }}"></label>
+  <button>Speichern</button>
+</form>
+<div class="karte">
+  <h2>Buchungsraster</h2>
+  <table><tr><th>Wochentag</th><th>Modus</th><th>Slots</th><th></th></tr>
+  {% for r in feld.raster %}<tr>
+    <td>{{ wochentage[r.wochentag] if r.wochentag is not none else "alle" }}</td>
+    <td>{{ r.modus }}</td>
+    <td>{% if r.modus == "dauer" %}{{ r.slot_minuten }} min{% else %}{% for f in r.fenster_json %}{{ f[0] }}-{{ f[1] }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+    <td><form method="post" action="/admin/felder/{{ feld.id }}/raster/{{ r.id }}/loeschen" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">löschen</button></form></td>
+  </tr>{% endfor %}</table>
+  <form method="post" action="/admin/felder/{{ feld.id }}/raster">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Wochentag <select name="wochentag"><option value="">alle</option>{% for w in wochentage %}<option value="{{ loop.index0 }}">{{ w }}</option>{% endfor %}</select></label>
+    <label>Modus <select name="modus"><option value="dauer">feste Slot-Dauer</option><option value="fenster">feste Zeitfenster</option></select></label>
+    <label>Slot-Dauer in Minuten <input name="slot_minuten" type="number" placeholder="60"></label>
+    <label>Zeitfenster <input name="fenster" placeholder="19:00-21:00, 21:00-23:00"></label>
+    <button>Raster setzen</button>
+  </form>
+</div>
+</div>
+{% endblock %}

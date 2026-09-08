@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Tarife{% endblock %}
+{% block content %}
+<h1>Tarife</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="karte">
+<table>
+  <tr><th>Name</th><th>Preis</th><th>Feld</th><th>Wochentag</th><th>Uhrzeit</th><th>Gruppe</th><th>Gültig</th><th>Aktiv</th><th></th></tr>
+  {% for t in tarife %}<tr>
+    <td>{{ t.name }}</td>
+    <td>{{ t.preis|euro }}</td>
+    <td>{{ feld_namen.get(t.feld_id, "alle") }}</td>
+    <td>{{ wochentage[t.wochentag] if t.wochentag is not none else "alle" }}</td>
+    <td>{% if t.uhrzeit_von and t.uhrzeit_bis %}{{ t.uhrzeit_von|uhrzeit }}–{{ t.uhrzeit_bis|uhrzeit }}{% else %}alle{% endif %}</td>
+    <td>{{ gruppen_namen.get(t.kundengruppe_id, "alle") }}</td>
+    <td>{{ t.gueltig_von|datum if t.gueltig_von else "–" }} – {{ t.gueltig_bis|datum if t.gueltig_bis else "–" }}</td>
+    <td>{% if t.aktiv %}<span class="badge">aktiv</span>{% else %}<span class="badge">inaktiv</span>{% endif %}</td>
+    <td>{% if t.aktiv %}<form method="post" action="/admin/tarife/{{ t.id }}/deaktivieren" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">deaktivieren</button></form>{% endif %}</td>
+  </tr>{% endfor %}
+</table>
+</div>
+<form method="post" action="/admin/tarife" class="karte schmal">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="name" required></label>
+  <label>Preis <input name="preis" placeholder="40,00" required></label>
+  <label>Feld <select name="feld_id"><option value="">alle</option>{% for f in felder %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}</select></label>
+  <label>Wochentag <select name="wochentag"><option value="">alle</option>{% for w in wochentage %}<option value="{{ loop.index0 }}">{{ w }}</option>{% endfor %}</select></label>
+  <label>Uhrzeit von <input name="uhrzeit_von" type="time"></label>
+  <label>Uhrzeit bis <input name="uhrzeit_bis" type="time"></label>
+  <label>Kundengruppe <select name="kundengruppe_id"><option value="">alle</option>{% for g in gruppen %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}</select></label>
+  <label>Gültig von <input name="gueltig_von" type="date"></label>
+  <label>Gültig bis <input name="gueltig_bis" type="date"></label>
+  <button>Tarif anlegen</button>
+</form>
+{% endblock %}

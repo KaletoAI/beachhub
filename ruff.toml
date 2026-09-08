@@ -7,4 +7,4 @@ ignore = ["S101"]  # assert in Tests
 "*/tests/*" = ["S105", "S106"]
 [lint.flake8-bugbear]
 # FastAPIs Depends()/Query()/... werden bei jedem Request neu ausgewertet – für B008 unbedenklich.
-extend-immutable-calls = ["fastapi.Depends", "fastapi.Security"]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Security", "fastapi.Form"]

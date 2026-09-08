@@ -1,0 +1,28 @@
+{% extends "base.html" %}{% block title %}Kundengruppen{% endblock %}
+{% block content %}
+<h1>Kundengruppen</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="karte">
+{% for g in gruppen %}<form id="kg-{{ g.id }}" method="post" action="/admin/kundengruppen/{{ g.id }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"></form>{% endfor %}
+<table>
+  <tr><th>Name</th><th>Standard-Zahlungsart</th><th></th></tr>
+  {% for g in gruppen %}<tr>
+    <td><input form="kg-{{ g.id }}" name="name" value="{{ g.name }}" required></td>
+    <td><select form="kg-{{ g.id }}" name="standard_zahlungsart">
+      <option value="online" {% if g.standard_zahlungsart == "online" %}selected{% endif %}>online</option>
+      <option value="rechnung" {% if g.standard_zahlungsart == "rechnung" %}selected{% endif %}>Rechnung</option>
+    </select></td>
+    <td><button form="kg-{{ g.id }}">Speichern</button></td>
+  </tr>{% endfor %}
+</table>
+</div>
+<form method="post" action="/admin/kundengruppen" class="karte schmal">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="name" required></label>
+  <label>Standard-Zahlungsart <select name="standard_zahlungsart">
+    <option value="online">online</option>
+    <option value="rechnung">Rechnung</option>
+  </select></label>
+  <button>Kundengruppe anlegen</button>
+</form>
+{% endblock %}
