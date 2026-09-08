@@ -12,7 +12,7 @@ D = date(2027, 12, 1)
 
 
 @pytest.fixture
-def welt(db: Session, monkeypatch):
+def welt(db: Session):
     f1, f2 = Feld(name="F1", reihenfolge=1), Feld(name="F2", reihenfolge=2)
     for f in (f1, f2):
         f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
@@ -24,18 +24,11 @@ def welt(db: Session, monkeypatch):
     k = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=g.id)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
-    storniert = []
-    monkeypatch.setattr(
-        sperren,
-        "STORNIERE",
-        lambda db, b, **kw: storniert.append(b.id)
-        or buchungen.setze_status(db, b, "storniert", quelle="admin"),
-    )
-    return f1, f2, k, storniert
+    return f1, f2, k
 
 
 def test_entscheidung_pflicht_und_stornieren(db: Session, welt) -> None:
-    f1, f2, k, storniert = welt
+    f1, f2, k = welt
     b = buchungen.lege_an(
         db,
         feld_id=f1.id,
@@ -64,7 +57,7 @@ def test_entscheidung_pflicht_und_stornieren(db: Session, welt) -> None:
         entscheidungen={b.id: "stornieren"},
     )
     db.commit()
-    assert len(s) == 1 and s[0].feld_id is None and storniert == [b.id]
+    assert len(s) == 1 and s[0].feld_id is None and b.status == "storniert"
     with pytest.raises(buchungen.BuchungsFehler, match="belegt"):
         buchungen.lege_an(
             db,
@@ -76,7 +69,7 @@ def test_entscheidung_pflicht_und_stornieren(db: Session, welt) -> None:
 
 
 def test_behalten_laesst_buchung_stehen(db: Session, welt) -> None:
-    f1, f2, k, storniert = welt
+    f1, f2, k = welt
     b = buchungen.lege_an(
         db,
         feld_id=f1.id,
@@ -94,14 +87,14 @@ def test_behalten_laesst_buchung_stehen(db: Session, welt) -> None:
         entscheidungen={b.id: "behalten"},
     )
     db.commit()
-    assert len(s) == 2 and b.status == "bestaetigt" and storniert == []
+    assert len(s) == 2 and b.status == "bestaetigt"
     sperren.loesche(db, s[0], admin_user_id=None)
     db.commit()
     assert db.query(Sperre).count() == 1
 
 
 def test_ueberlappende_sperre_wirft_fachfehler(db: Session, welt) -> None:
-    f1, f2, k, storniert = welt
+    f1, f2, k = welt
     # Create initial Sperre on f1 19–21
     _ = sperren.lege_an(
         db,

@@ -13,13 +13,13 @@ from beachhub_core.models import (
     Sperre,
     Tarif,
 )
-from beachhub_core.services import buchungen, dauerbuchungen, kunden, pin, sperren
+from beachhub_core.services import buchungen, dauerbuchungen, kunden, pin
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def welt(db: Session, monkeypatch):
+def welt(db: Session):
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
     g = Kundengruppe(name="Verein", standard_zahlungsart="rechnung")
@@ -31,11 +31,6 @@ def welt(db: Session, monkeypatch):
     k2 = kunden.lege_an(db, name="B", email="b@x.de", kundengruppe_id=g.id)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
-    monkeypatch.setattr(
-        sperren,
-        "STORNIERE",
-        lambda db, b, **kw: buchungen.setze_status(db, b, "storniert", quelle="admin"),
-    )
     return f, k, k2
 
 
