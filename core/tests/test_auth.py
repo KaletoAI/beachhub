@@ -27,6 +27,13 @@ def test_login_braucht_passwort_und_totp(client: TestClient, db: Session) -> Non
     assert r.status_code == 200 and "Übersicht" in r.text
 
 
+def test_login_unbekannter_name_gleiche_antwort(client: TestClient) -> None:
+    r = client.post(
+        "/admin/login", data={"name": "unbekannt", "passwort": "irgendwas", "code": "123456"}
+    )
+    assert r.status_code == 200 and "Anmeldung fehlgeschlagen" in r.text
+
+
 def test_ohne_session_umleitung(client: TestClient) -> None:
     r = client.get("/admin", follow_redirects=False)
     assert r.status_code == 303 and r.headers["location"].startswith("/admin/login")

@@ -43,6 +43,19 @@ def pruefe_totp(secret: str, code: str) -> bool:
     return pyotp.TOTP(secret).verify(code.strip().replace(" ", ""), valid_window=1)
 
 
+_DUMMY_HASH = hash_passwort("dummy-passwort-fuer-timing")  # noqa: S105 -- kein echtes Geheimnis
+
+
+def pruefe_login(user: AdminUser | None, passwort: str, code: str) -> bool:
+    """Läuft für existierende und nicht-existierende Namen gleich lang durch.
+
+    Verhindert, dass Antwortzeiten verraten, ob ein Nutzername existiert.
+    """
+    pw_ok = pruefe_passwort(passwort, user.passwort_hash if user else _DUMMY_HASH)
+    totp_ok = pruefe_totp(user.totp_secret if user else erzeuge_totp_secret(), code)
+    return user is not None and pw_ok and totp_ok
+
+
 def lege_admin_an(
     db: Session, *, name: str, passwort: str, rolle: str = "admin"
 ) -> tuple[AdminUser, str]:

@@ -29,12 +29,17 @@ from beachhub_core.database import SessionLocal, engine, stelle_extensions_siche
 from beachhub_core.main import app  # noqa: E402
 from beachhub_core.models import AdminUser, Base  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def frisches_schema() -> Iterator[None]:
     stelle_extensions_sicher(engine)
+    with engine.begin() as conn:
+        # tests/test_migrationen.py steuert Alembic direkt; ein abgebrochener Lauf könnte sonst
+        # einen veralteten Versionsstand hinterlassen, den spätere Tests fälschlich vorfinden.
+        conn.execute(text("DROP TABLE IF EXISTS alembic_version"))
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
     yield

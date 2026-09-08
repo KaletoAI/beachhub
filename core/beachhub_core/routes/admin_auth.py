@@ -28,12 +28,7 @@ def login(
     user = db.scalar(
         select(AdminUser).where(AdminUser.name == name.strip(), AdminUser.aktiv.is_(True))
     )
-    ok = (
-        user is not None
-        and auth.pruefe_passwort(passwort, user.passwort_hash)
-        and auth.pruefe_totp(user.totp_secret, code)
-    )
-    if not ok or user is None:
+    if not auth.pruefe_login(user, passwort, code) or user is None:
         return render(request, "login.html", fehler=True)
     token, _ = auth.erzeuge_session(db, user)
     resp = RedirectResponse("/admin", status_code=303)
