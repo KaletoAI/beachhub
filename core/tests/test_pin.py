@@ -1,7 +1,7 @@
 from datetime import date, time
 from decimal import Decimal
 
-from beachhub_core.models import Buchung, Feld, Kunde, Kundengruppe
+from beachhub_core.models import Buchung, Dauerbuchung, Feld, Kunde, Kundengruppe
 from beachhub_core.services import pin
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
@@ -41,3 +41,54 @@ def test_finde_freien_vermeidet_kollision(db: Session, monkeypatch) -> None:
     folge = iter(["123456", "654321"])
     monkeypatch.setattr(pin, "erzeuge", lambda laenge: next(folge))
     assert pin.finde_freien(db, kombiniere(d, time(20)), kombiniere(d, time(21)), 6, 15) == "654321"
+
+
+def test_finde_freien_ignoriert_beendete_dauerbuchung(db: Session, monkeypatch) -> None:
+    g = Kundengruppe(name="Privat")
+    f = Feld(name="F1", reihenfolge=1)
+    db.add_all([g, f])
+    db.flush()
+    k = Kunde(name="A", email="a@x.de", kundengruppe_id=g.id, zahlungsart="online")
+    db.add(k)
+    db.flush()
+    db.add(
+        Dauerbuchung(
+            kunde_id=k.id,
+            feld_id=f.id,
+            wochentag=1,
+            start=time(19),
+            ende=time(21),
+            gueltig_von=date(2027, 12, 1),
+            gueltig_bis=date(2027, 12, 31),
+            pin_hash=pin.hash("123456"),
+            pin_verschluesselt=pin.verschluessele("123456"),
+            beendet_ab=date(2027, 12, 10),
+        )
+    )
+    db.commit()
+
+    folge = iter(["123456", "654321"])
+    monkeypatch.setattr(pin, "erzeuge", lambda laenge: next(folge))
+    assert (
+        pin.finde_freien(
+            db,
+            kombiniere(date(2027, 12, 15), time(19)),
+            kombiniere(date(2027, 12, 15), time(21)),
+            6,
+            15,
+        )
+        == "123456"
+    )
+
+    folge = iter(["123456", "654321"])
+    monkeypatch.setattr(pin, "erzeuge", lambda laenge: next(folge))
+    assert (
+        pin.finde_freien(
+            db,
+            kombiniere(date(2027, 12, 5), time(19)),
+            kombiniere(date(2027, 12, 5), time(21)),
+            6,
+            15,
+        )
+        == "654321"
+    )

@@ -6,6 +6,7 @@ import secrets
 from datetime import datetime, timedelta
 
 from argon2.low_level import Type, hash_secret_raw
+from beachhub_shared.zeit import lokales_datum
 from cryptography.fernet import Fernet
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
@@ -67,10 +68,15 @@ def finde_freien(
             )
         ).all()
     )
+    beginn_datum = lokales_datum(beginn)
     belegt |= set(
         db.scalars(
             select(Dauerbuchung.pin_hash).where(
-                or_(Dauerbuchung.beendet_am.is_(None), Dauerbuchung.beendet_am > beginn)
+                Dauerbuchung.gueltig_bis >= beginn_datum,
+                or_(
+                    Dauerbuchung.beendet_ab.is_(None),
+                    Dauerbuchung.beendet_ab > beginn_datum,
+                ),
             )
         ).all()
     )
