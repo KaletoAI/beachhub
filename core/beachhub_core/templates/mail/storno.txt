@@ -1,0 +1,13 @@
+Hallo {{ b.kunde.name }},
+
+Ihre Buchung wurde storniert:
+Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
+
+{% if s.kostenfrei -%}
+Die Stornierung ist für Sie kostenfrei.
+{%- else -%}
+Wird der Platz bis zum Termin von jemand anderem gebucht, entfällt der Betrag. Wir informieren Sie.
+{%- endif %}
+
+Viele Grüße
+{{ betreiber }}

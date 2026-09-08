@@ -1,0 +1,10 @@
+Hallo {{ r.kunde.name }},
+
+anbei erhalten Sie die Rechnung {{ r.nummer }} über {{ r.brutto|euro }}.
+{% if r.status == "offen" %}
+Bitte überweisen Sie den Betrag bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer.
+{% endif %}
+Die Rechnung finden Sie als PDF im Anhang dieser E-Mail.
+
+Viele Grüße
+{{ betreiber }}

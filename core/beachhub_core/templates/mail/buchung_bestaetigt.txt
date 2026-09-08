@@ -1,0 +1,11 @@
+Hallo {{ b.kunde.name }},
+
+Ihre Buchung ist bestätigt:
+Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
+Preis: {{ b.preis|euro }}
+
+Ihr Zahlencode für die Tür: {{ pin }}
+Er gilt ab 15 Minuten vor Beginn bis zum Ende Ihrer Buchung.
+
+Viele Grüße
+{{ betreiber }}

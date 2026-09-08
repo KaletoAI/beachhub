@@ -1,0 +1,12 @@
+Hallo {{ d.kunde.name }},
+
+Ihre Dauerbuchung wurde angelegt:
+Feld {{ d.feld.name }}, jeden {{ wochentage[d.wochentag] }} {{ d.start|uhrzeit }} bis {{ d.ende|uhrzeit }} Uhr
+Zeitraum: {{ d.gueltig_von|datum }} bis {{ d.gueltig_bis|datum }}
+Anzahl Termine: {{ d.buchungen|length }}
+
+Ihr Zahlencode für die Tür: {{ pin }}
+Er gilt jeweils ab 15 Minuten vor Beginn bis zum Ende des Termins.
+
+Viele Grüße
+{{ betreiber }}

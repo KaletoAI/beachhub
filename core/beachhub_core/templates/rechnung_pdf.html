@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<style>
+@page { size: A4; margin: 20mm; @bottom-center { content: "Seite " counter(page) " von " counter(pages); font-size: 9pt; color:#666; } }
+body { font: 10.5pt/1.45 "DejaVu Sans", sans-serif; color:#1f2933; }
+.kopf { display:flex; justify-content:space-between; margin-bottom: 18mm; }
+.absender { font-size: 8pt; color:#666; border-bottom: .5pt solid #999; display:inline-block; margin-bottom: 4pt; }
+h1 { font-size: 16pt; margin: 0 0 4pt 0; }
+table { width:100%; border-collapse: collapse; margin: 8pt 0; }
+th, td { padding: 4pt 6pt; border-bottom: .5pt solid #ccc; text-align:left; vertical-align: top; }
+td.r, th.r { text-align: right; }
+.summe td { border: 0; } .summe .gesamt td { font-weight: bold; border-top: 1pt solid #333; }
+.fuss { position: fixed; bottom: 0; font-size: 8pt; color:#666; }
+</style></head><body>
+<div class="kopf">
+  <div>
+    <div class="absender">{{ betreiber.name }} · {{ betreiber.adresse }}</div><br>
+    {{ r.adresse_snapshot.name }}<br>{{ r.adresse_snapshot.strasse }}<br>{{ r.adresse_snapshot.plz }} {{ r.adresse_snapshot.ort }}
+  </div>
+  <div>
+    <strong>{{ betreiber.name }}</strong><br>{{ betreiber.adresse }}<br>USt-IdNr. {{ betreiber.ust_id }}
+  </div>
+</div>
+<h1>{% if r.art == "storno" %}Stornorechnung{% else %}Rechnung{% endif %} {{ r.nummer }}</h1>
+<p>Rechnungsdatum: {{ r.datum|datum }} · Leistungszeitraum: {{ r.leistung_von|datum }}{% if r.leistung_bis != r.leistung_von %} – {{ r.leistung_bis|datum }}{% endif %}
+{% if r.status == "offen" %}· Zahlbar bis {{ r.faellig_am|datum }}{% endif %}</p>
+<table>
+  <thead><tr><th>Pos.</th><th>Leistung</th><th class="r">Betrag</th></tr></thead>
+  <tbody>{% for p in r.positionen %}<tr><td>{{ p.reihenfolge }}</td><td>{{ p.text }}</td><td class="r">{{ p.brutto|euro }}</td></tr>{% endfor %}</tbody>
+</table>
+<table class="summe">
+  <tr><td></td><td class="r">Nettobetrag</td><td class="r">{{ r.netto|euro }}</td></tr>
+  <tr><td></td><td class="r">zzgl. {{ r.ust_satz|int }} % USt</td><td class="r">{{ r.ust|euro }}</td></tr>
+  <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
+</table>
+{% if r.art == "storno" %}<p>Diese Stornorechnung hebt die ursprüngliche Rechnung auf.</p>
+{% elif r.status == "bezahlt" %}<p>Der Betrag wurde bereits bezahlt. Vielen Dank.</p>
+{% else %}<p>Bitte überweisen Sie den Gesamtbetrag bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer auf:<br>{{ betreiber.bank }}</p>{% endif %}
+<div class="fuss">{{ betreiber.name }} · {{ betreiber.adresse }} · USt-IdNr. {{ betreiber.ust_id }}</div>
+</body></html>

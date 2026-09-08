@@ -24,7 +24,7 @@ os.environ["ENABLE_SCHEDULER"] = "false"
 
 import pyotp  # noqa: E402
 import pytest  # noqa: E402
-from beachhub_core import auth  # noqa: E402
+from beachhub_core import auth, mail  # noqa: E402
 from beachhub_core.database import SessionLocal, engine, stelle_extensions_sicher  # noqa: E402
 from beachhub_core.main import app  # noqa: E402
 from beachhub_core.models import AdminUser, Base  # noqa: E402
@@ -48,6 +48,13 @@ def frisches_schema() -> Iterator[None]:
 @pytest.fixture(autouse=True)
 def _rate_limits_leeren() -> None:
     auth.reset_rate_limits()
+
+
+@pytest.fixture(autouse=True)
+def mail_ausgang(monkeypatch: pytest.MonkeyPatch) -> Iterator[list]:
+    ausgang: list = []
+    monkeypatch.setattr(mail, "TEST_AUSGANG", ausgang)
+    yield ausgang
 
 
 @pytest.fixture
