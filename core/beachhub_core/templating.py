@@ -1,8 +1,9 @@
 from datetime import date, datetime, time
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 from typing import Any
 
+import jinja2
 from beachhub_shared.zeit import lokal
 from fastapi import Request
 from fastapi.responses import HTMLResponse
@@ -13,6 +14,11 @@ from beachhub_core.config import settings
 from beachhub_core.models import AdminUser
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
+# Nur .html/.htm automatisch escapen – die reinen Text-Mailvorlagen (.txt) sollen Sonderzeichen
+# wie "&" oder Anführungszeichen unverändert ausgeben.
+templates.env.autoescape = jinja2.select_autoescape(
+    enabled_extensions=("html", "htm"), default_for_string=False, default=False
+)
 _WT = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
 _flash = URLSafeTimedSerializer(settings.secret_key, salt="flash")
 
@@ -38,8 +44,16 @@ def f_uhrzeit(v: time | datetime) -> str:
     return (lokal(v) if isinstance(v, datetime) else v).strftime("%H:%M")
 
 
+def prozent(v: Decimal) -> str:
+    """Decimal("19.00") -> "19 %", Decimal("7.50") -> "7,5 %" (ohne unnötige Nullen)."""
+    text = format(v.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP).normalize(), "f")
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return f"{text.replace('.', ',')} %"
+
+
 templates.env.filters.update(
-    {"euro": euro, "lokal": f_lokal, "datum": f_datum, "uhrzeit": f_uhrzeit}
+    {"euro": euro, "lokal": f_lokal, "datum": f_datum, "uhrzeit": f_uhrzeit, "prozent": prozent}
 )
 templates.env.globals["wochentage"] = _WT
 

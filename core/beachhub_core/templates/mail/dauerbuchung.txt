@@ -6,7 +6,7 @@ Zeitraum: {{ d.gueltig_von|datum }} bis {{ d.gueltig_bis|datum }}
 Anzahl Termine: {{ d.buchungen|length }}
 
 Ihr Zahlencode für die Tür: {{ pin }}
-Er gilt jeweils ab 15 Minuten vor Beginn bis zum Ende des Termins.
+Er gilt jeweils ab {{ vorlauf }} Minuten vor Beginn bis zum Ende des Termins.
 
 Viele Grüße
 {{ betreiber }}

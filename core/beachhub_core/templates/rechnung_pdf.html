@@ -29,7 +29,7 @@ td.r, th.r { text-align: right; }
 </table>
 <table class="summe">
   <tr><td></td><td class="r">Nettobetrag</td><td class="r">{{ r.netto|euro }}</td></tr>
-  <tr><td></td><td class="r">zzgl. {{ r.ust_satz|int }} % USt</td><td class="r">{{ r.ust|euro }}</td></tr>
+  <tr><td></td><td class="r">zzgl. {{ r.ust_satz|prozent }} USt</td><td class="r">{{ r.ust|euro }}</td></tr>
   <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
 </table>
 {% if r.art == "storno" %}<p>Diese Stornorechnung hebt die ursprüngliche Rechnung auf.</p>

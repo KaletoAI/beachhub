@@ -1,14 +1,27 @@
+import shutil
 from datetime import date, time
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
 from beachhub_core import clock
+from beachhub_core.config import settings
 from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Tarif
 from beachhub_core.services import buchungen, kunden, rechnung_pdf, rechnungen
 from beachhub_shared.zeit import kombiniere
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
+
+
+@pytest.fixture(autouse=True)
+def _rechnungsordner_leeren() -> None:
+    # data_dir ist über die ganze Testsession hinweg derselbe Temp-Ordner (siehe conftest.py),
+    # die DB wird aber pro Test neu aufgesetzt. Ohne das hier würde eine frühere Rechnung mit
+    # derselben Nummer (gleiches Jahr, Nummernkreis bei 1) der exklusiven Dateierstellung
+    # in rechnung_pdf.erzeuge in die Quere kommen.
+    ordner = settings.data_dir / "rechnungen"
+    if ordner.exists():
+        shutil.rmtree(ordner)
 
 
 @pytest.fixture
@@ -52,3 +65,20 @@ def test_pdf_wird_erzeugt_und_gehasht(db: Session, rechnung) -> None:
     assert rechnung_pdf.pruefe_integritaet(rechnung)
     with pytest.raises(rechnungen.RechnungsFehler, match="pdf_vorhanden"):
         rechnung_pdf.erzeuge(db, rechnung)
+
+
+def test_pdf_datei_wird_nie_ueberschrieben(db: Session, rechnung) -> None:
+    ordner = settings.data_dir / "rechnungen"
+    ordner.mkdir(parents=True, exist_ok=True)
+    pfad = ordner / f"{rechnung.nummer}.pdf"
+    pfad.write_bytes(b"schon-da")
+    with pytest.raises(rechnungen.RechnungsFehler, match="pdf_vorhanden"):
+        rechnung_pdf.erzeuge(db, rechnung)
+    assert pfad.read_bytes() == b"schon-da"
+
+
+def test_pruefe_integritaet_fehlt_datei(db: Session, rechnung) -> None:
+    pfad = rechnung_pdf.erzeuge(db, rechnung)
+    db.commit()
+    Path(pfad).unlink()
+    assert rechnung_pdf.pruefe_integritaet(rechnung) is False

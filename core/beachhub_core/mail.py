@@ -32,6 +32,14 @@ async def _senden(m: EmailMessage) -> None:
     )
 
 
+def _sende_und_logge(m: EmailMessage, an: str) -> None:
+    """Mailversand darf einen Buchungs-/Rechnungsvorgang nie zum Absturz bringen."""
+    try:
+        asyncio.run(_senden(m))
+    except Exception:  # noqa: BLE001 -- Mailversand darf aufrufende Abläufe nie stören
+        logger.exception("Mailversand an %s fehlgeschlagen", an)
+
+
 def sende(
     an: str, betreff: str, text: str, anhaenge: list[tuple[str, bytes]] | None = None
 ) -> None:
@@ -48,6 +56,6 @@ def sende(
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        asyncio.run(_senden(m))
+        _sende_und_logge(m, an)
         return
-    threading.Thread(target=lambda: asyncio.run(_senden(m)), daemon=True).start()
+    threading.Thread(target=_sende_und_logge, args=(m, an), daemon=True).start()
