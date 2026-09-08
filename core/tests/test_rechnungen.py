@@ -205,3 +205,23 @@ def test_setze_bezahlt_und_nicht_offen(db: Session, welt) -> None:
     with pytest.raises(rechnungen.RechnungsFehler, match="nicht_offen"):
         rechnungen.setze_bezahlt(db, r, admin_user_id=None)
     assert db.query(Audit).filter_by(objekt_typ="rechnung", objekt_id=r.id).count() > 0
+
+
+def test_nach_stornorechnung_kann_buchung_neu_berechnet_werden(db: Session, welt) -> None:
+    f, a, _ = welt
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=a.id,
+        beginn=kombiniere(date(2027, 12, 1), time(19)),
+        ende=kombiniere(date(2027, 12, 1), time(20)),
+    )
+    r = rechnungen.erzeuge_einzelrechnung(db, b)
+    db.commit()
+    rechnungen.storniere(db, r, admin_user_id=None, grund="Falscher Preis")
+    db.commit()
+    r2 = rechnungen.erzeuge_einzelrechnung(db, b)
+    db.commit()
+    assert r2.nummer != r.nummer
+    assert b.rechnung_position_id == r2.positionen[0].id
+    assert db.query(Rechnung).count() == 3

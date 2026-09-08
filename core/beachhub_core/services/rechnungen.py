@@ -252,6 +252,7 @@ def storniere(
             b = db.get(Buchung, p.buchung_id)
             if b is not None:
                 b.rechnung_position_id = None
+            p.buchung_id = None
     db.flush()
     audit.protokolliere(
         db,
