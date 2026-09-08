@@ -6,6 +6,7 @@ from beachhub_core import clock
 from beachhub_core.models import (
     Betriebszeit,
     Buchung,
+    Dauerbuchung,
     Feld,
     FeldRaster,
     Kundengruppe,
@@ -124,6 +125,29 @@ def test_anlegen_mit_auslassen_und_gemeinsamer_pin(db: Session, welt) -> None:
     assert pin.entschluessele(dauer.pin_verschluesselt) == pin.entschluessele(
         dauer.buchungen[0].pin_verschluesselt
     )
+
+
+def test_anlegen_ohne_tarif_wirft_und_schreibt_nichts(db: Session, welt) -> None:
+    f, k, _ = welt
+    db.query(Tarif).delete()
+    db.commit()
+    with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match="kein_tarif"):
+        dauerbuchungen.lege_an(
+            db,
+            kunde_id=k.id,
+            feld_id=f.id,
+            wochentag=1,
+            start=time(19),
+            ende=time(21),
+            gueltig_von=date(2027, 12, 1),
+            gueltig_bis=date(2027, 12, 31),
+            admin_user_id=None,
+            auslassen=set(),
+            entscheidungen={},
+        )
+    db.rollback()
+    assert db.query(Dauerbuchung).count() == 0
+    assert db.query(Buchung).count() == 0
 
 
 def test_beenden_storniert_kuenftige(db: Session, welt) -> None:
