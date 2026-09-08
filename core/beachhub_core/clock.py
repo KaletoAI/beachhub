@@ -21,6 +21,8 @@ def now(db: Session) -> datetime:
     if o is None:
         return echt
     lok = echt.astimezone(BERLIN)
+    # An Umstellungstagen (Sommer-/Winterzeit) kann die kombinierte lokale Zeit in die
+    # Zeitspanne der Lücke bzw. Überlappung fallen; zoneinfo löst das mit fold=0 auf.
     return datetime.combine(o, lok.time(), tzinfo=BERLIN).astimezone(UTC)
 
 
