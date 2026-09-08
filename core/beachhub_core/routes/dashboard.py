@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import auth, clock
 from beachhub_core.database import get_db
-from beachhub_core.models import AdminUser, Buchung, Storno
+from beachhub_core.models import AdminUser, Buchung, Rechnung, Storno
 from beachhub_core.templating import render
 
 router = APIRouter()
@@ -40,7 +40,9 @@ def dashboard(
         )
         or 0
     )
-    rechnungen_offen = 0  # Task 15 ersetzt das durch die echte Zählung
+    rechnungen_offen = (
+        db.scalar(select(func.count()).select_from(Rechnung).where(Rechnung.status == "offen")) or 0
+    )
     return render(
         request,
         "dashboard.html",

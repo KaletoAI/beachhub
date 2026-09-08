@@ -1,6 +1,7 @@
 from beachhub_core.models.base import Base, UUIDMixin, ZeitstempelMixin, utcnow
 from beachhub_core.models.buchungen import Buchung, Dauerbuchung, Sperre, Storno
 from beachhub_core.models.kunden import GuthabenBuchung, Kunde
+from beachhub_core.models.rechnungen import Nummernkreis, Rechnung, RechnungPosition
 from beachhub_core.models.stammdaten import (
     Ausnahmetag,
     Betriebszeit,
@@ -35,6 +36,9 @@ __all__ = [
     "Kunde",
     "Kundengruppe",
     "LesestandVersion",
+    "Nummernkreis",
+    "Rechnung",
+    "RechnungPosition",
     "Sperre",
     "Storno",
     "Tarif",

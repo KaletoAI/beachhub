@@ -36,6 +36,10 @@ class Buchung(UUIDMixin, ZeitstempelMixin, Base):
     )
     anfrage_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), unique=True)
     reserviert_bis: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rechnung_position_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("rechnung_position.id", use_alter=True, name="fk_buchung_rechnung_position_id"),
+    )
     anwesenheit: Mapped[str] = mapped_column(String(20), default="unbekannt", nullable=False)
     quelle: Mapped[str] = mapped_column(String(10), nullable=False)  # admin | portal | dauer
 
