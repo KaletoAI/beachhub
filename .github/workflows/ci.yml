@@ -1,0 +1,23 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_USER: beachhub, POSTGRES_PASSWORD: beachhub, POSTGRES_DB: beachhub_test }
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U beachhub" --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
+      - run: pip install -e shared[dev] -e core[dev]
+      - run: ruff check . && ruff format --check .
+      - run: mypy
+      - run: cd shared && pytest -q
+      - run: cd core && pytest -q
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_test

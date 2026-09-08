@@ -3,11 +3,23 @@
 Buchung, Abrechnung und Steuerung einer Beachvolleyballhalle im Winterbetrieb.
 Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`core/`), Hallendienst (`hall/`).
 
-Status: Anforderungs- und Designphase, noch keine Implementierung.
+Status: Stufe 1 (Hauptsystem) in Arbeit. Monorepo-Grundgerüst (`shared/`, `core/`) mit Konfiguration,
+Datenbankanbindung und CI steht.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch): `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
   (Quelle: `docs/betreiber/anforderungen-und-loesungskonzept.html`, erzeugt mit WeasyPrint)
+
+## Entwicklung (core)
+
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate
+pip install -e shared[dev] -e core[dev]
+cp core/.env.example core/.env
+cd core && TEST_DATABASE_URL=postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_test pytest -q
+```
+
+Für PostgreSQL per Docker siehe `core/docker-compose.yml`.
 
 ## Lizenz
 
