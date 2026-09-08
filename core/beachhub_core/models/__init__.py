@@ -7,6 +7,7 @@ from beachhub_core.models.stammdaten import (
     Kundengruppe,
     Tarif,
 )
+from beachhub_core.models.kunden import GuthabenBuchung, Kunde
 from beachhub_core.models.system import (
     AdminUser,
     AppSetting,
@@ -24,7 +25,9 @@ __all__ = [
     "Betriebszeit",
     "Feld",
     "FeldRaster",
+    "GuthabenBuchung",
     "Konfiguration",
+    "Kunde",
     "Kundengruppe",
     "LesestandVersion",
     "Tarif",
