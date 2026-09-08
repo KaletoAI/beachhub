@@ -151,3 +151,48 @@ def test_zu_spaet_und_nicht_aktiv(db: Session, welt) -> None:
     storno.storniere(db, bu, durch="kunde")
     with pytest.raises(storno.StornoFehler, match="nicht_aktiv"):
         storno.storniere(db, bu, durch="kunde")
+
+
+def test_betreiber_darf_laufende_buchung_stornieren(db: Session, welt, monkeypatch) -> None:
+    f, a, _, _ = welt
+    bu = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=a.id,
+        beginn=kombiniere(D, time(9)),
+        ende=kombiniere(D, time(10)),
+    )
+    db.commit()
+    monkeypatch.setattr(storno.clock, "now", lambda db: kombiniere(D, time(9, 30)))
+    s = storno.storniere(db, bu, durch="betreiber", kostenfrei=True, grund="Sperre")
+    db.commit()
+    assert s.kostenfrei and bu.status == "storniert"
+    # Slot ist wieder frei (Storno zählt nicht als aktiv) – neue Buchung im selben Slot,
+    # dazu die Uhr kurz zurückstellen, damit lege_an sie nicht als "vergangenheit" ablehnt.
+    monkeypatch.undo()
+    bu2 = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=a.id,
+        beginn=kombiniere(D, time(9)),
+        ende=kombiniere(D, time(10)),
+    )
+    db.commit()
+    monkeypatch.setattr(storno.clock, "now", lambda db: kombiniere(D, time(9, 30)))
+    with pytest.raises(storno.StornoFehler, match="zu_spaet"):
+        storno.storniere(db, bu2, durch="kunde")
+
+
+def test_beendete_buchung_kann_niemand_stornieren(db: Session, welt, monkeypatch) -> None:
+    f, a, _, _ = welt
+    bu = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=a.id,
+        beginn=kombiniere(D, time(9)),
+        ende=kombiniere(D, time(10)),
+    )
+    db.commit()
+    monkeypatch.setattr(storno.clock, "now", lambda db: kombiniere(D, time(11)))
+    with pytest.raises(storno.StornoFehler, match="zu_spaet"):
+        storno.storniere(db, bu, durch="betreiber", kostenfrei=True, grund="Test")

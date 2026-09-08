@@ -45,7 +45,12 @@ def storniere(
     if not buchung.aktiv:
         raise StornoFehler("nicht_aktiv")
     jetzt = clock.now(db)
-    if buchung.beginn <= jetzt:
+    # A-STORNO-5: Kunden dürfen nur vor Beginn stornieren. Betreiber/System dürfen
+    # auch eine bereits laufende Buchung stornieren (z. B. Notfall-Sperre), aber
+    # niemand eine bereits beendete Buchung.
+    if durch == "kunde" and buchung.beginn <= jetzt:
+        raise StornoFehler("zu_spaet")
+    if buchung.ende <= jetzt:
         raise StornoFehler("zu_spaet")
     war_bezahlt = buchung.status in (
         Buchung.BESTAETIGT,
