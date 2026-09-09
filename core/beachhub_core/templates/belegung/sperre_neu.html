@@ -1,0 +1,40 @@
+{% extends "base.html" %}{% block title %}Sperre anlegen{% endblock %}
+{% block content %}
+<h1>Sperre anlegen</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<form method="post" action="/admin/belegung/sperre">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="karte schmal">
+    <label><input type="checkbox" name="alle_felder" value="1" {% if werte.get("alle_felder") == "1" %}checked{% endif %}> Alle Felder</label>
+    <fieldset>
+      <legend>oder einzelne Felder</legend>
+      {% for f in felder %}
+      <label><input type="checkbox" name="feld_ids" value="{{ f.id }}" {% if werte.get("feld_ids") == f.id|string %}checked{% endif %}> {{ f.name }}</label>
+      {% endfor %}
+    </fieldset>
+    <label>Beginn <input type="datetime-local" name="beginn" value="{{ werte.get('beginn', '') }}" required></label>
+    <label>Ende <input type="datetime-local" name="ende" value="{{ werte.get('ende', '') }}" required></label>
+    <label>Grund <input name="grund" value="{{ werte.get('grund', '') }}"></label>
+  </div>
+
+  {% if betroffen %}
+  <div class="karte">
+    <h2>Betroffene Buchungen</h2>
+    <table>
+      <tr><th>Zeitraum</th><th>Kunde</th><th>Entscheidung</th></tr>
+      {% for b in betroffen %}
+      <tr>
+        <td>{{ b.beginn|lokal }} – {{ b.ende|uhrzeit }}</td>
+        <td>{{ b.kunde.name }}</td>
+        <td>
+          <label><input type="radio" name="entscheidung_{{ b.id }}" value="behalten" required> behalten</label>
+          <label><input type="radio" name="entscheidung_{{ b.id }}" value="stornieren"> stornieren</label>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+  <button>Sperre anlegen</button>
+</form>
+{% endblock %}

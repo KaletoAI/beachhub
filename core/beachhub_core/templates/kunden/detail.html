@@ -55,7 +55,7 @@
       <td>{{ b.feld.name }}</td>
       <td>{{ b.status }}</td>
       <td>{{ b.preis|euro }}</td>
-      <td><a href="/admin/belegung?buchung_id={{ b.id }}">anzeigen</a></td>
+      <td><a href="/admin/belegung/buchung/{{ b.id }}">anzeigen</a></td>
     </tr>{% endfor %}
   </table>
 </div>

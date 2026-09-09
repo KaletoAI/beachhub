@@ -1,0 +1,53 @@
+{% extends "base.html" %}{% block title %}Dauerbuchung anlegen{% endblock %}
+{% block content %}
+<h1>Dauerbuchung anlegen</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<form method="post" action="/admin/belegung/dauer/planen">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="karte schmal">
+    <label>Kunde <select name="kunde_id" required>
+      <option value="">bitte wählen</option>
+      {% for k in kunden %}<option value="{{ k.id }}" {% if werte.get("kunde_id") == k.id|string %}selected{% endif %}>{{ k.name }} ({{ k.email }})</option>{% endfor %}
+    </select></label>
+    <label>Feld <select name="feld_id" required>
+      <option value="">bitte wählen</option>
+      {% for f in felder %}<option value="{{ f.id }}" {% if werte.get("feld_id") == f.id|string %}selected{% endif %}>{{ f.name }}</option>{% endfor %}
+    </select></label>
+    <label>Wochentag <select name="wochentag" required>
+      {% for wt in wochentage %}<option value="{{ loop.index0 }}" {% if werte.get("wochentag") == loop.index0|string %}selected{% endif %}>{{ wt }}</option>{% endfor %}
+    </select></label>
+    <label>Von <input type="time" name="start" value="{{ werte.get('start', '') }}" required></label>
+    <label>Bis <input type="time" name="ende" value="{{ werte.get('ende', '') }}" required></label>
+    <label>Gültig von <input type="date" name="gueltig_von" value="{{ werte.get('gueltig_von', '') }}" required></label>
+    <label>Gültig bis <input type="date" name="gueltig_bis" value="{{ werte.get('gueltig_bis', '') }}" required></label>
+  </div>
+
+  {% if termine is not none %}
+  <div class="karte">
+    <h2>Termine</h2>
+    <table>
+      <tr><th>Auslassen</th><th>Datum</th><th>Preis</th><th>Kollision</th></tr>
+      {% for t in termine %}
+      <tr>
+        <td><label><input type="checkbox" name="auslassen_{{ t.datum.isoformat() }}" value="1"> auslassen</label></td>
+        <td>{{ t.datum|datum }}</td>
+        <td>{{ t.preis|euro if t.preis is not none else "kein Tarif" }}</td>
+        <td>
+          {% for k in t.kollisionen %}
+            {% if k.kunde_id is defined %}
+              <label><input type="radio" name="entscheidung_{{ k.id }}" value="behalten" required> behalten</label>
+              <label><input type="radio" name="entscheidung_{{ k.id }}" value="stornieren"> stornieren</label> ({{ k.kunde.name }})
+            {% else %}
+              gesperrt: {{ k.grund }}
+            {% endif %}
+          {% endfor %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% endif %}
+  <button formaction="/admin/belegung/dauer/planen" formmethod="post">Termine prüfen</button>
+  <button formaction="/admin/belegung/dauer" formmethod="post">Anlegen</button>
+</form>
+{% endblock %}

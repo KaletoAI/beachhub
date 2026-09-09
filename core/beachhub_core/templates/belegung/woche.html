@@ -1,0 +1,48 @@
+{% extends "base.html" %}{% block title %}Belegungsplan{% endblock %}
+{% block content %}
+<h1>Belegungsplan</h1>
+{% if not felder %}
+<p>Kein aktives Feld vorhanden. Bitte zunächst ein Feld in den Stammdaten anlegen.</p>
+{% else %}
+<div class="karte zeile">
+  <form method="get" action="/admin/belegung">
+    <label>Feld <select name="feld" onchange="this.form.submit()">
+      {% for x in felder %}<option value="{{ x.id }}" {% if x.id == feld.id %}selected{% endif %}>{{ x.name }}</option>{% endfor %}
+    </select></label>
+    <input type="hidden" name="woche" value="{{ montag.isoformat() }}">
+    <noscript><button>Anzeigen</button></noscript>
+  </form>
+  <nav>
+    <a href="/admin/belegung?feld={{ feld.id }}&woche={{ vorher.isoformat() }}">« Vorherige Woche</a>
+    <a href="/admin/belegung?feld={{ feld.id }}&woche={{ nachher.isoformat() }}">Nächste Woche »</a>
+  </nav>
+  <a href="/admin/belegung/sperre/neu">Sperre anlegen</a>
+  <a href="/admin/belegung/dauer/neu">Dauerbuchung anlegen</a>
+</div>
+
+<div class="karte">
+  <div class="kalender">
+    {% for tag in tage %}
+    <div class="tag">
+      <div class="kopf">{{ wochentage[loop.index0] }} {{ tag.datum.strftime("%d.%m.") }}</div>
+      {% for z in tag.zellen %}
+        {% if z.art == "frei" %}
+        <a class="zelle frei" href="/admin/belegung/buchung/neu?feld={{ feld.id }}&beginn={{ iso_lokal(z.slot.beginn) }}">{{ z.slot.beginn|uhrzeit }} frei</a>
+        {% elif z.art == "buchung" %}
+        <a class="zelle belegt{% if not z.buchung.aktiv %} storno{% endif %}" href="/admin/belegung/buchung/{{ z.buchung.id }}">{{ z.slot.beginn|uhrzeit }} {{ z.buchung.kunde.name }}</a>
+        {% else %}
+        <div class="zelle sperre">
+          {{ z.slot.beginn|uhrzeit }} {{ z.sperre.grund }}
+          <form method="post" action="/admin/belegung/sperre/{{ z.sperre.id }}/loeschen" class="inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="link" title="Sperre löschen">×</button>
+          </form>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

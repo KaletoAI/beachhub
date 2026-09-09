@@ -1,0 +1,51 @@
+{% extends "base.html" %}{% block title %}Buchung{% endblock %}
+{% block content %}
+<h1>Buchung</h1>
+<p><a href="{{ zurueck }}">« zur Woche</a></p>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<div class="karte">
+  <p>Kunde: <strong>{{ b.kunde.name }}</strong> ({{ b.kunde.email }})</p>
+  <p>Feld: {{ b.feld.name }}</p>
+  <p>Zeitraum: {{ b.beginn|lokal }} – {{ b.ende|uhrzeit }} Uhr</p>
+  <p>Preis: {{ b.preis|euro }}</p>
+  <p>Status: {{ b.status }}</p>
+  <p>Zahlungsart: {{ b.zahlungsart }}</p>
+  {% if pin %}<p>PIN: <strong class="pin-gross">{{ pin }}</strong></p>{% endif %}
+  {% if position %}<p>Rechnung: <a href="/admin/rechnungen/{{ position.rechnung_id }}">{{ position.rechnung.nummer }}</a></p>{% endif %}
+</div>
+
+{% if b.storno %}
+<div class="karte">
+  <h2>Storno</h2>
+  <p>Zeitpunkt: {{ b.storno.zeitpunkt|lokal }}</p>
+  <p>Durch: {{ b.storno.durch }}</p>
+  <p>Grund: {{ b.storno.grund }}</p>
+  <p>Kostenfrei: {{ "ja" if b.storno.kostenfrei else "nein" }}</p>
+  <p>Freigestellter Betrag: {{ b.storno.freigestellt_betrag|euro }}</p>
+  <p>Nachbuchung offen: {{ "ja" if b.storno.nachbuchung_offen else "nein" }}</p>
+  {% if b.storno.nachbuchung_offen %}
+  <form method="post" action="/admin/belegung/buchung/{{ b.id }}/kulanz" class="karte schmal">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Kulanzgrund <input name="grund" required></label>
+    <button>Kulanz gewähren</button>
+  </form>
+  {% endif %}
+</div>
+{% elif b.aktiv %}
+<div class="karte schmal">
+  <h2>Stornieren</h2>
+  <form method="post" action="/admin/belegung/buchung/{{ b.id }}/storno">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Grund <input name="grund"></label>
+    <label>Kostenfrei
+      <select name="kostenfrei">
+        <option value="auto">automatisch (nach Frist)</option>
+        <option value="ja">ja</option>
+        <option value="nein">nein</option>
+      </select>
+    </label>
+    <button class="gefahr">Stornieren</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

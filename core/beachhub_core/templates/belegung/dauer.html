@@ -1,0 +1,36 @@
+{% extends "base.html" %}{% block title %}Dauerbuchung{% endblock %}
+{% block content %}
+<h1>Dauerbuchung: {{ d.kunde.name }} · {{ d.feld.name }}</h1>
+<div class="karte">
+  <p>Wochentag: {{ wochentage[d.wochentag] }}</p>
+  <p>Zeit: {{ d.start|uhrzeit }} – {{ d.ende|uhrzeit }} Uhr</p>
+  <p>Gültig: {{ d.gueltig_von|datum }} – {{ d.gueltig_bis|datum }}</p>
+  <p>PIN: <strong class="pin-gross">{{ pin }}</strong></p>
+  {% if d.beendet_am %}<p>Beendet ab {{ d.beendet_ab|datum }}</p>{% endif %}
+</div>
+
+<div class="karte">
+  <h2>Termine</h2>
+  <table>
+    <tr><th>Datum</th><th>Status</th><th></th></tr>
+    {% for b in d.buchungen %}
+    <tr>
+      <td>{{ b.beginn|lokal }}</td>
+      <td>{{ b.status }}</td>
+      <td><a href="/admin/belegung/buchung/{{ b.id }}">anzeigen</a></td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+
+{% if not d.beendet_am %}
+<div class="karte schmal">
+  <h2>Beenden</h2>
+  <form method="post" action="/admin/belegung/dauer/{{ d.id }}/beenden">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Beenden ab <input type="date" name="ab" required></label>
+    <button class="gefahr">Beenden</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

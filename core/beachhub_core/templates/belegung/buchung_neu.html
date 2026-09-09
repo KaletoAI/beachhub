@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block title %}Neue Buchung{% endblock %}
+{% block content %}
+<h1>Neue Buchung</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+{% if feld is none %}
+<p>Feld nicht gefunden.</p>
+{% else %}
+<div class="karte schmal">
+<form method="post" action="/admin/belegung/buchung">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="feld_id" value="{{ feld.id }}">
+  <input type="hidden" name="beginn" value="{{ beginn_roh }}">
+  <label>Feld <input value="{{ feld.name }}" readonly></label>
+  <label>Beginn <input value="{{ beginn|lokal }}" readonly></label>
+  <label>Ende <select name="ende" required>
+    {% for e in enden %}<option value="{{ iso_lokal(e) }}">{{ e|uhrzeit }}</option>{% endfor %}
+  </select></label>
+  <label>Kunde <select name="kunde_id" required>
+    <option value="">bitte wählen</option>
+    {% for k in kunden %}<option value="{{ k.id }}">{{ k.name }} ({{ k.email }})</option>{% endfor %}
+  </select></label>
+  <button>Buchen</button>
+</form>
+</div>
+{% endif %}
+{% endblock %}
