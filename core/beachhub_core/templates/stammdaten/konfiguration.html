@@ -1,5 +1,6 @@
 {% extends "base.html" %}{% block title %}Konfiguration{% endblock %}
 {% block content %}
+{% include "stammdaten/_nav.html" %}
 <h1>Konfiguration</h1>
 {% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
 <form method="post" action="/admin/konfiguration" class="karte schmal">

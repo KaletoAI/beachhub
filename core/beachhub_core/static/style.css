@@ -35,3 +35,7 @@ th, td { text-align:left; padding:.45rem .6rem; border-bottom:1px solid var(--ra
 .zeile { display:flex; gap:1rem; flex-wrap:wrap; } .zeile > * { flex:1; min-width:160px; }
 .rechts { text-align:right; }
 .badge { display:inline-block; padding:.1rem .5rem; border-radius:999px; font-size:.8rem; border:1px solid var(--rand); }
+.unternav { display:flex; gap:.25rem 1rem; flex-wrap:wrap; margin:-.25rem 0 1rem; font-size:.95rem; }
+.unternav a { color:var(--akzent); text-decoration:none; padding:.2rem 0; border-bottom:2px solid transparent; }
+.unternav a:hover { border-bottom-color:var(--akzent); }
+.small { font-size:.9rem; color:var(--fg); opacity:.8; }

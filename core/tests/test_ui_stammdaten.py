@@ -226,3 +226,26 @@ def test_lesende_rolle_bekommt_403(client: TestClient, db: Session) -> None:
     assert client.get("/admin/felder").status_code == 200
     r = client.post("/admin/felder", data={"csrf_token": "x", "name": "F", "reihenfolge": "1"})
     assert r.status_code == 403
+
+
+STAMMDATEN_SEITEN = [
+    "/admin/felder",
+    "/admin/betriebszeiten",
+    "/admin/ausnahmetage",
+    "/admin/kundengruppen",
+    "/admin/tarife",
+    "/admin/konfiguration",
+]
+
+
+def test_stammdaten_unternavigation_auf_jeder_seite(eingeloggt: TestClient) -> None:
+    for seite in STAMMDATEN_SEITEN:
+        text = eingeloggt.get(seite).text
+        for ziel in STAMMDATEN_SEITEN:
+            assert f'href="{ziel}"' in text, f"{seite} verlinkt {ziel} nicht"
+
+
+def test_kundenseite_verweist_ohne_gruppen_auf_kundengruppen(eingeloggt: TestClient) -> None:
+    text = eingeloggt.get("/admin/kunden").text
+    assert 'href="/admin/kundengruppen"' in text
+    assert "Kundengruppe" in text
