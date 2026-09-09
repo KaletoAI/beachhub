@@ -3,23 +3,26 @@
 Buchung, Abrechnung und Steuerung einer Beachvolleyballhalle im Winterbetrieb.
 Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`core/`), Hallendienst (`hall/`).
 
-Status: Stufe 1 (Hauptsystem) in Arbeit. Monorepo-Grundgerüst (`shared/`, `core/`) mit Konfiguration,
-Datenbankanbindung und CI steht.
+Status: Stufe 1 (Hauptsystem) fertig implementiert. Buchung, Tarife, Sperren, Stornos, Monatslauf
+mit Sammelrechnungen und signiertem Lesestand laufen im Admin-UI (`core/`); Betrieb hinter
+WireGuard mit Caddy ist dokumentiert (`docs/betrieb/hauptsystem.md`). Stufe 2 (Portal) und Stufe 3
+(Halle) folgen.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch): `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
   (Quelle: `docs/betreiber/anforderungen-und-loesungskonzept.html`, erzeugt mit WeasyPrint)
+- Betriebshandbuch (Inbetriebnahme, Backup, WireGuard): `docs/betrieb/hauptsystem.md`
+- Entwickler-Kurzstart: `core/README.md`
 
-## Entwicklung (core)
+## Entwicklung
 
 ```bash
-python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e shared[dev] -e core[dev]
-cp core/.env.example core/.env
-cd core && TEST_DATABASE_URL=postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_test pytest -q
+docker compose -f core/docker-compose.yml up -d db
+cd core && pytest
 ```
 
-Für PostgreSQL per Docker siehe `core/docker-compose.yml`.
+Details (venv, `.env`, Migrationen, CLI) siehe `core/README.md`.
 
 ## Lizenz
 

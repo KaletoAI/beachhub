@@ -15,5 +15,11 @@ services:
     depends_on: [db]
     ports: ["127.0.0.1:8000:8000"]
     volumes: ["./data:/app/data"]
+  caddy:
+    image: caddy:2
+    network_mode: host
+    volumes: ["./deploy/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data"]
+    depends_on: [app]
 volumes:
   pgdata: {}
+  caddy_data: {}
