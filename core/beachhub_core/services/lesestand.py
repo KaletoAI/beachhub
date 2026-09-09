@@ -1,3 +1,4 @@
+import logging
 import os
 import uuid
 from datetime import timedelta
@@ -26,15 +27,18 @@ from beachhub_core.models import (
 )
 from beachhub_core.services import konfiguration, pin
 
+logger = logging.getLogger(__name__)
+
 
 def erzeuge_schluessel() -> str:
     pfad = settings.signatur_privatschluessel_pfad
-    if pfad.exists():
-        raise FileExistsError(str(pfad))
     priv, pub = signatur.erzeuge_schluesselpaar()
     pfad.parent.mkdir(parents=True, exist_ok=True)
-    pfad.write_text(priv + "\n", encoding="utf-8")
-    os.chmod(pfad, 0o600)
+    # O_EXCL sorgt für ein atomares "nur anlegen, wenn noch nicht vorhanden" inklusive
+    # FileExistsError, ohne die Lücke zwischen exists()-Prüfung und write.
+    fd = os.open(pfad, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(priv + "\n")
     return pub
 
 
@@ -228,7 +232,10 @@ def publiziere(db: Session, name: str) -> schema.Dokument:
     dok = entwurf.model_copy(update={"signatur": sig})
     ordner = settings.data_dir / "lesestand"
     ordner.mkdir(parents=True, exist_ok=True)
-    (ordner / f"{name.replace(':', '_')}.json").write_text(dok.model_dump_json(), encoding="utf-8")
+    pfad = ordner / f"{name.replace(':', '_')}.json"
+    tmp = pfad.with_suffix(".json.tmp")
+    tmp.write_text(dok.model_dump_json(), encoding="utf-8")
+    os.replace(tmp, pfad)  # atomar: Version im Dateiinhalt und die Datei selbst bleiben in Sync
     db.flush()
     return dok
 
@@ -250,15 +257,27 @@ def verarbeite_geaenderte(db: Session) -> list[str]:
             select(LesestandVersion).where(LesestandVersion.geaendert.is_(True))
         ).all()
     ]
+    veroeffentlicht: list[str] = []
     for name in namen:
         try:
             publiziere(db, name)
-        except KeyError:
+            db.commit()
+            veroeffentlicht.append(name)
+        except (KeyError, ValueError):
+            # z. B. anonymisierter/gelöschter Kunde oder ein nicht (mehr) gültiger Name
+            # (ungültige UUID) – wie einen unbekannten Namen behandeln und die Markierung
+            # entfernen, statt sie endlos erneut zu versuchen.
+            db.rollback()
             zeile = db.get(LesestandVersion, name)
             if zeile is not None:
-                db.delete(zeile)  # z. B. anonymisierter/gelöschter Kunde
-    db.commit()
-    return namen
+                db.delete(zeile)
+            db.commit()
+        except Exception:
+            # Ein einzelnes fehlerhaftes Dokument (z. B. Datei-/Signaturfehler) darf die
+            # übrigen nicht blockieren; Markierung bleibt bestehen für den nächsten Lauf.
+            db.rollback()
+            logger.exception("Lesestand-Dokument %s konnte nicht erzeugt werden", name)
+    return veroeffentlicht
 
 
 def lade(name: str) -> schema.Dokument | None:

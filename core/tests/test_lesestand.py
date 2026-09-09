@@ -124,3 +124,11 @@ def test_aenderungen_markieren_und_verarbeiten(db: Session, welt) -> None:
     storno.storniere(db, bu, durch="kunde")
     db.commit()
     assert db.query(LesestandVersion).filter_by(geaendert=True).count() == 2
+
+
+def test_verarbeite_geaenderte_ueberspringt_fehlerhaftes_dokument(db: Session, welt) -> None:
+    lesestand.markiere_geaendert(db, "konto:not-a-uuid", "belegung")
+    db.commit()
+    assert lesestand.verarbeite_geaenderte(db) == ["belegung"]
+    assert Path(settings.data_dir, "lesestand", "belegung.json").exists()
+    assert db.get(LesestandVersion, "konto:not-a-uuid") is None

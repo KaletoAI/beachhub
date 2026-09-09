@@ -91,6 +91,7 @@ def audit_liste(
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    seite = max(seite, 1)
     stmt = select(Audit).order_by(Audit.zeitpunkt.desc())
     if typ:
         stmt = stmt.where(Audit.objekt_typ == typ)
