@@ -94,3 +94,17 @@ def test_rechnungen_detail_zeigt_positionen_und_integritaet(
     assert "TSV" in seite.text
     assert "F1" in seite.text
     assert "PDF unverändert" in seite.text
+
+
+def test_monatslauf_ungueltiger_monat_zeigt_meldung(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    r = c.post(
+        "/admin/rechnungen/monatslauf",
+        data={"csrf_token": c.csrf, "jahr": "2027", "monat": "13"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert "bh_flash" in r.cookies
+    seite = c.get(r.headers["location"])
+    assert "Monat muss zwischen 1 und 12" in seite.text
+    assert db.query(Rechnung).count() == 0

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from beachhub_core import auth
 from beachhub_core.database import get_db
 from beachhub_core.models import AdminUser, Kunde, Rechnung
-from beachhub_core.routes._form import fehlertext, t_datum
+from beachhub_core.routes._form import fehlertext, pflicht, t_datum, t_int
 from beachhub_core.services import benachrichtigung, rechnung_pdf, rechnungen
 from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_core.templating import mit_flash, render
@@ -24,6 +24,13 @@ GRUND = {
 }
 
 
+def _datum_oder_none(v: str) -> date | None:
+    try:
+        return t_datum(v)
+    except ValueError:
+        return None
+
+
 @router.get("/rechnungen", response_class=HTMLResponse)
 def liste(
     request: Request,
@@ -34,13 +41,14 @@ def liste(
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    von_d, bis_d = _datum_oder_none(von), _datum_oder_none(bis)
     stmt = select(Rechnung).join(Kunde).order_by(Rechnung.nummer.desc())
     if status:
         stmt = stmt.where(Rechnung.status == status)
-    if t_datum(von):
-        stmt = stmt.where(Rechnung.datum >= t_datum(von))
-    if t_datum(bis):
-        stmt = stmt.where(Rechnung.datum <= t_datum(bis))
+    if von_d:
+        stmt = stmt.where(Rechnung.datum >= von_d)
+    if bis_d:
+        stmt = stmt.where(Rechnung.datum <= bis_d)
     if q:
         stmt = stmt.where(Kunde.name.ilike(f"%{q}%"))
     return render(
@@ -62,7 +70,7 @@ def export(
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> Response:
-    v, b = t_datum(von) or date(2000, 1, 1), t_datum(bis) or date(2100, 1, 1)
+    v, b = _datum_oder_none(von) or date(2000, 1, 1), _datum_oder_none(bis) or date(2100, 1, 1)
     return Response(
         rechnungen.csv_export(db, v, b),
         media_type="text/csv; charset=utf-8",
@@ -103,8 +111,18 @@ def pdf(
             RedirectResponse("/admin/rechnungen", status_code=303), "Nicht gefunden", "fehler"
         )
     if not r.pdf_pfad:
-        rechnung_pdf.erzeuge(db, r)
-        db.commit()
+        try:
+            rechnung_pdf.erzeuge(db, r)
+            db.commit()
+        except RechnungsFehler as e:
+            db.rollback()
+            db.refresh(r)
+            if not r.pdf_pfad:
+                return mit_flash(
+                    RedirectResponse(f"/admin/rechnungen/{r.id}", status_code=303),
+                    fehlertext(e, GRUND),
+                    "fehler",
+                )
     return FileResponse(r.pdf_pfad, media_type="application/pdf", filename=f"{r.nummer}.pdf")  # type: ignore[arg-type]
 
 
@@ -172,7 +190,13 @@ def monatslauf(
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
     try:
-        erzeugt = rechnungen.monatslauf(db, int(jahr), int(monat))
+        j = pflicht(t_int(jahr), "Jahr")
+        m = pflicht(t_int(monat), "Monat")
+        if not (1 <= m <= 12):
+            raise ValueError("Monat muss zwischen 1 und 12 liegen")
+        if not (2000 <= j <= 2100):
+            raise ValueError("Jahr ungültig")
+        erzeugt = rechnungen.monatslauf(db, j, m)
         for r in erzeugt:
             rechnung_pdf.erzeuge(db, r)
         db.commit()
