@@ -1,0 +1,18 @@
+{% extends "base.html" %}{% block title %}Offene Stornos{% endblock %}
+{% block content %}
+<h1>Offene Stornos (Nachbuchung möglich)</h1>
+<div class="karte">
+<table>
+  <tr><th>Buchung</th><th>Kunde</th><th>Zeitraum</th><th class="rechts">Preis</th><th class="rechts">Freigestellt</th><th></th></tr>
+  {% for s in stornos %}<tr>
+    <td>{{ s.buchung.feld.name }}</td>
+    <td>{{ s.buchung.kunde.name }}</td>
+    <td>{{ s.buchung.beginn|lokal }} – {{ s.buchung.ende|uhrzeit }}</td>
+    <td class="rechts">{{ s.buchung.preis|euro }}</td>
+    <td class="rechts">{{ s.freigestellt_betrag|euro }}</td>
+    <td><a href="/admin/belegung/buchung/{{ s.buchung_id }}">öffnen</a></td>
+  </tr>{% endfor %}
+</table>
+{% if not stornos %}<p>Keine offenen Stornos.</p>{% endif %}
+</div>
+{% endblock %}

@@ -131,6 +131,9 @@ def pruefe_nachbuchung(db: Session, neue: Buchung) -> None:
             vorher=vorher,
             nachher=audit.als_dict(s),
         )
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_geaendert(db, f"konto:{alt.kunde_id}")
 
 
 def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: str) -> None:
@@ -151,6 +154,9 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
         nachher=audit.als_dict(s),
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, f"konto:{s.buchung.kunde_id}")
 
 
 # Verdrahtung der Hooks aus Task 8/9 – einmalig beim Import

@@ -11,7 +11,15 @@ from starlette.requests import Request
 
 from beachhub_core.auth import verify_csrf
 from beachhub_core.config import settings
-from beachhub_core.routes import admin_auth, belegung, dashboard, kunden, rechnungen, stammdaten
+from beachhub_core.routes import (
+    admin_auth,
+    belegung,
+    dashboard,
+    kunden,
+    rechnungen,
+    stammdaten,
+    system,
+)
 from beachhub_core.services import storno as _storno  # noqa: F401 – verdrahtet Hooks beim Start
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -67,6 +75,7 @@ app.include_router(stammdaten.router, prefix="/admin", dependencies=csrf)
 app.include_router(kunden.router, prefix="/admin", dependencies=csrf)
 app.include_router(belegung.router, prefix="/admin", dependencies=csrf)
 app.include_router(rechnungen.router, prefix="/admin", dependencies=csrf)
+app.include_router(system.router, prefix="/admin", dependencies=csrf)
 
 
 @app.exception_handler(HTTPException)

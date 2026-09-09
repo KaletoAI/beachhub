@@ -60,3 +60,7 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         nachher={"wert": neu, "schluessel": schluessel},
         admin_user_id=admin_user_id,
     )
+    if schluessel in ("fenster_tage", "mindestvorlauf_minuten"):
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_geaendert(db, "belegung")

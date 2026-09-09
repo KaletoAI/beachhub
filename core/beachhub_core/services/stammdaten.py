@@ -15,6 +15,24 @@ class StammdatenFehler(Exception):  # noqa: N818
     pass
 
 
+# Betroffenes Lesestand-Dokument je Objekttyp (Kundengruppen gehen in keins ein).
+_LESESTAND_DOKUMENT = {
+    "feld": "belegung",
+    "feld_raster": "belegung",
+    "betriebszeit": "belegung",
+    "ausnahmetag": "belegung",
+    "tarif": "tarife",
+}
+
+
+def _markiere_lesestand(db: Session, typ: str) -> None:
+    dokument = _LESESTAND_DOKUMENT.get(typ)
+    if dokument:
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_geaendert(db, dokument)
+
+
 def _pruefe_zeiten(oeffnet: time, schliesst: time) -> None:
     if schliesst != time(0, 0) and schliesst <= oeffnet:
         raise StammdatenFehler("Schließzeit muss nach der Öffnungszeit liegen")
@@ -43,6 +61,7 @@ def _anlegen(db: Session, typ: str, obj: T, admin_user_id: uuid.UUID | None) -> 
     db.add(obj)
     db.flush()
     _log(db, typ, obj, None, admin_user_id)
+    _markiere_lesestand(db, typ)
     return obj
 
 
@@ -52,6 +71,7 @@ def _aendern(db: Session, typ: str, obj: T, admin_user_id: uuid.UUID | None, **f
         setattr(obj, k, v)
     db.flush()
     _log(db, typ, obj, vorher, admin_user_id)
+    _markiere_lesestand(db, typ)
     return obj
 
 
@@ -59,6 +79,7 @@ def _loeschen(db: Session, typ: str, obj: Any, admin_user_id: uuid.UUID | None) 
     _log(db, typ, obj, audit.als_dict(obj), admin_user_id, geloescht=True)
     db.delete(obj)
     db.flush()
+    _markiere_lesestand(db, typ)
 
 
 def feld_anlegen(

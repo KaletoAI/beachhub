@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}System{% endblock %}
+{% block content %}
+<h1>System</h1>
+
+<div class="karte schmal">
+  <h2>Signaturschlüssel</h2>
+  {% if schluessel %}
+  <p>Öffentlicher Schlüssel (für das Portal): <code>{{ schluessel }}</code></p>
+  {% else %}
+  <p class="fehler">Schlüssel fehlt: <code>beachhub-core keygen</code> ausführen</p>
+  {% endif %}
+</div>
+
+<div class="karte schmal">
+  <h2>Uhr</h2>
+  <p>Aktuelles Datum: {{ heute|datum }}{% if override %} (überschrieben){% endif %}</p>
+  <form method="post" action="/admin/system/uhr" class="zeile">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Datum überschreiben <input type="date" name="datum" value="{{ override.isoformat() if override else '' }}"></label>
+    <button>Setzen</button>
+  </form>
+  <form method="post" action="/admin/system/uhr">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="datum" value="">
+    <button type="submit">Uhr zurücksetzen (Leeren)</button>
+  </form>
+</div>
+
+<div class="karte">
+  <h2>Lesestand</h2>
+  <table>
+    <tr><th>Dokument</th><th>Version</th><th>Signiert am</th><th>Geändert</th></tr>
+    {% for v in versionen %}<tr>
+      <td>{{ v.dokument }}</td>
+      <td>{{ v.version }}</td>
+      <td>{{ v.signiert_am|lokal if v.signiert_am else "–" }}</td>
+      <td>{{ "ja" if v.geaendert else "nein" }}</td>
+    </tr>{% endfor %}
+  </table>
+  <form method="post" action="/admin/system/lesestand">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label><input type="checkbox" name="alle" value="1"> Belegung und Tarife auch ohne Änderung neu erzeugen</label>
+    <button>Lesestand jetzt erzeugen</button>
+  </form>
+</div>
+{% endblock %}

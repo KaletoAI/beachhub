@@ -128,6 +128,9 @@ def lege_an(
         nachher=audit.als_dict(b),
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, "belegung", f"konto:{b.kunde_id}")
     for hook in NACH_ANLAGE:
         hook(db, b)
     return b
@@ -148,3 +151,6 @@ def setze_status(
         nachher=audit.als_dict(buchung),
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, "belegung", f"konto:{buchung.kunde_id}")

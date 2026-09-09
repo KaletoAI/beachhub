@@ -62,6 +62,9 @@ def buche(
         },
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, f"konto:{kunde.id}")
     return b
 
 

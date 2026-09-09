@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block title %}Audit{% endblock %}
+{% block content %}
+<h1>Audit</h1>
+<form method="get" action="/admin/system/audit" class="karte zeile">
+  <label>Typ <select name="typ">
+    <option value="" {% if not typ %}selected{% endif %}>alle</option>
+    {% for t in typen %}<option value="{{ t }}" {% if t == typ %}selected{% endif %}>{{ t }}</option>{% endfor %}
+  </select></label>
+  <button>Filtern</button>
+</form>
+
+<div class="karte">
+<table>
+  <tr><th>Zeitpunkt</th><th>Quelle</th><th>Typ</th><th>Objekt</th><th>Admin</th><th>Vorher</th><th>Nachher</th></tr>
+  {% for e in eintraege %}<tr>
+    <td>{{ e.zeitpunkt|lokal }}</td>
+    <td>{{ e.quelle }}</td>
+    <td>{{ e.objekt_typ }}</td>
+    <td>{{ e.objekt_id or "–" }}</td>
+    <td>{{ admin_namen.get(e.admin_user_id, "–") }}</td>
+    <td>{% if e.vorher_json is none %}–{% else %}<details><summary>anzeigen</summary><pre>{{ e.vorher_json|tojson(indent=2) }}</pre></details>{% endif %}</td>
+    <td>{% if e.nachher_json is none %}–{% else %}<details><summary>anzeigen</summary><pre>{{ e.nachher_json|tojson(indent=2) }}</pre></details>{% endif %}</td>
+  </tr>{% endfor %}
+</table>
+</div>
+
+<p class="zeile">
+  {% if seite > 1 %}<a href="/admin/system/audit?typ={{ typ }}&seite={{ seite - 1 }}">« vorherige Seite</a>{% endif %}
+  {% if eintraege|length == 100 %}<a href="/admin/system/audit?typ={{ typ }}&seite={{ seite + 1 }}">nächste Seite »</a>{% endif %}
+</p>
+{% endblock %}

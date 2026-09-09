@@ -84,6 +84,9 @@ def lege_an(
                 grund=f"Sperre: {grund}",
                 admin_user_id=admin_user_id,
             )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, "belegung")
     return ergebnis
 
 
@@ -99,3 +102,6 @@ def loesche(db: Session, sperre: Sperre, admin_user_id: uuid.UUID | None) -> Non
     )
     db.delete(sperre)
     db.flush()
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, "belegung")

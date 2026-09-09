@@ -117,6 +117,9 @@ def _neue_rechnung(
         vorher=None,
         nachher=audit.als_dict(r),
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, f"konto:{kunde.id}")
     return r
 
 
@@ -224,6 +227,9 @@ def setze_bezahlt(db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID |
         nachher=audit.als_dict(rechnung),
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, f"konto:{rechnung.kunde_id}")
 
 
 def storniere(
@@ -263,6 +269,9 @@ def storniere(
         nachher={**audit.als_dict(rechnung), "grund": grund},
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, f"konto:{rechnung.kunde_id}")
     return s
 
 
