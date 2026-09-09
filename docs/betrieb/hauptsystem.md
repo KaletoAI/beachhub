@@ -18,6 +18,18 @@ administriert. Das Admin-UI ist ausschließlich über WireGuard erreichbar, niem
 - **WireGuard** (`apt install wireguard`) – Konfiguration siehe `core/deploy/wireguard-beispiel.md`.
 - In der Hetzner-Cloud-Firewall darf nach außen nur `51820/udp` (WireGuard) offen sein. Kein Port
   des Hauptsystems (weder `8000` noch `8443`) wird öffentlich freigegeben.
+- **Für unbeaufsichtigte Backups** (Abschnitt 6) einmalig vorbereiten:
+  - Den öffentlichen GPG-Schlüssel des Betreibers auf die VM übertragen und importieren:
+    `gpg --import betreiber.pub`. Das Backup-Skript verschlüsselt mit `--trust-model always`, d. h.
+    GPG verlangt beim Verschlüsseln keine manuelle Vertrauensbestätigung für diesen Schlüssel (kein
+    interaktives „Are you sure you want to use this key?“, das einen Cron-Lauf sonst blockieren
+    würde). Das ersetzt keine Prüfung der Echtheit des Schlüssels – dieser sollte vor dem Import auf
+    einem sicheren Weg (persönlich, Signal, o. ä.) vom Betreiber bestätigt worden sein.
+  - Einen eigenen SSH-Schlüssel für den Backup-Vorgang erzeugen und auf dem Backup-Host hinterlegen:
+    `ssh-keygen -t ed25519 -f ~/.ssh/beachhub-backup` und `ssh-copy-id -i ~/.ssh/beachhub-backup.pub
+    <ziel-user>@<backup-host>`.
+  - Den Host-Key des Backup-Hosts einmalig akzeptieren, damit `scp` im Cron-Lauf nicht auf eine
+    interaktive Bestätigung wartet: `ssh -o StrictHostKeyChecking=accept-new <backup-host> true`.
 
 ## 2. Installation
 
@@ -131,6 +143,14 @@ Verzeichnis `data/` (Rechnungs-PDFs, Lesestand-Exporte, Signaturschlüssel) und 
 `user@backup-host:/srv/beachhub`) und `BACKUP_GPG` (GPG-Key-ID des Betreibers, mit der verschlüsselt
 wird).
 
+Vor der ersten produktiven Nutzung das Skript einmal **manuell** ausführen und die übertragene
+Datei auf dem Backup-Host prüfen, bevor der Cron-Job aktiviert wird:
+
+```bash
+cd /opt/beachhub/core
+BACKUP_ZIEL=user@backup-host:/srv/beachhub BACKUP_GPG=<key-id> ./deploy/backup.sh
+```
+
 Cron-Eintrag für ein tägliches Backup um 03:15 Uhr:
 
 ```
@@ -139,7 +159,14 @@ Cron-Eintrag für ein tägliches Backup um 03:15 Uhr:
 
 ### Wiederherstellung (Restore)
 
-1. Backup-Datei entschlüsseln und entpacken:
+1. App stoppen, damit während des Restores keine neuen Buchungen/Änderungen in die Datenbank
+   geschrieben werden:
+
+   ```bash
+   docker compose stop app
+   ```
+
+2. Backup-Datei entschlüsseln und entpacken:
 
    ```bash
    gpg --decrypt beachhub-<stamp>.tar.gpg > beachhub-<stamp>.tar
@@ -148,21 +175,44 @@ Cron-Eintrag für ein tägliches Backup um 03:15 Uhr:
 
    Das ergibt `db-<stamp>.sql.gz` und `data-<stamp>.tgz`.
 
-2. Datenbank auf einer frischen bzw. geleerten Zieldatenbank einspielen:
+3. Zieldatenbank leeren, bevor der Dump eingespielt wird:
+   - **Frische/leere Zieldatenbank** (z. B. Testlauf, siehe unten): Schritt 4 kann direkt erfolgen.
+   - **Bereits befüllte Zieldatenbank** (echter Wiederherstellungsfall auf derselben VM): entweder
+     den kompletten `db`-Container samt Datenvolumen verwerfen,
+
+     ```bash
+     docker compose down
+     docker volume rm core_pgdata
+     docker compose up -d db
+     ```
+
+     oder bei einer host-installierten PostgreSQL die Datenbank neu anlegen:
+
+     ```bash
+     dropdb -U beachhub beachhub && createdb -U beachhub -O beachhub beachhub
+     ```
+
+     Alternativ kann ein Dump mit `pg_dump --clean` erzeugt werden (im Skript die pg_dump-Zeile
+     entsprechend anpassen); ein damit erzeugter Dump löscht beim Einspielen selbst zuerst die
+     vorhandenen Objekte und ein vorheriges Leeren der Datenbank entfällt.
+
+4. Dump einspielen:
 
    ```bash
    gunzip -c db-<stamp>.sql.gz | docker compose exec -T db psql -U beachhub beachhub
    ```
 
-3. Das Verzeichnis `data/` (Rechnungs-PDFs, `signatur.key`) aus `data-<stamp>.tgz` an die
+5. Das Verzeichnis `data/` (Rechnungs-PDFs, `signatur.key`) aus `data-<stamp>.tgz` an die
    ursprüngliche Stelle zurückkopieren, z. B.:
 
    ```bash
    tar xzf data-<stamp>.tgz -C /opt/beachhub/core
    ```
 
-4. Anwendung neu starten (`docker compose up -d`) und im Admin-UI stichprobenartig prüfen
-   (Belegungsplan, letzte Rechnung, Lesestand-Signatur).
+6. Anwendung neu starten (`docker compose up -d`) und im Admin-UI stichprobenartig prüfen
+   (Belegungsplan, letzte Rechnung, Lesestand-Signatur). Caddy kann in den ersten Sekunden nach
+   `docker compose up -d` mit `502 Bad Gateway` antworten, solange uvicorn im `app`-Container noch
+   hochfährt – das ist normal und verschwindet nach wenigen Sekunden von selbst.
 
 **Vor Saisonstart** sollte ein vollständiger Restore-Testlauf gegen eine separate Testdatenbank
 durchgeführt werden, um sicherzustellen, dass Backup und Wiederherstellung tatsächlich
@@ -184,6 +234,26 @@ Abschnitt 6.
 
 ## 8. Störungen
 
+Die Compose-Services `db`, `app` und `caddy` sind mit `restart: unless-stopped` konfiguriert und
+starten nach einem VM-Reboot oder einem Absturz automatisch neu, sobald der Docker-Daemon läuft.
+
+**Startreihenfolge nach einem Reboot**: Caddy lauscht ausschließlich auf der WireGuard-Adresse
+(`10.8.0.1:8443`, `network_mode: host`). Startet Docker vor WireGuard, versucht Caddy auf eine zu
+diesem Zeitpunkt noch nicht existierende Adresse zu binden und schlägt fehl. Damit
+`wg-quick@wg0` vor Docker aktiv ist, zusätzlich zu `systemctl enable wg-quick@wg0`
+(siehe `core/deploy/wireguard-beispiel.md`) eine systemd-Drop-in-Datei für den Docker-Dienst
+anlegen:
+
+```bash
+sudo mkdir -p /etc/systemd/system/docker.service.d
+sudo tee /etc/systemd/system/docker.service.d/override.conf <<'EOF'
+[Unit]
+After=wg-quick@wg0.service
+Requires=wg-quick@wg0.service
+EOF
+sudo systemctl daemon-reload
+```
+
 - **App startet nicht, Meldung zu unsicheren Standardwerten**: `SECRET_KEY` und/oder
   `PIN_SCHLUESSEL` stehen in `.env` noch auf `change-me`. Bei `APP_ENV=production` verweigert die
   Anwendung bewusst den Start. Abhilfe: beide Werte wie in Abschnitt 2 beschrieben neu erzeugen und
@@ -203,3 +273,7 @@ Abschnitt 6.
   `EMAIL_FROM`). Anwendungslogs auf SMTP-Fehler prüfen (`docker compose logs -f app`). Ist
   `SMTP_HOST` leer, werden Mails nur geloggt und nicht tatsächlich versendet – für den
   Produktivbetrieb muss ein echter SMTP-Zugang eingetragen sein.
+- **Caddy startet nicht: WireGuard-Interface fehlt** (meist nach einem Reboot, wenn die
+  systemd-Abhängigkeit aus diesem Abschnitt fehlt oder `wg-quick@wg0` selbst nicht hochkam):
+  `systemctl status wg-quick@wg0` prüfen und bei Bedarf starten (`systemctl start wg-quick@wg0`),
+  danach `docker compose restart caddy`.

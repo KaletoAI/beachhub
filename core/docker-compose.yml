@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_USER: beachhub
       POSTGRES_PASSWORD: beachhub
@@ -9,6 +10,7 @@ services:
     volumes: ["pgdata:/var/lib/postgresql/data", "./deploy/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro"]
   app:
     build: { context: .., dockerfile: core/Dockerfile }
+    restart: unless-stopped
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://beachhub:beachhub@db:5432/beachhub
@@ -17,6 +19,7 @@ services:
     volumes: ["./data:/app/data"]
   caddy:
     image: caddy:2
+    restart: unless-stopped
     network_mode: host
     volumes: ["./deploy/Caddyfile:/etc/caddy/Caddyfile:ro", "caddy_data:/data"]
     depends_on: [app]
