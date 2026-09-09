@@ -33,7 +33,8 @@ class RechnungsFehler(Exception):  # noqa: N818
 def naechste_nummer(db: Session, jahr: int) -> str:
     db.execute(insert(Nummernkreis).values(jahr=jahr, letzte_nummer=0).on_conflict_do_nothing())
     kreis = db.scalar(select(Nummernkreis).where(Nummernkreis.jahr == jahr).with_for_update())
-    assert kreis is not None
+    if kreis is None:
+        raise RuntimeError("Nummernkreis konnte nicht angelegt werden")
     kreis.letzte_nummer += 1
     db.flush()
     return f"{jahr}-{kreis.letzte_nummer:05d}"
@@ -279,6 +280,13 @@ def _de(v: Decimal) -> str:
     return f"{v:.2f}".replace(".", ",")
 
 
+def _csv_sicher(wert: str) -> str:
+    """Verhindert CSV-/Formel-Injection (Excel & Co. interpretieren Zellen, die mit
+    =, +, - oder @ beginnen, als Formel): eine führende einzelne Anführung entschärft das,
+    ohne den sichtbaren Wert zu verändern."""
+    return f"'{wert}" if wert.startswith(("=", "+", "-", "@")) else wert
+
+
 def csv_export(db: Session, von: date, bis: date) -> str:
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";", lineterminator="\n")
@@ -308,7 +316,7 @@ def csv_export(db: Session, von: date, bis: date) -> str:
             [
                 r.nummer,
                 r.datum.isoformat(),
-                r.adresse_snapshot.get("name", ""),
+                _csv_sicher(r.adresse_snapshot.get("name", "")),
                 r.art,
                 r.status,
                 _de(r.netto),

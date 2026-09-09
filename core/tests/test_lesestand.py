@@ -126,6 +126,15 @@ def test_aenderungen_markieren_und_verarbeiten(db: Session, welt) -> None:
     assert db.query(LesestandVersion).filter_by(geaendert=True).count() == 2
 
 
+def test_lade_und_pruefe_roundtrip(db: Session, welt) -> None:
+    lesestand.publiziere(db, "belegung")
+    dok = lesestand.lade("belegung")
+    assert dok is not None
+    assert lesestand.pruefe(dok) is True
+    dok.inhalt["fenster_tage"] = 9999
+    assert lesestand.pruefe(dok) is False
+
+
 def test_verarbeite_geaenderte_ueberspringt_fehlerhaftes_dokument(db: Session, welt) -> None:
     lesestand.markiere_geaendert(db, "konto:not-a-uuid", "belegung")
     db.commit()

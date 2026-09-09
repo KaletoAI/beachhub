@@ -24,6 +24,7 @@
   {% endif %}
 </header>
 <main>
+  {% if uhr_override %}<div class="flash fehler">Achtung: Systemdatum überschrieben auf {{ uhr_override|datum }}</div>{% endif %}
   {% if flash %}<div class="flash {{ flash.art }}">{{ flash.text }}</div>{% endif %}
   {% block content %}{% endblock %}
 </main>

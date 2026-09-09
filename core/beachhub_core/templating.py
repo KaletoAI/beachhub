@@ -10,7 +10,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
+from beachhub_core import clock
 from beachhub_core.config import settings
+from beachhub_core.database import SessionLocal
 from beachhub_core.models import AdminUser
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -66,6 +68,10 @@ def render(request: Request, name: str, admin: AdminUser | None = None, **ctx: A
             flash = _flash.loads(roh, max_age=60)
         except BadSignature:
             flash = None
+    uhr_override = None
+    if admin is not None:
+        with SessionLocal() as db:
+            uhr_override = clock.override(db)
     resp = templates.TemplateResponse(
         request,
         name,
@@ -73,6 +79,7 @@ def render(request: Request, name: str, admin: AdminUser | None = None, **ctx: A
             "admin": admin,
             "csrf_token": getattr(request.state, "csrf", ""),
             "flash": flash,
+            "uhr_override": uhr_override,
             **ctx,
         },
     )

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -34,6 +34,7 @@ def index(
         schluessel=schluessel,
         heute=clock.today(db),
         override=clock.override(db),
+        produktion=settings.app_env == "production",
         versionen=db.scalars(select(LesestandVersion).order_by(LesestandVersion.dokument)).all(),
     )
 
@@ -69,6 +70,10 @@ def uhr(
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
+    if settings.app_env == "production":
+        raise HTTPException(
+            status_code=403, detail="Uhr-Override ist im Produktivbetrieb deaktiviert"
+        )
     try:
         neu = t_datum(datum)
         clock.set_override(db, neu)

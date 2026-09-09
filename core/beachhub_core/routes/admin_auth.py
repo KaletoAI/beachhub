@@ -11,8 +11,10 @@ from beachhub_core.templating import render
 router = APIRouter()
 
 
-@router.get("/login", response_class=HTMLResponse)
-def login_seite(request: Request) -> HTMLResponse:
+@router.get("/login", response_class=HTMLResponse, response_model=None)
+def login_seite(request: Request, db: Session = Depends(get_db)) -> HTMLResponse | RedirectResponse:
+    if auth.lade_session(db, request.cookies.get(auth.COOKIE)) is not None:
+        return RedirectResponse("/admin", status_code=303)
     return render(request, "login.html", fehler=False)
 
 

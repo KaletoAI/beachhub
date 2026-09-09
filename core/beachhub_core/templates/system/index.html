@@ -14,6 +14,9 @@
 <div class="karte schmal">
   <h2>Uhr</h2>
   <p>Aktuelles Datum: {{ heute|datum }}{% if override %} (überschrieben){% endif %}</p>
+  {% if produktion %}
+  <p class="fehler">Uhr-Override ist im Produktivbetrieb deaktiviert</p>
+  {% else %}
   <form method="post" action="/admin/system/uhr" class="zeile">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Datum überschreiben <input type="date" name="datum" value="{{ override.isoformat() if override else '' }}"></label>
@@ -24,6 +27,7 @@
     <input type="hidden" name="datum" value="">
     <button type="submit">Uhr zurücksetzen (Leeren)</button>
   </form>
+  {% endif %}
 </div>
 
 <div class="karte">

@@ -251,6 +251,13 @@ def markiere_geaendert(db: Session, *namen: str) -> None:
 
 
 def verarbeite_geaenderte(db: Session) -> list[str]:
+    if not settings.signatur_privatschluessel_pfad.exists():
+        # Einmal vorab statt erst beim ersten `publiziere()`: dort würde das breite
+        # `except Exception:` unten das FileNotFoundError sonst abfangen und nur loggen,
+        # wodurch die Meldung "Signaturschlüssel fehlt" in der Route nie ausgelöst würde.
+        raise FileNotFoundError(
+            f"Signaturschlüssel fehlt: {settings.signatur_privatschluessel_pfad}"
+        )
     namen = [
         z.dokument
         for z in db.scalars(
