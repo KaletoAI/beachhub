@@ -1,9 +1,10 @@
 import uuid
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beachhub_core import auth
@@ -17,12 +18,28 @@ from beachhub_core.models import (
     Kundengruppe,
     Tarif,
 )
-from beachhub_core.routes._form import t_betrag, t_datum, t_fenster, t_int, t_uuid, t_zeit
+from beachhub_core.routes._form import pflicht, t_betrag, t_datum, t_fenster, t_int, t_uuid, t_zeit
 from beachhub_core.services import konfiguration, stammdaten
 from beachhub_core.services.stammdaten import StammdatenFehler
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
+
+# Alle vom Admin-Formular her erwartbaren Fehler: Domänenvalidierung (StammdatenFehler),
+# fehlerhafte/​leere Formularwerte (ValueError aus routes._form), ungültige Decimal-Literale
+# (InvalidOperation, wird von t_betrag zwar schon in ValueError gewandelt, hier zur Sicherheit
+# trotzdem mitgefangen) sowie DB-Constraint-Verletzungen (IntegrityError, z. B. doppelter Name).
+FORM_FEHLER = (StammdatenFehler, ValueError, InvalidOperation, IntegrityError)
+
+
+def fehlertext(e: BaseException) -> str:
+    """Wandelt eine der FORM_FEHLER-Ausnahmen in einen für den Admin lesbaren deutschen Text."""
+    if isinstance(e, IntegrityError):
+        orig = str(getattr(e, "orig", "")).lower()
+        if "unique" in orig:
+            return "Name/Datum ist bereits vergeben"
+        return "Eintrag existiert bereits oder verweist auf einen ungültigen Datensatz"
+    return str(e)
 
 
 def _redirect(url: str, text: str, art: str = "ok") -> RedirectResponse:
@@ -53,10 +70,12 @@ def feld_anlegen(
             db, admin_user_id=admin.id, name=name, reihenfolge=t_int(reihenfolge) or 0
         )
         db.commit()
-    except StammdatenFehler as e:
+    except FORM_FEHLER as e:
         db.rollback()
         liste = db.scalars(select(Feld).order_by(Feld.reihenfolge)).all()
-        return render(request, "stammdaten/felder.html", admin=admin, felder=liste, fehler=str(e))
+        return render(
+            request, "stammdaten/felder.html", admin=admin, felder=liste, fehler=fehlertext(e)
+        )
     return _redirect(f"/admin/felder/{f.id}", "Feld angelegt")
 
 
@@ -73,8 +92,9 @@ def feld(
     return render(request, "stammdaten/feld.html", admin=admin, feld=f)
 
 
-@router.post("/felder/{feld_id}")
+@router.post("/felder/{feld_id}", response_model=None)
 def feld_aendern(
+    request: Request,
     feld_id: uuid.UUID,
     name: str = Form(...),
     reihenfolge: str = Form("0"),
@@ -84,22 +104,26 @@ def feld_aendern(
     heizzone: str = Form(""),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+) -> HTMLResponse | RedirectResponse:
     f = db.get(Feld, feld_id)
     if f is None:
         return _redirect("/admin/felder", "Feld nicht gefunden", "fehler")
-    stammdaten.feld_aendern(
-        db,
-        f,
-        admin_user_id=admin.id,
-        name=name.strip(),
-        reihenfolge=t_int(reihenfolge) or 0,
-        aktiv=aktiv == "1",
-        ha_licht_entity=ha_licht_entity or None,
-        ha_praesenz_entity=ha_praesenz_entity or None,
-        heizzone=heizzone or None,
-    )
-    db.commit()
+    try:
+        stammdaten.feld_aendern(
+            db,
+            f,
+            admin_user_id=admin.id,
+            name=name.strip(),
+            reihenfolge=t_int(reihenfolge) or 0,
+            aktiv=aktiv == "1",
+            ha_licht_entity=ha_licht_entity or None,
+            ha_praesenz_entity=ha_praesenz_entity or None,
+            heizzone=heizzone or None,
+        )
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        return render(request, "stammdaten/feld.html", admin=admin, feld=f, fehler=fehlertext(e))
     return _redirect(f"/admin/felder/{f.id}", "Gespeichert")
 
 
@@ -128,9 +152,9 @@ def raster_setzen(
             fenster=t_fenster(fenster),
         )
         db.commit()
-    except (StammdatenFehler, ValueError) as e:
+    except FORM_FEHLER as e:
         db.rollback()
-        return render(request, "stammdaten/feld.html", admin=admin, feld=f, fehler=str(e))
+        return render(request, "stammdaten/feld.html", admin=admin, feld=f, fehler=fehlertext(e))
     return _redirect(f"/admin/felder/{f.id}", "Raster gespeichert")
 
 
@@ -143,8 +167,12 @@ def raster_loeschen(
 ) -> RedirectResponse:
     r = db.get(FeldRaster, raster_id)
     if r is not None and r.feld_id == feld_id:
-        stammdaten.raster_loeschen(db, r, admin_user_id=admin.id)
-        db.commit()
+        try:
+            stammdaten.raster_loeschen(db, r, admin_user_id=admin.id)
+            db.commit()
+        except FORM_FEHLER as e:
+            db.rollback()
+            return _redirect(f"/admin/felder/{feld_id}", fehlertext(e), "fehler")
     return _redirect(f"/admin/felder/{feld_id}", "Raster gelöscht")
 
 
@@ -176,22 +204,19 @@ def betriebszeit_anlegen(
     db: Session = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     try:
-        oeffnet_zeit = t_zeit(oeffnet)
-        schliesst_zeit = t_zeit(schliesst)
-        assert oeffnet_zeit is not None and schliesst_zeit is not None
         stammdaten.betriebszeit_anlegen(
             db,
             admin_user_id=admin.id,
-            wochentag=int(wochentag),
-            oeffnet=oeffnet_zeit,
-            schliesst=schliesst_zeit,
+            wochentag=pflicht(t_int(wochentag), "Wochentag"),
+            oeffnet=pflicht(t_zeit(oeffnet), "Öffnungszeit"),
+            schliesst=pflicht(t_zeit(schliesst), "Schließzeit"),
             gueltig_von=t_datum(gueltig_von),
             gueltig_bis=t_datum(gueltig_bis),
         )
         db.commit()
-    except (StammdatenFehler, ValueError) as e:
+    except FORM_FEHLER as e:
         db.rollback()
-        return betriebszeiten(request, admin, db, fehler=str(e))
+        return betriebszeiten(request, admin, db, fehler=fehlertext(e))
     return _redirect("/admin/betriebszeiten", "Betriebszeit angelegt")
 
 
@@ -203,8 +228,12 @@ def betriebszeit_loeschen(
 ) -> RedirectResponse:
     bz = db.get(Betriebszeit, bz_id)
     if bz:
-        stammdaten.betriebszeit_loeschen(db, bz, admin_user_id=admin.id)
-        db.commit()
+        try:
+            stammdaten.betriebszeit_loeschen(db, bz, admin_user_id=admin.id)
+            db.commit()
+        except FORM_FEHLER as e:
+            db.rollback()
+            return _redirect("/admin/betriebszeiten", fehlertext(e), "fehler")
     return _redirect("/admin/betriebszeiten", "Gelöscht")
 
 
@@ -232,21 +261,19 @@ def ausnahmetag_anlegen(
     db: Session = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
     try:
-        datum_wert = t_datum(datum)
-        assert datum_wert is not None
         stammdaten.ausnahmetag_anlegen(
             db,
             admin_user_id=admin.id,
-            datum=datum_wert,
+            datum=pflicht(t_datum(datum), "Datum"),
             geschlossen=geschlossen == "1",
             oeffnet=t_zeit(oeffnet),
             schliesst=t_zeit(schliesst),
             grund=grund.strip(),
         )
         db.commit()
-    except (StammdatenFehler, ValueError) as e:
+    except FORM_FEHLER as e:
         db.rollback()
-        return ausnahmetage(request, admin, db, fehler=str(e))
+        return ausnahmetage(request, admin, db, fehler=fehlertext(e))
     return _redirect("/admin/ausnahmetage", "Ausnahmetag angelegt")
 
 
@@ -258,8 +285,12 @@ def ausnahmetag_loeschen(
 ) -> RedirectResponse:
     a = db.get(Ausnahmetag, tag_id)
     if a:
-        stammdaten.ausnahmetag_loeschen(db, a, admin_user_id=admin.id)
-        db.commit()
+        try:
+            stammdaten.ausnahmetag_loeschen(db, a, admin_user_id=admin.id)
+            db.commit()
+        except FORM_FEHLER as e:
+            db.rollback()
+            return _redirect("/admin/ausnahmetage", fehlertext(e), "fehler")
     return _redirect("/admin/ausnahmetage", "Gelöscht")
 
 
@@ -290,27 +321,36 @@ def kundengruppe_anlegen(
             db, admin_user_id=admin.id, name=name, standard_zahlungsart=standard_zahlungsart
         )
         db.commit()
-    except StammdatenFehler as e:
+    except FORM_FEHLER as e:
         db.rollback()
-        return kundengruppen(request, admin, db, fehler=str(e))
+        return kundengruppen(request, admin, db, fehler=fehlertext(e))
     return _redirect("/admin/kundengruppen", "Kundengruppe angelegt")
 
 
-@router.post("/kundengruppen/{gruppe_id}")
+@router.post("/kundengruppen/{gruppe_id}", response_model=None)
 def kundengruppe_aendern(
+    request: Request,
     gruppe_id: uuid.UUID,
     name: str = Form(...),
     standard_zahlungsart: str = Form(...),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+) -> HTMLResponse | RedirectResponse:
     g = db.get(Kundengruppe, gruppe_id)
     if g is None:
         return _redirect("/admin/kundengruppen", "Gruppe nicht gefunden", "fehler")
-    stammdaten.kundengruppe_aendern(
-        db, g, admin_user_id=admin.id, name=name.strip(), standard_zahlungsart=standard_zahlungsart
-    )
-    db.commit()
+    try:
+        stammdaten.kundengruppe_aendern(
+            db,
+            g,
+            admin_user_id=admin.id,
+            name=name.strip(),
+            standard_zahlungsart=standard_zahlungsart,
+        )
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        return kundengruppen(request, admin, db, fehler=fehlertext(e))
     return _redirect("/admin/kundengruppen", "Gespeichert")
 
 
@@ -366,16 +406,17 @@ def tarif_anlegen(
             gueltig_bis=t_datum(gueltig_bis),
         )
         db.commit()
-    except (StammdatenFehler, ValueError) as e:
+    except FORM_FEHLER as e:
         db.rollback()
         return render(
-            request, "stammdaten/tarife.html", admin=admin, fehler=str(e), **_tarif_ctx(db)
+            request, "stammdaten/tarife.html", admin=admin, fehler=fehlertext(e), **_tarif_ctx(db)
         )
     return _redirect("/admin/tarife", "Tarif angelegt")
 
 
-@router.post("/tarife/{tarif_id}")
+@router.post("/tarife/{tarif_id}", response_model=None)
 def tarif_aendern(
+    request: Request,
     tarif_id: uuid.UUID,
     name: str = Form(...),
     preis: str = Form(...),
@@ -389,26 +430,32 @@ def tarif_aendern(
     aktiv: str = Form(""),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+) -> HTMLResponse | RedirectResponse:
     t = db.get(Tarif, tarif_id)
     if t is None:
         return _redirect("/admin/tarife", "Tarif nicht gefunden", "fehler")
-    stammdaten.tarif_aendern(
-        db,
-        t,
-        admin_user_id=admin.id,
-        name=name.strip(),
-        preis=t_betrag(preis) or Decimal("0.00"),
-        feld_id=t_uuid(feld_id),
-        wochentag=t_int(wochentag),
-        uhrzeit_von=t_zeit(uhrzeit_von),
-        uhrzeit_bis=t_zeit(uhrzeit_bis),
-        kundengruppe_id=t_uuid(kundengruppe_id),
-        gueltig_von=t_datum(gueltig_von),
-        gueltig_bis=t_datum(gueltig_bis),
-        aktiv=aktiv == "1",
-    )
-    db.commit()
+    try:
+        stammdaten.tarif_aendern(
+            db,
+            t,
+            admin_user_id=admin.id,
+            name=name.strip(),
+            preis=t_betrag(preis) or Decimal("0.00"),
+            feld_id=t_uuid(feld_id),
+            wochentag=t_int(wochentag),
+            uhrzeit_von=t_zeit(uhrzeit_von),
+            uhrzeit_bis=t_zeit(uhrzeit_bis),
+            kundengruppe_id=t_uuid(kundengruppe_id),
+            gueltig_von=t_datum(gueltig_von),
+            gueltig_bis=t_datum(gueltig_bis),
+            aktiv=aktiv == "1",
+        )
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        return render(
+            request, "stammdaten/tarife.html", admin=admin, fehler=fehlertext(e), **_tarif_ctx(db)
+        )
     return _redirect("/admin/tarife", "Gespeichert")
 
 
@@ -420,8 +467,12 @@ def tarif_deaktivieren(
 ) -> RedirectResponse:
     t = db.get(Tarif, tarif_id)
     if t:
-        stammdaten.tarif_deaktivieren(db, t, admin_user_id=admin.id)
-        db.commit()
+        try:
+            stammdaten.tarif_deaktivieren(db, t, admin_user_id=admin.id)
+            db.commit()
+        except FORM_FEHLER as e:
+            db.rollback()
+            return _redirect("/admin/tarife", fehlertext(e), "fehler")
     return _redirect("/admin/tarife", "Tarif deaktiviert")
 
 
@@ -442,16 +493,29 @@ def konfiguration_seite(
     )
 
 
-@router.post("/konfiguration")
+@router.post("/konfiguration", response_model=None)
 async def konfiguration_speichern(
     request: Request,
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
-) -> RedirectResponse:
+) -> HTMLResponse | RedirectResponse:
     form = await request.form()
-    for k in konfiguration.DEFAULTS:
-        wert = str(form.get(k, "")).strip()
-        if wert:
-            konfiguration.setze(db, k, wert.replace(",", "."), admin_user_id=admin.id)
-    db.commit()
+    schluessel = ""
+    try:
+        for schluessel in konfiguration.DEFAULTS:
+            wert = str(form.get(schluessel, "")).strip()
+            if wert:
+                konfiguration.setze(db, schluessel, wert.replace(",", "."), admin_user_id=admin.id)
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        werte = {k: konfiguration.hole(db, k) for k in konfiguration.DEFAULTS}
+        return render(
+            request,
+            "stammdaten/konfiguration.html",
+            admin=admin,
+            werte=werte,
+            defaults=konfiguration.DEFAULTS,
+            fehler=f"{schluessel}: {fehlertext(e)}",
+        )
     return _redirect("/admin/konfiguration", "Konfiguration gespeichert")

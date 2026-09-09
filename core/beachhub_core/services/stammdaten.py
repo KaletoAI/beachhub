@@ -72,6 +72,8 @@ def feld_anlegen(
 def feld_aendern(
     db: Session, feld: Feld, *, admin_user_id: uuid.UUID | None, **felder: Any
 ) -> Feld:
+    if "name" in felder and not str(felder["name"] or "").strip():
+        raise StammdatenFehler("Name fehlt")
     return _aendern(db, "feld", feld, admin_user_id, **felder)
 
 
@@ -183,22 +185,35 @@ def kundengruppe_anlegen(
 def kundengruppe_aendern(
     db: Session, g: Kundengruppe, *, admin_user_id: uuid.UUID | None, **felder: Any
 ) -> Kundengruppe:
+    if "standard_zahlungsart" in felder and felder["standard_zahlungsart"] not in (
+        "online",
+        "rechnung",
+    ):
+        raise StammdatenFehler("Zahlungsart ungültig")
     return _aendern(db, "kundengruppe", g, admin_user_id, **felder)
+
+
+def _pruefe_tarif(preis: Decimal, uhrzeit_von: time | None, uhrzeit_bis: time | None) -> None:
+    if preis < 0:
+        raise StammdatenFehler("Preis darf nicht negativ sein")
+    if (uhrzeit_von is None) != (uhrzeit_bis is None):
+        raise StammdatenFehler("Uhrzeit von und bis gemeinsam angeben")
 
 
 def tarif_anlegen(
     db: Session, *, admin_user_id: uuid.UUID | None, name: str, preis: Decimal, **kriterien: Any
 ) -> Tarif:
-    if preis < 0:
-        raise StammdatenFehler("Preis darf nicht negativ sein")
-    if (kriterien.get("uhrzeit_von") is None) != (kriterien.get("uhrzeit_bis") is None):
-        raise StammdatenFehler("Uhrzeit von und bis gemeinsam angeben")
+    _pruefe_tarif(preis, kriterien.get("uhrzeit_von"), kriterien.get("uhrzeit_bis"))
     return _anlegen(db, "tarif", Tarif(name=name.strip(), preis=preis, **kriterien), admin_user_id)
 
 
 def tarif_aendern(
     db: Session, t: Tarif, *, admin_user_id: uuid.UUID | None, **felder: Any
 ) -> Tarif:
+    preis = felder.get("preis", t.preis)
+    uhrzeit_von = felder.get("uhrzeit_von", t.uhrzeit_von)
+    uhrzeit_bis = felder.get("uhrzeit_bis", t.uhrzeit_bis)
+    _pruefe_tarif(preis, uhrzeit_von, uhrzeit_bis)
     return _aendern(db, "tarif", t, admin_user_id, **felder)
 
 

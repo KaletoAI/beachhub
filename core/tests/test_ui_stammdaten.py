@@ -98,6 +98,121 @@ def test_tarif_und_konfiguration(eingeloggt: TestClient, db: Session) -> None:
     )  # leer = Default behalten
 
 
+def test_doppelter_feldname_zeigt_meldung(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    c.post(
+        "/admin/felder",
+        data={"csrf_token": c.csrf, "name": "Feld X", "reihenfolge": "1"},
+        follow_redirects=False,
+    )
+    r = c.post("/admin/felder", data={"csrf_token": c.csrf, "name": "Feld X", "reihenfolge": "2"})
+    assert r.status_code == 200
+    assert "bereits vergeben" in r.text
+    assert db.query(Feld).count() == 1
+
+
+def test_leere_pflichtzeit_zeigt_meldung(eingeloggt: TestClient) -> None:
+    c = eingeloggt
+    r = c.post(
+        "/admin/betriebszeiten",
+        data={
+            "csrf_token": c.csrf,
+            "wochentag": "0",
+            "oeffnet": "",
+            "schliesst": "20:00",
+            "gueltig_von": "",
+            "gueltig_bis": "",
+        },
+    )
+    assert r.status_code == 200
+    assert "fehlt" in r.text
+
+
+def test_tarif_aendern_validiert(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    c.post(
+        "/admin/tarife",
+        data={
+            "csrf_token": c.csrf,
+            "name": "Standard",
+            "preis": "20,00",
+            "feld_id": "",
+            "wochentag": "",
+            "uhrzeit_von": "",
+            "uhrzeit_bis": "",
+            "kundengruppe_id": "",
+            "gueltig_von": "",
+            "gueltig_bis": "",
+        },
+        follow_redirects=False,
+    )
+    t = db.query(Tarif).one()
+    r = c.post(
+        f"/admin/tarife/{t.id}",
+        data={
+            "csrf_token": c.csrf,
+            "name": "Standard",
+            "preis": "-5",
+            "feld_id": "",
+            "wochentag": "",
+            "uhrzeit_von": "",
+            "uhrzeit_bis": "",
+            "kundengruppe_id": "",
+            "gueltig_von": "",
+            "gueltig_bis": "",
+            "aktiv": "1",
+        },
+    )
+    assert r.status_code == 200
+    assert "negativ" in r.text
+    db.expire_all()
+    assert db.get(Tarif, t.id).preis == Decimal("20.00")
+
+
+def test_konfiguration_ungueltiger_wert(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    r = c.post("/admin/konfiguration", data={"csrf_token": c.csrf, "storno_frist_stunden": "abc"})
+    assert r.status_code == 200
+    assert "storno_frist_stunden" in r.text
+    assert db.query(Konfiguration).filter_by(schluessel="storno_frist_stunden").first() is None
+
+
+def test_raster_gleicher_wochentag_wird_ersetzt(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    c.post(
+        "/admin/felder",
+        data={"csrf_token": c.csrf, "name": "Feld R", "reihenfolge": "1"},
+        follow_redirects=False,
+    )
+    feld = db.query(Feld).one()
+    c.post(
+        f"/admin/felder/{feld.id}/raster",
+        data={
+            "csrf_token": c.csrf,
+            "wochentag": "",
+            "modus": "dauer",
+            "slot_minuten": "60",
+            "fenster": "",
+        },
+        follow_redirects=False,
+    )
+    c.post(
+        f"/admin/felder/{feld.id}/raster",
+        data={
+            "csrf_token": c.csrf,
+            "wochentag": "",
+            "modus": "dauer",
+            "slot_minuten": "90",
+            "fenster": "",
+        },
+        follow_redirects=False,
+    )
+    db.expire_all()
+    raster = db.get(Feld, feld.id).raster
+    assert len(raster) == 1
+    assert raster[0].slot_minuten == 90
+
+
 def test_lesende_rolle_bekommt_403(client: TestClient, db: Session) -> None:
     import pyotp
     from beachhub_core import auth
