@@ -18,7 +18,16 @@ from beachhub_core.models import (
     Kundengruppe,
     Tarif,
 )
-from beachhub_core.routes._form import pflicht, t_betrag, t_datum, t_fenster, t_int, t_uuid, t_zeit
+from beachhub_core.routes._form import (
+    fehlertext,
+    pflicht,
+    t_betrag,
+    t_datum,
+    t_fenster,
+    t_int,
+    t_uuid,
+    t_zeit,
+)
 from beachhub_core.services import konfiguration, stammdaten
 from beachhub_core.services.stammdaten import StammdatenFehler
 from beachhub_core.templating import mit_flash, render
@@ -30,16 +39,6 @@ router = APIRouter()
 # (InvalidOperation, wird von t_betrag zwar schon in ValueError gewandelt, hier zur Sicherheit
 # trotzdem mitgefangen) sowie DB-Constraint-Verletzungen (IntegrityError, z. B. doppelter Name).
 FORM_FEHLER = (StammdatenFehler, ValueError, InvalidOperation, IntegrityError)
-
-
-def fehlertext(e: BaseException) -> str:
-    """Wandelt eine der FORM_FEHLER-Ausnahmen in einen für den Admin lesbaren deutschen Text."""
-    if isinstance(e, IntegrityError):
-        orig = str(getattr(e, "orig", "")).lower()
-        if "unique" in orig:
-            return "Name/Datum ist bereits vergeben"
-        return "Eintrag existiert bereits oder verweist auf einen ungültigen Datensatz"
-    return str(e)
 
 
 def _redirect(url: str, text: str, art: str = "ok") -> RedirectResponse:

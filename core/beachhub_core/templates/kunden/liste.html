@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% block title %}Kunden{% endblock %}
+{% block content %}
+<h1>Kunden</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+<form method="get" action="/admin/kunden" class="karte zeile">
+  <label>Suche <input name="q" value="{{ q }}" placeholder="Name oder E-Mail"></label>
+  <button>Suchen</button>
+</form>
+<div class="karte">
+<table>
+  <tr><th>Name</th><th>E-Mail</th><th>Gruppe</th><th>Zahlungsart</th><th>Guthaben</th><th></th></tr>
+  {% for k in kunden %}<tr>
+    <td>{{ k.name }}</td>
+    <td>{{ k.email }}</td>
+    <td>{{ k.kundengruppe.name }}</td>
+    <td>{{ k.zahlungsart }}</td>
+    <td>{{ k.guthaben|euro }}</td>
+    <td><a href="/admin/kunden/{{ k.id }}">öffnen</a></td>
+  </tr>{% endfor %}
+</table>
+</div>
+<div class="karte schmal">
+<h2>Neuer Kunde</h2>
+<form method="post" action="/admin/kunden">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="name" required></label>
+  <label>E-Mail <input name="email" type="email" required></label>
+  <label>Kundengruppe <select name="kundengruppe_id" required>
+    <option value="">bitte wählen</option>
+    {% for g in gruppen %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+  </select></label>
+  <label>Zahlungsart <select name="zahlungsart">
+    <option value="">Standard der Gruppe</option>
+    <option value="online">online</option>
+    <option value="rechnung">Rechnung</option>
+  </select></label>
+  <label>Straße <input name="adresse_strasse"></label>
+  <label>PLZ <input name="adresse_plz"></label>
+  <label>Ort <input name="adresse_ort"></label>
+  <button>Kunde anlegen</button>
+</form>
+</div>
+{% endblock %}

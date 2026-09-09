@@ -1,0 +1,106 @@
+{% extends "base.html" %}{% block title %}{{ kunde.name }}{% endblock %}
+{% block content %}
+<h1>{{ kunde.name }}</h1>
+{% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+{% if kunde.anonymisiert_am %}<p class="badge">anonymisiert am {{ kunde.anonymisiert_am|datum }}</p>{% endif %}
+<div class="zeile">
+<form method="post" action="/admin/kunden/{{ kunde.id }}" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Name <input name="name" value="{{ kunde.name }}" required></label>
+  <label>E-Mail <input name="email" type="email" value="{{ kunde.email }}" required></label>
+  <label>Kundengruppe <select name="kundengruppe_id" required>
+    {% for g in gruppen %}<option value="{{ g.id }}" {% if g.id == kunde.kundengruppe_id %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
+  </select></label>
+  <label>Zahlungsart <select name="zahlungsart">
+    <option value="online" {% if kunde.zahlungsart == "online" %}selected{% endif %}>online</option>
+    <option value="rechnung" {% if kunde.zahlungsart == "rechnung" %}selected{% endif %}>Rechnung</option>
+  </select></label>
+  <label>Straße <input name="adresse_strasse" value="{{ kunde.adresse_strasse }}"></label>
+  <label>PLZ <input name="adresse_plz" value="{{ kunde.adresse_plz }}"></label>
+  <label>Ort <input name="adresse_ort" value="{{ kunde.adresse_ort }}"></label>
+  <button>Speichern</button>
+</form>
+
+<div class="karte">
+  <h2>Guthaben</h2>
+  <p>Saldo: <strong>{{ kunde.guthaben|euro }}</strong></p>
+  <form method="post" action="/admin/kunden/{{ kunde.id }}/guthaben">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Betrag <input name="betrag" placeholder="25,00" required></label>
+    <label>Art <select name="art">
+      <option value="manuell">manuelle Buchung</option>
+      <option value="auszahlung">Auszahlung</option>
+    </select></label>
+    <label>Notiz <input name="notiz"></label>
+    <button>Buchen</button>
+  </form>
+  <table>
+    <tr><th>Datum</th><th>Betrag</th><th>Art</th><th>Notiz</th></tr>
+    {% for b in guthaben %}<tr>
+      <td>{{ b.created_at|lokal }}</td>
+      <td>{{ b.betrag|euro }}</td>
+      <td>{{ b.art }}</td>
+      <td>{{ b.notiz }}</td>
+    </tr>{% endfor %}
+  </table>
+</div>
+</div>
+
+<div class="karte">
+  <h2>Buchungen</h2>
+  <table>
+    <tr><th>Datum</th><th>Feld</th><th>Status</th><th>Preis</th><th></th></tr>
+    {% for b in buchungen %}<tr>
+      <td>{{ b.beginn|lokal }}</td>
+      <td>{{ b.feld.name }}</td>
+      <td>{{ b.status }}</td>
+      <td>{{ b.preis|euro }}</td>
+      <td><a href="/admin/belegung?buchung_id={{ b.id }}">anzeigen</a></td>
+    </tr>{% endfor %}
+  </table>
+</div>
+
+<div class="karte">
+  <h2>Rechnungen</h2>
+  <table>
+    <tr><th>Nummer</th><th>Datum</th><th>Brutto</th><th>Status</th><th></th></tr>
+    {% for r in rechnungen %}<tr>
+      <td>{{ r.nummer }}</td>
+      <td>{{ r.datum|datum }}</td>
+      <td>{{ r.brutto|euro }}</td>
+      <td>{{ r.status }}</td>
+      <td><a href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
+    </tr>{% endfor %}
+  </table>
+</div>
+
+<div class="karte">
+  <h2>Audit</h2>
+  <table>
+    <tr><th>Zeitpunkt</th><th>Quelle</th><th>Änderung</th></tr>
+    {% for a in audit %}<tr>
+      <td>{{ a.zeitpunkt|lokal }}</td>
+      <td>{{ a.quelle }}</td>
+      <td>
+        {% if a.vorher_json is none %}angelegt
+        {% elif a.nachher_json is none %}gelöscht
+        {% else %}
+          {% for schluessel, wert in a.nachher_json.items() %}
+            {% if a.vorher_json.get(schluessel) != wert %}{{ schluessel }}: {{ a.vorher_json.get(schluessel) }} → {{ wert }}; {% endif %}
+          {% endfor %}
+        {% endif %}
+      </td>
+    </tr>{% endfor %}
+  </table>
+</div>
+
+<div class="karte schmal">
+  <h2>Anonymisieren</h2>
+  <p>Entfernt personenbezogene Daten des Kunden unwiderruflich (DSGVO-Löschung).</p>
+  <form method="post" action="/admin/kunden/{{ kunde.id }}/anonymisieren">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label><input type="checkbox" name="bestaetigt" value="1" required> Ich bin sicher, dass dieser Kunde anonymisiert werden soll</label>
+    <button class="gefahr">Anonymisieren</button>
+  </form>
+</div>
+{% endblock %}

@@ -3,6 +3,8 @@ from datetime import date, time
 from decimal import Decimal, InvalidOperation
 from typing import TypeVar
 
+from sqlalchemy.exc import IntegrityError
+
 T = TypeVar("T")
 
 
@@ -10,6 +12,26 @@ def pflicht(wert: T | None, name: str) -> T:
     if wert is None:
         raise ValueError(f"{name} fehlt")
     return wert
+
+
+def fehlertext(e: BaseException, fachtexte: dict[str, str] | None = None) -> str:
+    """Wandelt eine der Admin-Formular-Ausnahmen (Fachfehler, ValueError, IntegrityError)
+    in einen für den Admin lesbaren deutschen Text.
+
+    `fachtexte` bildet Fachfehler-Codes (str(e)) auf spezifische deutsche Texte ab und kann
+    die generischen IntegrityError-Meldungen über die Schlüssel "unique" bzw. "integrity"
+    überschreiben (z. B. eine passendere Meldung bei doppelter E-Mail-Adresse).
+    """
+    fachtexte = fachtexte or {}
+    if isinstance(e, IntegrityError):
+        orig = str(getattr(e, "orig", "")).lower()
+        if "unique" in orig:
+            return fachtexte.get("unique", "Name/Datum ist bereits vergeben")
+        return fachtexte.get(
+            "integrity", "Eintrag existiert bereits oder verweist auf einen ungültigen Datensatz"
+        )
+    text = str(e)
+    return fachtexte.get(text, text)
 
 
 def t_zeit(v: str | None) -> time | None:
