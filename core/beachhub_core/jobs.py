@@ -7,8 +7,9 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import clock
 from beachhub_core.database import SessionLocal
-from beachhub_core.models import AppSetting
+from beachhub_core.models import AppSetting, Rechnung
 from beachhub_core.services import benachrichtigung, konfiguration, rechnung_pdf, rechnungen
+from beachhub_core.services.rechnungen import RechnungsFehler
 
 logger = logging.getLogger(__name__)
 MARKER = "monatslauf_letzter"
@@ -26,24 +27,43 @@ def monatslauf_faellig(db: Session) -> tuple[int, int] | None:
     return jahr, monat
 
 
+def monatslauf_fuer(db: Session, jahr: int, monat: int) -> int:
+    """Erzeugt die Rechnungen für jahr/monat inkl. PDF und Mail.
+
+    Die Rechnungen selbst werden in einer eigenen Transaktion angelegt und committet, bevor
+    PDFs erzeugt werden. Danach wird pro Rechnung einzeln committet: schlägt die PDF-Erzeugung
+    für eine Rechnung fehl, bleiben die übrigen Rechnungen und bereits erzeugte PDFs erhalten
+    (kein Rollback über alle Rechnungen hinweg), und ein erneuter Lauf kann die fehlende PDF
+    nachholen.
+    """
+    erzeugt: list[Rechnung] = rechnungen.monatslauf(db, jahr, monat)
+    db.commit()
+    for r in erzeugt:
+        try:
+            rechnung_pdf.erzeuge(db, r)
+            db.commit()
+        except RechnungsFehler:
+            logger.exception("PDF-Erzeugung für Rechnung %s fehlgeschlagen", r.nummer)
+            db.rollback()
+            continue
+        benachrichtigung.rechnung(db, r)
+    logger.info("Monatslauf %s-%02d: %d Rechnungen", jahr, monat, len(erzeugt))
+    return len(erzeugt)
+
+
 def monatslauf_ausfuehren(db: Session) -> int:
     faellig = monatslauf_faellig(db)
     if faellig is None:
         return 0
     jahr, monat = faellig
-    erzeugt = rechnungen.monatslauf(db, jahr, monat)
-    for r in erzeugt:
-        rechnung_pdf.erzeuge(db, r)
+    anzahl = monatslauf_fuer(db, jahr, monat)
     marker = db.get(AppSetting, MARKER)
     if marker:
         marker.value = f"{jahr}-{monat:02d}"
     else:
         db.add(AppSetting(key=MARKER, value=f"{jahr}-{monat:02d}"))
     db.commit()
-    for r in erzeugt:
-        benachrichtigung.rechnung(db, r)
-    logger.info("Monatslauf %s-%02d: %d Rechnungen", jahr, monat, len(erzeugt))
-    return len(erzeugt)
+    return anzahl
 
 
 def _job_monatslauf() -> None:

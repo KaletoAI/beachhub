@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date
 
@@ -7,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from beachhub_core import auth
+from beachhub_core import auth, jobs
 from beachhub_core.database import get_db
 from beachhub_core.models import AdminUser, Kunde, Rechnung
 from beachhub_core.routes._form import fehlertext, pflicht, t_datum, t_int
@@ -16,6 +17,7 @@ from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 GRUND = {
     "nicht_offen": "Rechnung ist nicht offen",
@@ -111,19 +113,36 @@ def pdf(
             RedirectResponse("/admin/rechnungen", status_code=303), "Nicht gefunden", "fehler"
         )
     if not r.pdf_pfad:
-        try:
-            rechnung_pdf.erzeuge(db, r)
-            db.commit()
-        except RechnungsFehler as e:
-            db.rollback()
-            db.refresh(r)
-            if not r.pdf_pfad:
-                return mit_flash(
-                    RedirectResponse(f"/admin/rechnungen/{r.id}", status_code=303),
-                    fehlertext(e, GRUND),
-                    "fehler",
-                )
-    return FileResponse(r.pdf_pfad, media_type="application/pdf", filename=f"{r.nummer}.pdf")  # type: ignore[arg-type]
+        return mit_flash(
+            RedirectResponse(f"/admin/rechnungen/{r.id}", status_code=303),
+            "PDF noch nicht erzeugt",
+            "fehler",
+        )
+    return FileResponse(r.pdf_pfad, media_type="application/pdf", filename=f"{r.nummer}.pdf")
+
+
+@router.post("/rechnungen/{rechnung_id}/pdf", response_model=None)
+def pdf_erzeugen(
+    rechnung_id: uuid.UUID,
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    r = db.get(Rechnung, rechnung_id)
+    if r is None:
+        return mit_flash(
+            RedirectResponse("/admin/rechnungen", status_code=303), "Nicht gefunden", "fehler"
+        )
+    try:
+        rechnung_pdf.erzeuge(db, r)
+        db.commit()
+    except RechnungsFehler as e:
+        db.rollback()
+        return mit_flash(
+            RedirectResponse(f"/admin/rechnungen/{r.id}", status_code=303),
+            fehlertext(e, GRUND),
+            "fehler",
+        )
+    return mit_flash(RedirectResponse(f"/admin/rechnungen/{r.id}", status_code=303), "PDF erzeugt")
 
 
 @router.post("/rechnungen/{rechnung_id}/bezahlt")
@@ -166,7 +185,6 @@ def storno(
         )
     try:
         s = rechnungen.storniere(db, r, admin_user_id=admin.id, grund=grund)
-        rechnung_pdf.erzeuge(db, s)
         db.commit()
     except (RechnungsFehler, ValueError, IntegrityError) as e:
         db.rollback()
@@ -175,7 +193,14 @@ def storno(
             fehlertext(e, GRUND),
             "fehler",
         )
-    benachrichtigung.rechnung(db, s)
+    try:
+        rechnung_pdf.erzeuge(db, s)
+        db.commit()
+    except RechnungsFehler:
+        logger.exception("PDF-Erzeugung für Stornorechnung %s fehlgeschlagen", s.nummer)
+        db.rollback()
+    else:
+        benachrichtigung.rechnung(db, s)
     return mit_flash(
         RedirectResponse(f"/admin/rechnungen/{s.id}", status_code=303),
         f"Stornorechnung {s.nummer} erzeugt",
@@ -196,18 +221,13 @@ def monatslauf(
             raise ValueError("Monat muss zwischen 1 und 12 liegen")
         if not (2000 <= j <= 2100):
             raise ValueError("Jahr ungültig")
-        erzeugt = rechnungen.monatslauf(db, j, m)
-        for r in erzeugt:
-            rechnung_pdf.erzeuge(db, r)
-        db.commit()
+        anzahl = jobs.monatslauf_fuer(db, j, m)
     except (RechnungsFehler, ValueError, IntegrityError) as e:
         db.rollback()
         return mit_flash(
             RedirectResponse("/admin/rechnungen", status_code=303), fehlertext(e, GRUND), "fehler"
         )
-    for r in erzeugt:
-        benachrichtigung.rechnung(db, r)
     return mit_flash(
         RedirectResponse("/admin/rechnungen?status=offen", status_code=303),
-        f"{len(erzeugt)} Rechnungen erzeugt",
+        f"{anzahl} Rechnungen erzeugt",
     )

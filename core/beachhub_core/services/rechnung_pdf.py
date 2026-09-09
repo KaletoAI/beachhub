@@ -34,6 +34,11 @@ def erzeuge(db: Session, rechnung: Rechnung) -> Path:
     ordner = settings.data_dir / "rechnungen"
     ordner.mkdir(parents=True, exist_ok=True)
     pfad = ordner / f"{rechnung.nummer}.pdf"
+    # An dieser Stelle ist `rechnung.pdf_pfad` (DB, die Quelle der Wahrheit) noch None. Existiert
+    # trotzdem schon eine Datei unter `pfad`, ist das ein verwaister Rest eines abgebrochenen
+    # vorherigen Versuchs (z. B. Rollback nach dem Schreiben) und darf ersetzt werden.
+    if pfad.exists():
+        pfad.unlink()
     rechnung.pdf_pfad = str(pfad)
     rechnung.pdf_sha256 = hashlib.sha256(daten).hexdigest()
     db.flush()

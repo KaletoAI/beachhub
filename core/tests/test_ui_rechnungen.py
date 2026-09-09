@@ -3,8 +3,16 @@ from decimal import Decimal
 
 import pytest
 from beachhub_core import clock, mail
-from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Rechnung, Tarif
-from beachhub_core.services import buchungen, kunden
+from beachhub_core.models import (
+    Betriebszeit,
+    Buchung,
+    Feld,
+    FeldRaster,
+    Kundengruppe,
+    Rechnung,
+    Tarif,
+)
+from beachhub_core.services import buchungen, kunden, rechnungen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -94,6 +102,27 @@ def test_rechnungen_detail_zeigt_positionen_und_integritaet(
     assert "TSV" in seite.text
     assert "F1" in seite.text
     assert "PDF unverändert" in seite.text
+
+
+def test_pdf_get_ohne_pdf_redirect_und_post_erzeugt(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    c = eingeloggt
+    b = db.query(Buchung).one()
+    r = rechnungen.erzeuge_einzelrechnung(db, b)
+    db.commit()
+    ohne_pdf = c.get(f"/admin/rechnungen/{r.id}/pdf", follow_redirects=False)
+    assert ohne_pdf.status_code == 303
+    seite = c.get(ohne_pdf.headers["location"])
+    assert "PDF noch nicht erzeugt" in seite.text
+    erzeugen = c.post(
+        f"/admin/rechnungen/{r.id}/pdf", data={"csrf_token": c.csrf}, follow_redirects=False
+    )
+    assert erzeugen.status_code == 303
+    db.refresh(r)
+    assert r.pdf_pfad
+    pdf = c.get(f"/admin/rechnungen/{r.id}/pdf")
+    assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
 
 
 def test_monatslauf_ungueltiger_monat_zeigt_meldung(eingeloggt: TestClient, db: Session) -> None:

@@ -1,3 +1,4 @@
+import logging
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -41,6 +42,7 @@ from beachhub_core.services.storno import StornoFehler
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 GRUND = {
     "belegt": "Zeitraum ist belegt",
@@ -157,14 +159,14 @@ def buchung_neu(
 ) -> HTMLResponse | RedirectResponse:
     try:
         f = db.get(Feld, uuid.UUID(feld))
+        start = _lokal(beginn) if f is not None else None
     except ValueError:
-        f = None
-    if f is None:
+        f = start = None
+    if f is None or start is None:
         return mit_flash(
             RedirectResponse("/admin/belegung", status_code=303), "Feld nicht gefunden", "fehler"
         )
-    start = _lokal(beginn)
-    tages = slots_db.tages_slots(db, f, start.astimezone(BERLIN).date()) if f else []
+    tages = slots_db.tages_slots(db, f, start.astimezone(BERLIN).date())
     enden = []
     for s in tages:
         if s.beginn >= start and (not enden or s.beginn == enden[-1]):
@@ -205,7 +207,6 @@ def buchung_anlegen(
         )
         if b.zahlungsart == "online":
             r = rechnungen.erzeuge_einzelrechnung(db, b)
-            rechnung_pdf.erzeuge(db, r)
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
@@ -218,7 +219,14 @@ def buchung_anlegen(
         )
     benachrichtigung.buchung_bestaetigt(db, b)
     if r is not None:
-        benachrichtigung.rechnung(db, r)
+        try:
+            rechnung_pdf.erzeuge(db, r)
+            db.commit()
+        except RechnungsFehler:
+            logger.exception("PDF-Erzeugung für Rechnung %s fehlgeschlagen", r.nummer)
+            db.rollback()
+        else:
+            benachrichtigung.rechnung(db, r)
     return mit_flash(
         RedirectResponse(_woche_url(b.feld_id, b.beginn), status_code=303), "Buchung angelegt"
     )
@@ -357,7 +365,8 @@ async def sperre_anlegen(
     try:
         alle = str(form.get("alle_felder", "")) == "1"
         feld_ids = None if alle else [uuid.UUID(str(v)) for v in form.getlist("feld_ids")]
-        beginn, ende = _lokal(str(form["beginn"])), _lokal(str(form["ende"]))
+        beginn = _lokal(str(pflicht(form.get("beginn") or None, "Beginn")))
+        ende = _lokal(str(pflicht(form.get("ende") or None, "Ende")))
         grund = str(form.get("grund", "")).strip()
         entscheidungen = {
             uuid.UUID(k.removeprefix("entscheidung_")): str(v)
@@ -538,13 +547,21 @@ async def dauer_anlegen(
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
+        try:
+            termine = dauerbuchungen.plane(db, **args)
+        except FORM_FEHLER:
+            return mit_flash(
+                RedirectResponse("/admin/belegung/dauer/neu", status_code=303),
+                fehlertext(e, GRUND),
+                "fehler",
+            )
         return render(
             request,
             "belegung/dauer_neu.html",
             admin=admin,
             **_dauer_formular_ctx(
                 db,
-                termine=dauerbuchungen.plane(db, **args),
+                termine=termine,
                 werte=dict(form),
                 fehler=fehlertext(e, GRUND),
             ),

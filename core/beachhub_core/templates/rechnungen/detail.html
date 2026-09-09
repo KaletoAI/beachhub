@@ -24,7 +24,14 @@
     Fällig am: {{ r.faellig_am|datum }}<br>
     {% if r.bezahlt_am %}Bezahlt am: {{ r.bezahlt_am|lokal }}<br>{% endif %}
   </p>
+  {% if r.pdf_pfad %}
   <p><a href="/admin/rechnungen/{{ r.id }}/pdf">PDF öffnen</a></p>
+  {% else %}
+  <form method="post" action="/admin/rechnungen/{{ r.id }}/pdf">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button>PDF erzeugen</button>
+  </form>
+  {% endif %}
 </div>
 </div>
 

@@ -30,10 +30,9 @@ def main() -> None:
 
         print(lesestand.erzeuge_schluessel())
     elif args.cmd == "monatslauf":
-        from beachhub_core.services import rechnungen
+        from beachhub_core import jobs
 
         jahr, monat = (int(x) for x in args.monat.split("-"))
         with SessionLocal() as db:
-            erzeugt = rechnungen.monatslauf(db, jahr, monat)
-            db.commit()
-        print(f"{len(erzeugt)} Rechnungen erzeugt")
+            anzahl = jobs.monatslauf_fuer(db, jahr, monat)
+        print(f"{anzahl} Rechnungen erzeugt")

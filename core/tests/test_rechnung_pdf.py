@@ -55,14 +55,24 @@ def test_pdf_wird_erzeugt_und_gehasht(db: Session, rechnung) -> None:
         rechnung_pdf.erzeuge(db, rechnung)
 
 
-def test_pdf_datei_wird_nie_ueberschrieben(db: Session, rechnung) -> None:
+def test_registriertes_pdf_wird_nie_ueberschrieben(db: Session, rechnung) -> None:
+    pfad = rechnung_pdf.erzeuge(db, rechnung)
+    db.commit()
+    inhalt = Path(pfad).read_bytes()
+    with pytest.raises(rechnungen.RechnungsFehler, match="pdf_vorhanden"):
+        rechnung_pdf.erzeuge(db, rechnung)
+    assert Path(pfad).read_bytes() == inhalt
+
+
+def test_verwaiste_pdf_datei_wird_ersetzt(db: Session, rechnung) -> None:
     ordner = settings.data_dir / "rechnungen"
     ordner.mkdir(parents=True, exist_ok=True)
     pfad = ordner / f"{rechnung.nummer}.pdf"
     pfad.write_bytes(b"schon-da")
-    with pytest.raises(rechnungen.RechnungsFehler, match="pdf_vorhanden"):
-        rechnung_pdf.erzeuge(db, rechnung)
-    assert pfad.read_bytes() == b"schon-da"
+    ergebnis = rechnung_pdf.erzeuge(db, rechnung)
+    db.commit()
+    assert ergebnis == pfad
+    assert pfad.read_bytes().startswith(b"%PDF")
 
 
 def test_pruefe_integritaet_fehlt_datei(db: Session, rechnung) -> None:
