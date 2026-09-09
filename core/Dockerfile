@@ -7,4 +7,5 @@ COPY shared /app/shared
 COPY core /app/core
 RUN pip install --no-cache-dir /app/shared /app/core
 WORKDIR /app/core
+RUN mkdir -p /app/data
 CMD ["sh", "-c", "alembic upgrade head && uvicorn beachhub_core.main:app --host 0.0.0.0 --port 8000"]

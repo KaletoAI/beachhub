@@ -14,6 +14,10 @@ administriert. Das Admin-UI ist ausschließlich über WireGuard erreichbar, niem
   Standard-Images nutzt, sollte mindestens das Datenverzeichnis (`/opt/beachhub/core/data`, enthält
   Rechnungs-PDFs, Signaturschlüssel, Kundendaten in der DB) auf einem LUKS-verschlüsselten Volume
   ablegen. Details zu Cloud-Init/LUKS: Hetzner-Dokumentation „Verschlüsseltes Volume einrichten“.
+  Dieses Host-Verzeichnis (`/opt/beachhub/core/data`) wird von `docker compose` nach `/app/data` im
+  Container gemountet; `DATA_DIR` und `SIGNATUR_PRIVATSCHLUESSEL_PFAD` werden dafür in
+  `core/docker-compose.yml` fest auf `/app/data` bzw. `/app/data/signatur.key` gesetzt (die Werte in
+  `.env`/`.env.example` gelten nur für die lokale Entwicklung ohne Docker).
 - **Docker** und das Compose-Plugin (`docker compose version` muss funktionieren).
 - **WireGuard** (`apt install wireguard`) – Konfiguration siehe `core/deploy/wireguard-beispiel.md`.
 - In der Hetzner-Cloud-Firewall darf nach außen nur `51820/udp` (WireGuard) offen sein. Kein Port
@@ -55,6 +59,11 @@ setzen. Solange `SECRET_KEY`/`PIN_SCHLUESSEL` noch auf dem Standardwert `change-
 die Anwendung bei `APP_ENV=production` den Start (siehe Abschnitt 8, „Störungen“). Auch `BASE_URL`
 (`https://10.8.0.1:8443`), `COOKIE_SECURE=true`, `SMTP_*` sowie `BETREIBER_NAME`/`BETREIBER_ADRESSE`/
 `BETREIBER_UST_ID`/`BETREIBER_BANK` (erscheinen auf Rechnungen) in `.env` prüfen und ausfüllen.
+`DATA_DIR` und `SIGNATUR_PRIVATSCHLUESSEL_PFAD` müssen in `.env` **nicht** angepasst werden: unter
+`docker compose` überschreibt `core/docker-compose.yml` beide fest mit `/app/data` bzw.
+`/app/data/signatur.key`, dem Pfad im Container, auf den das Host-Verzeichnis `./data`
+(= `/opt/beachhub/core/data`) gemountet ist. Die `.env`-Werte (`./data`, relativ zum Arbeitsverzeichnis)
+greifen nur, wenn die Anwendung ohne Docker lokal gestartet wird.
 
 Datenbank starten, Schema einspielen, Signaturschlüssel erzeugen, ersten Admin anlegen:
 
@@ -141,7 +150,13 @@ Das Skript `core/deploy/backup.sh` erstellt ein verschlüsseltes Backup aus Date
 Verzeichnis `data/` (Rechnungs-PDFs, Lesestand-Exporte, Signaturschlüssel) und überträgt es per
 `scp` an ein Backup-Ziel. Es benötigt die Umgebungsvariablen `BACKUP_ZIEL` (z. B.
 `user@backup-host:/srv/beachhub`) und `BACKUP_GPG` (GPG-Key-ID des Betreibers, mit der verschlüsselt
-wird).
+wird). Standardmäßig wird der Dump per `docker compose exec -T db pg_dump -U beachhub beachhub`
+erzeugt (Postgres läuft in Docker, siehe `docker-compose.yml`). Läuft Postgres stattdessen als
+Host-Installation, kann der Befehl per `PG_DUMP_CMD` überschrieben werden, z. B.:
+
+```bash
+PG_DUMP_CMD="pg_dump -U beachhub beachhub" BACKUP_ZIEL=user@backup-host:/srv/beachhub BACKUP_GPG=<key-id> ./deploy/backup.sh
+```
 
 Vor der ersten produktiven Nutzung das Skript einmal **manuell** ausführen und die übertragene
 Datei auf dem Backup-Host prüfen, bevor der Cron-Job aktiviert wird:

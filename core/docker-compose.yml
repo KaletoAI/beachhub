@@ -14,6 +14,8 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://beachhub:beachhub@db:5432/beachhub
+      DATA_DIR: /app/data
+      SIGNATUR_PRIVATSCHLUESSEL_PFAD: /app/data/signatur.key
     depends_on: [db]
     ports: ["127.0.0.1:8000:8000"]
     volumes: ["./data:/app/data"]
