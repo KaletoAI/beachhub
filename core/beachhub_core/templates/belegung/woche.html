@@ -5,12 +5,12 @@
 <p>Kein aktives Feld vorhanden. Bitte zunächst ein Feld in den Stammdaten anlegen.</p>
 {% else %}
 <div class="karte zeile">
-  <form method="get" action="/admin/belegung">
-    <label>Feld <select name="feld" onchange="this.form.submit()">
+  <form method="get" action="/admin/belegung" id="belegung-feld-form">
+    <label>Feld <select name="feld">
       {% for x in felder %}<option value="{{ x.id }}" {% if x.id == feld.id %}selected{% endif %}>{{ x.name }}</option>{% endfor %}
     </select></label>
     <input type="hidden" name="woche" value="{{ montag.isoformat() }}">
-    <noscript><button>Anzeigen</button></noscript>
+    <button>Anzeigen</button>
   </form>
   <nav>
     <a href="/admin/belegung?feld={{ feld.id }}&woche={{ vorher.isoformat() }}">« Vorherige Woche</a>
@@ -45,4 +45,5 @@
   </div>
 </div>
 {% endif %}
+<script src="/static/belegung.js"></script>
 {% endblock %}

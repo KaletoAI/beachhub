@@ -20,7 +20,7 @@ from beachhub_core.models import (
     RechnungPosition,
     Sperre,
 )
-from beachhub_core.routes._form import fehlertext, t_datum, t_zeit
+from beachhub_core.routes._form import fehlertext, pflicht, t_datum, t_zeit
 from beachhub_core.services import (
     belegung,
     benachrichtigung,
@@ -63,8 +63,9 @@ GRUND = {
 }
 
 # Alle vom Admin-Formular her erwartbaren Fehler: Domänenvalidierung der beteiligten Services,
-# fehlerhafte/leere Formularwerte (ValueError aus routes._form bzw. uuid.UUID/date.fromisoformat)
-# sowie DB-Constraint-Verletzungen (IntegrityError, z. B. überlappende Zeiträume).
+# fehlerhafte/leere Formularwerte (ValueError aus routes._form bzw. uuid.UUID/date.fromisoformat),
+# fehlende Formularfelder (KeyError bei form[...]-Zugriffen) sowie DB-Constraint-Verletzungen
+# (IntegrityError, z. B. überlappende Zeiträume).
 FORM_FEHLER = (
     BuchungsFehler,
     SperrenFehler,
@@ -72,6 +73,7 @@ FORM_FEHLER = (
     StornoFehler,
     RechnungsFehler,
     ValueError,
+    KeyError,
     IntegrityError,
 )
 
@@ -145,15 +147,22 @@ def woche(
 
 
 # ---- Buchungen ----
-@router.get("/belegung/buchung/neu", response_class=HTMLResponse)
+@router.get("/belegung/buchung/neu", response_class=HTMLResponse, response_model=None)
 def buchung_neu(
     request: Request,
     feld: str,
     beginn: str,
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
-) -> HTMLResponse:
-    f = db.get(Feld, uuid.UUID(feld))
+) -> HTMLResponse | RedirectResponse:
+    try:
+        f = db.get(Feld, uuid.UUID(feld))
+    except ValueError:
+        f = None
+    if f is None:
+        return mit_flash(
+            RedirectResponse("/admin/belegung", status_code=303), "Feld nicht gefunden", "fehler"
+        )
     start = _lokal(beginn)
     tages = slots_db.tages_slots(db, f, start.astimezone(BERLIN).date()) if f else []
     enden = []
@@ -378,7 +387,7 @@ async def sperre_anlegen(
             admin=admin,
             felder=_aktive_felder(db),
             betroffen=betroffen,
-            werte=dict(form),
+            werte={**dict(form), "feld_ids": form.getlist("feld_ids")},
             fehler=fehlertext(e, GRUND),
         )
     ziel_feld = (
@@ -412,14 +421,26 @@ def sperre_loeschen(
 
 # ---- Dauerbuchungen ----
 def _dauer_args(form: Any) -> dict[str, Any]:
+    """Wandelt die rohen Formularwerte in die Argumente von `dauerbuchungen.plane`/`lege_an`.
+
+    Fehlende Pflichtfelder (leer oder ganz abwesend) werden über `pflicht` in einen
+    lesbaren ValueError verwandelt, statt als KeyError durchzuschlagen.
+    """
+    kunde_id = pflicht(form.get("kunde_id") or None, "Kunde")
+    feld_id = pflicht(form.get("feld_id") or None, "Feld")
+    wochentag = pflicht(form.get("wochentag") or None, "Wochentag")
+    start = pflicht(form.get("start") or None, "Startzeit")
+    ende = pflicht(form.get("ende") or None, "Endzeit")
+    gueltig_von = pflicht(form.get("gueltig_von") or None, "Gültig von")
+    gueltig_bis = pflicht(form.get("gueltig_bis") or None, "Gültig bis")
     return dict(
-        kunde_id=uuid.UUID(str(form["kunde_id"])),
-        feld_id=uuid.UUID(str(form["feld_id"])),
-        wochentag=int(str(form["wochentag"])),
-        start=t_zeit(str(form["start"])),
-        ende=t_zeit(str(form["ende"])),
-        gueltig_von=t_datum(str(form["gueltig_von"])),
-        gueltig_bis=t_datum(str(form["gueltig_bis"])),
+        kunde_id=uuid.UUID(str(kunde_id)),
+        feld_id=uuid.UUID(str(feld_id)),
+        wochentag=int(str(wochentag)),
+        start=t_zeit(str(start)),
+        ende=t_zeit(str(ende)),
+        gueltig_von=t_datum(str(gueltig_von)),
+        gueltig_bis=t_datum(str(gueltig_bis)),
     )
 
 
@@ -459,7 +480,16 @@ async def dauer_planen(
 ) -> HTMLResponse:
     form = await request.form()
     try:
-        termine = dauerbuchungen.plane(db, **_dauer_args(form))
+        args = _dauer_args(form)
+    except FORM_FEHLER as e:
+        return render(
+            request,
+            "belegung/dauer_neu.html",
+            admin=admin,
+            **_dauer_formular_ctx(db, termine=None, werte=dict(form), fehler=fehlertext(e, GRUND)),
+        )
+    try:
+        termine = dauerbuchungen.plane(db, **args)
     except FORM_FEHLER as e:
         return render(
             request,
@@ -484,6 +514,14 @@ async def dauer_anlegen(
     form = await request.form()
     try:
         args = _dauer_args(form)
+    except FORM_FEHLER as e:
+        return render(
+            request,
+            "belegung/dauer_neu.html",
+            admin=admin,
+            **_dauer_formular_ctx(db, termine=None, werte=dict(form), fehler=fehlertext(e, GRUND)),
+        )
+    try:
         auslassen = {
             date.fromisoformat(k.removeprefix("auslassen_"))
             for k in form
@@ -506,7 +544,7 @@ async def dauer_anlegen(
             admin=admin,
             **_dauer_formular_ctx(
                 db,
-                termine=dauerbuchungen.plane(db, **_dauer_args(form)),
+                termine=dauerbuchungen.plane(db, **args),
                 werte=dict(form),
                 fehler=fehlertext(e, GRUND),
             ),

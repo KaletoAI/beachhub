@@ -9,7 +9,7 @@
     <fieldset>
       <legend>oder einzelne Felder</legend>
       {% for f in felder %}
-      <label><input type="checkbox" name="feld_ids" value="{{ f.id }}" {% if werte.get("feld_ids") == f.id|string %}checked{% endif %}> {{ f.name }}</label>
+      <label><input type="checkbox" name="feld_ids" value="{{ f.id }}" {% if f.id|string in werte.get("feld_ids", []) %}checked{% endif %}> {{ f.name }}</label>
       {% endfor %}
     </fieldset>
     <label>Beginn <input type="datetime-local" name="beginn" value="{{ werte.get('beginn', '') }}" required></label>
