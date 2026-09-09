@@ -11,7 +11,7 @@ from starlette.requests import Request
 
 from beachhub_core.auth import verify_csrf
 from beachhub_core.config import settings
-from beachhub_core.routes import admin_auth, belegung, dashboard, kunden, stammdaten
+from beachhub_core.routes import admin_auth, belegung, dashboard, kunden, rechnungen, stammdaten
 from beachhub_core.services import storno as _storno  # noqa: F401 – verdrahtet Hooks beim Start
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -25,7 +25,15 @@ if settings.has_insecure_defaults:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    if settings.enable_scheduler:
+        from beachhub_core import jobs
+
+        jobs.starte_scheduler()
     yield
+    if settings.enable_scheduler:
+        from beachhub_core import jobs
+
+        jobs.stoppe_scheduler()
 
 
 app = FastAPI(title="Beachhub Hauptsystem", docs_url=None, redoc_url=None, lifespan=lifespan)
@@ -58,6 +66,7 @@ app.include_router(dashboard.router, prefix="/admin", dependencies=csrf)
 app.include_router(stammdaten.router, prefix="/admin", dependencies=csrf)
 app.include_router(kunden.router, prefix="/admin", dependencies=csrf)
 app.include_router(belegung.router, prefix="/admin", dependencies=csrf)
+app.include_router(rechnungen.router, prefix="/admin", dependencies=csrf)
 
 
 @app.exception_handler(HTTPException)

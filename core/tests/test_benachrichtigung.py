@@ -1,23 +1,12 @@
-import shutil
 from datetime import date, time
 from decimal import Decimal
 
 import pytest
 from beachhub_core import clock
-from beachhub_core.config import settings
 from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Tarif
 from beachhub_core.services import benachrichtigung, buchungen, kunden, rechnungen
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
-
-
-@pytest.fixture(autouse=True)
-def _rechnungsordner_leeren() -> None:
-    # data_dir ist über die ganze Testsession hinweg derselbe Temp-Ordner (siehe conftest.py),
-    # die DB wird aber pro Test neu aufgesetzt – siehe gleichnamige Fixture in test_rechnung_pdf.py.
-    ordner = settings.data_dir / "rechnungen"
-    if ordner.exists():
-        shutil.rmtree(ordner)
 
 
 @pytest.fixture

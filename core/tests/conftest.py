@@ -6,6 +6,7 @@ Vor jedem Test wird das Schema neu aufgebaut. Für lokale Läufe:
 """
 
 import os
+import shutil
 import tempfile
 from collections.abc import Iterator
 
@@ -25,6 +26,7 @@ os.environ["ENABLE_SCHEDULER"] = "false"
 import pyotp  # noqa: E402
 import pytest  # noqa: E402
 from beachhub_core import auth, mail  # noqa: E402
+from beachhub_core.config import settings  # noqa: E402
 from beachhub_core.database import SessionLocal, engine, stelle_extensions_sicher  # noqa: E402
 from beachhub_core.main import app  # noqa: E402
 from beachhub_core.models import AdminUser, Base  # noqa: E402
@@ -35,6 +37,13 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def frisches_schema() -> Iterator[None]:
+    # data_dir ist über die ganze Testsession hinweg derselbe Temp-Ordner, die DB wird aber pro
+    # Test neu aufgesetzt. Ohne das hier würde eine frühere Rechnung mit derselben Nummer
+    # (gleiches Jahr, Nummernkreis bei 1) der exklusiven Dateierstellung in rechnung_pdf.erzeuge
+    # in die Quere kommen; ebenso für den Lesestand-Cache (Task 19).
+    for ordner in (settings.data_dir / "rechnungen", settings.data_dir / "lesestand"):
+        if ordner.exists():
+            shutil.rmtree(ordner)
     stelle_extensions_sicher(engine)
     with engine.begin() as conn:
         # tests/test_migrationen.py steuert Alembic direkt; ein abgebrochener Lauf könnte sonst

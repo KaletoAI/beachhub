@@ -1,0 +1,70 @@
+{% extends "base.html" %}{% block title %}Rechnung {{ r.nummer }}{% endblock %}
+{% block content %}
+<h1>Rechnung {{ r.nummer }}</h1>
+<p><span class="badge">{{ r.status }}</span>
+{% if integritaet %}<span class="badge">PDF unverändert</span>{% else %}<span class="badge">PDF fehlt oder verändert</span>{% endif %}</p>
+
+<div class="zeile">
+<div class="karte">
+  <h2>Adresse</h2>
+  <p>
+    {{ r.adresse_snapshot.get("name", "") }}<br>
+    {{ r.adresse_snapshot.get("strasse", "") }}<br>
+    {{ r.adresse_snapshot.get("plz", "") }} {{ r.adresse_snapshot.get("ort", "") }}<br>
+    {{ r.adresse_snapshot.get("email", "") }}
+  </p>
+</div>
+
+<div class="karte">
+  <h2>Kopfdaten</h2>
+  <p>
+    Art: {{ r.art }}<br>
+    Datum: {{ r.datum|datum }}<br>
+    Leistungszeitraum: {{ r.leistung_von|datum }} – {{ r.leistung_bis|datum }}<br>
+    Fällig am: {{ r.faellig_am|datum }}<br>
+    {% if r.bezahlt_am %}Bezahlt am: {{ r.bezahlt_am|lokal }}<br>{% endif %}
+  </p>
+  <p><a href="/admin/rechnungen/{{ r.id }}/pdf">PDF öffnen</a></p>
+</div>
+</div>
+
+<div class="karte">
+  <h2>Positionen</h2>
+  <table>
+    <tr><th>Text</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
+    {% for p in r.positionen %}<tr>
+      <td>{{ p.text }}</td>
+      <td class="rechts">{{ p.menge }}</td>
+      <td class="rechts">{{ p.brutto|euro }}</td>
+    </tr>{% endfor %}
+  </table>
+  <p class="rechts">
+    Netto: {{ r.netto|euro }}<br>
+    USt ({{ r.ust_satz|prozent }}): {{ r.ust|euro }}<br>
+    <strong>Brutto: {{ r.brutto|euro }}</strong>
+  </p>
+</div>
+
+<div class="zeile">
+{% if r.status == "offen" %}
+<div class="karte schmal">
+  <h2>Als bezahlt markieren</h2>
+  <form method="post" action="/admin/rechnungen/{{ r.id }}/bezahlt">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button>Als bezahlt markieren</button>
+  </form>
+</div>
+{% endif %}
+
+{% if r.status != "storniert" and r.art != "storno" %}
+<div class="karte schmal">
+  <h2>Stornorechnung erzeugen</h2>
+  <form method="post" action="/admin/rechnungen/{{ r.id }}/storno">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Grund <input name="grund" required></label>
+    <button class="gefahr">Stornorechnung erzeugen</button>
+  </form>
+</div>
+{% endif %}
+</div>
+{% endblock %}

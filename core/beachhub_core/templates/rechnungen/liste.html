@@ -1,0 +1,43 @@
+{% extends "base.html" %}{% block title %}Rechnungen{% endblock %}
+{% block content %}
+<h1>Rechnungen</h1>
+<form method="get" action="/admin/rechnungen" class="karte zeile">
+  <label>Status <select name="status">
+    <option value="" {% if not status %}selected{% endif %}>alle</option>
+    <option value="offen" {% if status == "offen" %}selected{% endif %}>offen</option>
+    <option value="bezahlt" {% if status == "bezahlt" %}selected{% endif %}>bezahlt</option>
+    <option value="storniert" {% if status == "storniert" %}selected{% endif %}>storniert</option>
+  </select></label>
+  <label>Von <input type="date" name="von" value="{{ von }}"></label>
+  <label>Bis <input type="date" name="bis" value="{{ bis }}"></label>
+  <label>Kunde <input name="q" value="{{ q }}" placeholder="Name"></label>
+  <button>Filtern</button>
+  <a href="/admin/rechnungen/export.csv?von={{ von }}&bis={{ bis }}">CSV-Export</a>
+</form>
+
+<div class="karte schmal">
+  <h2>Monatslauf</h2>
+  <form method="post" action="/admin/rechnungen/monatslauf">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Jahr <input name="jahr" type="number" required></label>
+    <label>Monat <input name="monat" type="number" min="1" max="12" required></label>
+    <button>Sammelrechnungen erzeugen</button>
+  </form>
+</div>
+
+<div class="karte">
+<table>
+  <tr><th>Nummer</th><th>Datum</th><th>Kunde</th><th>Art</th><th class="rechts">Brutto</th><th>Status</th><th>Fällig</th><th></th></tr>
+  {% for r in rechnungen %}<tr>
+    <td>{{ r.nummer }}</td>
+    <td>{{ r.datum|datum }}</td>
+    <td>{{ r.adresse_snapshot.get("name", "") }}</td>
+    <td>{{ r.art }}</td>
+    <td class="rechts">{{ r.brutto|euro }}</td>
+    <td>{{ r.status }}</td>
+    <td>{{ r.faellig_am|datum }}</td>
+    <td><a href="/admin/rechnungen/{{ r.id }}">öffnen</a> · <a href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
+  </tr>{% endfor %}
+</table>
+</div>
+{% endblock %}

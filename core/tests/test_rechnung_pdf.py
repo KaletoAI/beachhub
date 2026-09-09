@@ -1,4 +1,3 @@
-import shutil
 from datetime import date, time
 from decimal import Decimal
 from pathlib import Path
@@ -11,17 +10,6 @@ from beachhub_core.services import buchungen, kunden, rechnung_pdf, rechnungen
 from beachhub_shared.zeit import kombiniere
 from pypdf import PdfReader
 from sqlalchemy.orm import Session
-
-
-@pytest.fixture(autouse=True)
-def _rechnungsordner_leeren() -> None:
-    # data_dir ist über die ganze Testsession hinweg derselbe Temp-Ordner (siehe conftest.py),
-    # die DB wird aber pro Test neu aufgesetzt. Ohne das hier würde eine frühere Rechnung mit
-    # derselben Nummer (gleiches Jahr, Nummernkreis bei 1) der exklusiven Dateierstellung
-    # in rechnung_pdf.erzeuge in die Quere kommen.
-    ordner = settings.data_dir / "rechnungen"
-    if ordner.exists():
-        shutil.rmtree(ordner)
 
 
 @pytest.fixture
