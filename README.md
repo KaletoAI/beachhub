@@ -9,8 +9,11 @@ WireGuard mit Caddy ist dokumentiert (`docs/betrieb/hauptsystem.md`). Stufe 2 (P
 (Halle) folgen.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
-- Dokument für den Betreiber (nicht technisch): `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
+- Dokument für den Betreiber (nicht technisch), Version 0.2: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
   (Quelle: `docs/betreiber/anforderungen-und-loesungskonzept.html`, erzeugt mit WeasyPrint)
+- Offene Rückfragen an den Betreiber: `docs/betreiber/Beachhub-Rueckfragen-Runde-2.pdf`
+  (Quelle: `docs/betreiber/rueckfragen-runde-2.html`)
+- Antworten des Betreibers vom 10.09.2026: `docs/betreiber/Beachhub_Anforderungsprofil Antwort.pdf`
 - Betriebshandbuch (Inbetriebnahme, Backup, WireGuard): `docs/betrieb/hauptsystem.md`
 - Entwickler-Kurzstart: `core/README.md`
 
