@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -67,6 +67,14 @@ app.add_middleware(SecurityHeadersMiddleware)
 static_dir = Path(__file__).resolve().parent / "static"
 static_dir.mkdir(exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> FileResponse:
+    """Browser fragen diesen festen Pfad an, auch wenn die Seite ein Symbol verlinkt.
+    Ohne die Route stünde in jedem Log ein 404."""
+    return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
+
 
 csrf = [Depends(verify_csrf)]
 app.include_router(admin_auth.router, prefix="/admin", dependencies=csrf)

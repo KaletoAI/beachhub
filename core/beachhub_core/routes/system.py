@@ -121,10 +121,10 @@ def stornos(
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
-    offene = db.scalars(
+    kostenpflichtig = db.scalars(
         select(Storno)
         .join(Buchung, Storno.buchung_id == Buchung.id)
-        .where(Storno.nachbuchung_offen.is_(True))
+        .where(Storno.kostenfrei.is_(False))
         .order_by(Buchung.beginn)
     ).all()
-    return render(request, "system/stornos.html", admin=admin, stornos=offene)
+    return render(request, "system/stornos.html", admin=admin, stornos=kostenpflichtig)

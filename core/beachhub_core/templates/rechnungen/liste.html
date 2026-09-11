@@ -12,7 +12,7 @@
   <label>Bis <input type="date" name="bis" value="{{ bis }}"></label>
   <label>Kunde <input name="q" value="{{ q }}" placeholder="Name"></label>
   <button>Filtern</button>
-  <a href="/admin/rechnungen/export.csv?von={{ von }}&bis={{ bis }}">CSV-Export</a>
+  <a class="aktion" href="/admin/rechnungen/export.csv?von={{ von }}&bis={{ bis }}">CSV-Export</a>
 </form>
 
 <div class="karte schmal">
@@ -36,7 +36,7 @@
     <td class="rechts">{{ r.brutto|euro }}</td>
     <td>{{ r.status }}</td>
     <td>{{ r.faellig_am|datum }}</td>
-    <td><a href="/admin/rechnungen/{{ r.id }}">öffnen</a> · <a href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
+    <td><a class="aktion" href="/admin/rechnungen/{{ r.id }}">öffnen</a> · <a class="aktion" href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
   </tr>{% endfor %}
 </table>
 </div>

@@ -35,10 +35,7 @@ def dashboard(
         or 0
     )
     n_storno = (
-        db.scalar(
-            select(func.count()).select_from(Storno).where(Storno.nachbuchung_offen.is_(True))
-        )
-        or 0
+        db.scalar(select(func.count()).select_from(Storno).where(Storno.kostenfrei.is_(False))) or 0
     )
     rechnungen_offen = (
         db.scalar(select(func.count()).select_from(Rechnung).where(Rechnung.status == "offen")) or 0

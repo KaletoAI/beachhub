@@ -1,12 +1,19 @@
 {% extends "base.html" %}{% block title %}Konfiguration{% endblock %}
 {% block content %}
-{% include "stammdaten/_nav.html" %}
 <h1>Konfiguration</h1>
+<p class="hinweis">Alle Fristen und Werte des Betriebs. Ein leeres Feld bedeutet: Es gilt der Vorgabewert, der als hellgrauer Text im Feld steht.</p>
 {% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
-<form method="post" action="/admin/konfiguration" class="karte schmal">
+<form method="post" action="/admin/konfiguration" class="karte">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  {% for k, wert in werte.items() %}
-  <label>{{ k }} <input name="{{ k }}" value="{{ wert }}" placeholder="{{ defaults[k][1] }}"></label>
+  {% for gruppe, eintraege in gruppen %}
+  <fieldset>
+    <legend>{{ gruppe }}</legend>
+    <div class="raster">
+    {% for schluessel, wert, b in eintraege %}
+      <label><span class="bezeichnung">{{ b.name }}{% if b.einheit %} <span class="einheit">({{ b.einheit }})</span>{% endif %}</span><input name="{{ schluessel }}" value="{{ wert|wert }}" placeholder="{{ defaults[schluessel][1]|wert }}"><span class="hinweis">{{ b.hilfe }}</span></label>
+    {% endfor %}
+    </div>
+  </fieldset>
   {% endfor %}
   <button>Speichern</button>
 </form>

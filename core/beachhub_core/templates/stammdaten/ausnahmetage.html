@@ -1,6 +1,5 @@
 {% extends "base.html" %}{% block title %}Ausnahmetage{% endblock %}
 {% block content %}
-{% include "stammdaten/_nav.html" %}
 <h1>Ausnahmetage</h1>
 {% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
 <div class="karte">
@@ -12,7 +11,7 @@
     <td>{{ t.oeffnet|uhrzeit if t.oeffnet else "–" }}</td>
     <td>{{ t.schliesst|uhrzeit if t.schliesst else "–" }}</td>
     <td>{{ t.grund }}</td>
-    <td><form method="post" action="/admin/ausnahmetage/{{ t.id }}/loeschen" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="link">löschen</button></form></td>
+    <td><form method="post" action="/admin/ausnahmetage/{{ t.id }}/loeschen" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="aktion">löschen</button></form></td>
   </tr>{% endfor %}
 </table>
 </div>

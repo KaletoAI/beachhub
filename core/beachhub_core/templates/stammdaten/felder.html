@@ -1,6 +1,5 @@
 {% extends "base.html" %}{% block title %}Felder{% endblock %}
 {% block content %}
-{% include "stammdaten/_nav.html" %}
 <h1>Felder</h1>
 {% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
 <div class="karte">
@@ -10,7 +9,7 @@
     <td>{{ f.name }}</td>
     <td>{% if f.aktiv %}<span class="badge">aktiv</span>{% else %}<span class="badge">inaktiv</span>{% endif %}</td>
     <td>{{ f.raster|length }}</td>
-    <td><a href="/admin/felder/{{ f.id }}">bearbeiten</a></td>
+    <td><a class="aktion" href="/admin/felder/{{ f.id }}">bearbeiten</a></td>
   </tr>{% endfor %}
 </table>
 </div>

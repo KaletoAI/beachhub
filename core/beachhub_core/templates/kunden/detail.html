@@ -55,7 +55,7 @@
       <td>{{ b.feld.name }}</td>
       <td>{{ b.status }}</td>
       <td>{{ b.preis|euro }}</td>
-      <td><a href="/admin/belegung/buchung/{{ b.id }}">anzeigen</a></td>
+      <td><a class="aktion" href="/admin/belegung/buchung/{{ b.id }}">anzeigen</a></td>
     </tr>{% endfor %}
   </table>
 </div>
@@ -69,7 +69,7 @@
       <td>{{ r.datum|datum }}</td>
       <td>{{ r.brutto|euro }}</td>
       <td>{{ r.status }}</td>
-      <td><a href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
+      <td><a class="aktion" href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
     </tr>{% endfor %}
   </table>
 </div>

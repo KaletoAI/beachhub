@@ -40,10 +40,11 @@
   <div class="sub">Anforderungen und Lösungskonzept für Buchung, Abrechnung und Steuerung der Beachhalle</div>
   <p>Dieses Dokument beschreibt, was das neue System für die Beachhalle leisten soll und wie es aufgebaut wird. Es richtet sich an den Betreiber der Halle als Auftraggeber. Es enthält bewusst keine technischen Details; diese stehen in einer separaten Spezifikation für die Entwickler.</p>
   <p>Am Ende steht eine Liste von Entscheidungen, die der Betreiber treffen muss, bevor die Umsetzung beginnt.</p>
+  <p>Diese Ausgabe arbeitet Ihre Antworten vom 10. September 2026 ein. Wesentlich geändert haben sich: die Kundengruppen und ihre Steuersätze, die Abrechnung von Abos (Saisonrechnung statt Monatsrechnung), der Freischaltprozess für die Vereinsmitgliedschaft, die neu hinzugekommenen Gutscheincodes, die Werte für Heizung und Türcode sowie der Wegfall der nachträglichen Erstattung bei verspäteter Absage. Die verbliebenen Fragen stehen in einem eigenen kurzen Dokument.</p>
   <div class="meta">
-    Stand: 5. September 2026<br>
+    Stand: 11. September 2026<br>
     Status: Entwurf zur Abstimmung<br>
-    Ausgabe: Version 0.1
+    Ausgabe: Version 0.2
   </div>
 </div>
 
@@ -55,6 +56,7 @@
   <li>So bucht ein Kunde</li>
   <li>Regeln für Buchung, Storno und Zahlung</li>
   <li>Rechnungen und Guthaben</li>
+  <li>Gutscheine und Vereinsmitgliedschaft</li>
   <li>Was der Betreiber im System tut</li>
   <li>Die Halle: Licht, Heizung, Tür und Anwesenheit</li>
   <li>Spielergruppen: ein Service für die Kunden</li>
@@ -69,7 +71,8 @@
 <p>Ende 2027 eröffnet eine neue Beachhalle, die im Winter stundenweise an Privatpersonen, Vereine und Mitglieder vermietet wird. Ohne System würde der Betrieb viel Handarbeit bedeuten: Anfragen beantworten, Belegung pflegen, Rechnungen schreiben, Licht und Heizung rechtzeitig schalten, Schlüssel übergeben. Beachhub soll von der Eröffnung an diese Aufgaben übernehmen. Da die Halle neu gebaut wird, kann die Technik (Tür, Tastenfeld, Sensoren, Heizungsanbindung) von Anfang an passend geplant werden.</p>
 <p>Beachhub übernimmt diese Arbeit:</p>
 <ul>
-  <li>Kunden buchen freie Felder selbst im Internet, bezahlen online oder erhalten eine Monatsrechnung.</li>
+  <li>Kunden buchen freie Felder selbst im Internet und bezahlen sofort online. Wer ein Abo hat, bekommt einmal je Saison eine Rechnung.</li>
+  <li>Gutscheine lassen sich kaufen und verschenken; Sie selbst können Gratis-Codes ausstellen.</li>
   <li>Der Betreiber sieht die Belegung, legt Dauerbuchungen und Sperren an und erhält fertige Rechnungen.</li>
   <li>Die Halle heizt vor, schaltet das Licht pro Feld und öffnet die Tür per Zahlencode, passend zu den Buchungen. Das funktioniert auch, wenn das Internet in der Halle tagelang ausfällt.</li>
   <li>Kunden, die als Gruppe spielen, können Mitspieler einladen, Zusagen sammeln und die Kosten untereinander aufteilen. Für den Betreiber bleibt trotzdem nur ein Ansprechpartner pro Buchung.</li>
@@ -136,7 +139,7 @@
   <li><b>Anmelden ohne Passwort.</b> Der Kunde gibt seine E-Mail-Adresse ein und bekommt einen Anmeldelink zugeschickt. Es gibt keine Passwörter, die vergessen oder gestohlen werden können.</li>
   <li><b>Freies Feld wählen.</b> Der Belegungsplan zeigt je Feld die freien Zeiten. Fremde Buchungen erscheinen nur als „belegt“, ohne Namen. Buchbar sind Zeiten innerhalb des Buchungsfensters (z. B. die nächsten 14 Tage).</li>
   <li><b>Preis sehen und anfragen.</b> Der Preis richtet sich nach Feld, Uhrzeit, Wochentag und Kundengruppe. Der Kunde sieht ihn vor dem Klick.</li>
-  <li><b>Bestätigung.</b> Das Hauptsystem prüft, ob der Slot wirklich frei ist, und reserviert ihn. Privatkunden werden zur Online-Zahlung weitergeleitet und haben dafür 15 Minuten Zeit. Rechnungskunden (z. B. Vereine) sind sofort bestätigt.</li>
+  <li><b>Bezahlen.</b> Das Hauptsystem prüft, ob der Slot wirklich frei ist, und reserviert ihn. Der Kunde wird zur Online-Zahlung weitergeleitet und hat dafür 15 Minuten Zeit. Eine Zahlung auf Rechnung gibt es im Portal nicht – auch Abo-Kunden zahlen einen zusätzlich gebuchten Einzeltermin sofort. Wer einen Gutscheincode hat, gibt ihn hier ein; nur ein etwaiger Restbetrag ist noch zu zahlen.</li>
   <li><b>Zahlencode.</b> Mit der Bestätigung erhält der Kunde per E-Mail seinen Zahlencode für die Tür. Er gilt nur für seinen Termin, ab 15 Minuten vor Beginn bis zum Ende. Einen Tag vorher kommt eine Erinnerung.</li>
   <li><b>Spielen.</b> Beim Betreten ist die Halle vorgeheizt, das Licht des gebuchten Feldes geht kurz vor Beginn an und nach dem Ende aus.</li>
 </ol>
@@ -155,7 +158,7 @@
 <table>
   <tr><th>Art</th><th>Wer legt sie an</th><th>Beschreibung</th></tr>
   <tr><td>Einzelbuchung</td><td>Kunde im Portal oder Betreiber</td><td>Ein Feld, ein zusammenhängender Zeitraum. Nur innerhalb des Buchungsfensters buchbar.</td></tr>
-  <tr><td>Dauerbuchung</td><td>Nur der Betreiber</td><td>Zum Beispiel „Verein X, jeden Dienstag 19–21 Uhr, Oktober bis März“. Wird beliebig weit im Voraus angelegt. Kunden können eine Dauerbuchung im Portal anfragen; der Betreiber legt sie an. Alle Termine haben denselben Zahlencode.</td></tr>
+  <tr><td>Dauerbuchung</td><td>Nur der Betreiber</td><td>Zum Beispiel „Verein X, jeden Dienstag 19–21 Uhr, Oktober bis März“. Wird beliebig weit im Voraus angelegt. Ein Abo lässt sich nicht online abschließen: Kunden fragen es per E-Mail an, der Betreiber legt es an. Alle Termine haben denselben Zahlencode und werden über eine Saisonrechnung abgerechnet.</td></tr>
   <tr><td>Sperre</td><td>Nur der Betreiber</td><td>Turnier, Wartung, Eigenbedarf. Blockiert Felder ohne Kosten. Kunden sehen nur „nicht verfügbar“.</td></tr>
 </table>
 
@@ -163,7 +166,8 @@
 <p>Freie Slots werden für Kunden erst ab einem bestimmten Vorlauf sichtbar, zum Beispiel 14 Tage vor dem Termin, und bis zu einer Mindestfrist davor, zum Beispiel eine Stunde. So bleibt Raum für Dauerbuchungen und Sperren, die der Betreiber früher plant.</p>
 
 <h3>Preise</h3>
-<p>Preise werden als Regeln hinterlegt: nach Feld, Wochentag, Uhrzeit und Kundengruppe (Privat, Verein, Mitglied). Die genaueste passende Regel gilt. Der Preis wird bei der Buchung festgeschrieben; spätere Preisänderungen betreffen bestehende Buchungen nicht.</p>
+<p>Preise werden als Regeln hinterlegt: nach Feld, Wochentag, Uhrzeit und Kundengruppe. Es gibt genau zwei Kundengruppen: <b>DJK-Mitglied</b> und <b>Nicht-Mitglied</b>. Die genaueste passende Regel gilt. Der Preis wird bei der Buchung festgeschrieben; spätere Preisänderungen betreffen bestehende Buchungen nicht.</p>
+<p>Jede Gruppe hat ihren eigenen Umsatzsteuersatz: 7 % für Mitglieder, 19 % für Nicht-Mitglieder. Maßgeblich ist der Status am Tag des Termins, nicht am Tag der Buchung. Wer am 20. März für den 5. April bucht und dessen Mitgliedschaft am 31. März endet, zahlt also den Preis für Nicht-Mitglieder.</p>
 
 <h3>Storno</h3>
 <div class="box">
@@ -171,7 +175,7 @@
   <ul>
     <li>Bis zur Stornofrist (Vorschlag: 24 Stunden vor Beginn) ist die Stornierung kostenfrei.</li>
     <li>Nach der Frist bleibt der Preis fällig. Der Slot wird trotzdem sofort wieder freigegeben.</li>
-    <li>Bucht ein anderer Kunde den freigewordenen Slot bis zum Termin, wird die Stornierung nachträglich kostenfrei. Wer online bezahlt hatte, bekommt den Betrag als Guthaben; bei Rechnungskunden entfällt die Position auf der Monatsrechnung. Beide Kunden werden per E-Mail informiert.</li>
+    <li>Wird der Platz danach von jemand anderem gebucht, ändert das nichts: Der Betrag bleibt fällig.</li>
     <li>Der Betreiber kann jede Stornierung aus Kulanz auf kostenfrei setzen.</li>
   </ul>
 </div>
@@ -181,10 +185,17 @@
 
 <h3>Zahlung</h3>
 <ul>
-  <li><b>Privatkunden zahlen online</b> direkt bei der Buchung über den Zahlungsdienstleister Stripe. Möglich sind Karte, PayPal, Apple Pay, Google Pay und Sofortüberweisung. Das Geld geht auf das Stripe-Konto des Betreibers und wird automatisch aufs Bankkonto ausgezahlt. Kosten: keine Grundgebühr, etwa 1,5 % plus 0,25 € je Kartenzahlung.</li>
-  <li><b>Vereine und Dauerkunden erhalten eine Monatsrechnung</b> per E-Mail und überweisen. Der Betreiber hakt den Zahlungseingang ab.</li>
-  <li>Welcher Kunde wie zahlt, legt der Betreiber über die Kundengruppe fest. Neue Kunden sind zunächst Privatkunden mit Online-Zahlung.</li>
+  <li><b>Einzelbuchungen werden online bezahlt</b>, direkt bei der Buchung – von jedem Kunden. Das Geld geht auf das Konto des Betreibers beim Zahlungsdienst und wird von dort aufs Bankkonto ausgezahlt.</li>
+  <li><b>Abos werden über eine Saisonrechnung abgerechnet</b> und per Banküberweisung bezahlt. Der Betreiber hakt den Zahlungseingang ab.</li>
+  <li>Eine Zahlung auf Rechnung gibt es bei der Onlinebuchung nicht. Trägt der Betreiber selbst eine Buchung ein, kann er sie weiterhin ohne Zahlungsschritt anlegen und später abrechnen.</li>
 </ul>
+<p>Welcher <b>Zahlungsdienst</b> genutzt wird, ist noch offen. Wir haben auf Ihren Wunsch verglichen (Beispiel: 40 € Feldmiete):</p>
+<table>
+  <tr><th>Anbieter</th><th>Karte</th><th>Wero</th><th>PayPal</th><th>Sofort-/Überweisung</th><th>Grundgebühr</th></tr>
+  <tr><td>Stripe</td><td>0,85 €</td><td><b>nicht möglich</b></td><td>ja</td><td>ja</td><td>keine</td></tr>
+  <tr><td>Mollie</td><td>0,97 €</td><td>ca. 0,61 €</td><td>ja</td><td>ja (0,25 € bei Überweisung)</td><td>keine</td></tr>
+</table>
+<p>Stripe ist bei Kartenzahlung etwa 12 Cent je Buchung günstiger, unterstützt aber <b>kein Wero</b>. Mollie deckt alle vier von Ihnen genannten Wege in einem Vertrag ab. Die Entscheidung hängt also daran, wie wichtig Ihnen Wero ist. Das System wird so gebaut, dass der Anbieter später wechselbar bleibt.</p>
 <div class="box warn">
   <div class="t">Das System bewegt kein Geld</div>
   Beachhub löst keine Rückerstattungen, Überweisungen oder Lastschriften aus. Guthaben wird mit der nächsten Buchung verrechnet. Wünscht ein Kunde die Auszahlung, überweist der Betreiber selbst und hakt es im System ab.
@@ -193,39 +204,79 @@
 <h2>5. Rechnungen und Guthaben</h2>
 <ul>
   <li>Rechnungen entsprechen den gesetzlichen Vorgaben (§ 14 UStG): fortlaufende Nummer, Leistungszeitraum, Netto, Umsatzsteuer, Brutto, Betreiberdaten.</li>
-  <li>Online-Zahler erhalten je Buchung eine Rechnung mit der Bestätigung. Rechnungskunden erhalten automatisch eine Sammelrechnung pro Monat mit allen Terminen (durchgeführt, nicht erschienen, kostenpflichtig storniert).</li>
+  <li>Wer online zahlt, erhält je Buchung eine Rechnung mit der Bestätigung.</li>
+  <li><b>Abos erhalten eine Saisonrechnung</b> über alle Termine, erstellt bei Anlage des Abos. Eine Monatsrechnung gibt es nicht mehr. Ändert sich etwas – ein Termin fällt kostenfrei aus, das Abo endet vorzeitig –, entsteht eine Stornorechnung über die betroffenen Positionen; die ursprüngliche Rechnung bleibt unverändert.</li>
+  <li>Eine Rechnung kann beide Steuersätze enthalten, falls sich der Mitgliedsstatus während einer Saison ändert. Netto und Steuer werden dann je Satz getrennt ausgewiesen.</li>
   <li>Rechnungen werden unveränderbar archiviert. Korrekturen laufen über Stornorechnung und Neuausstellung.</li>
   <li>Kunden laden ihre Rechnungen im Portal herunter. Das Portal speichert sie nicht dauerhaft; sie werden bei Bedarf vom Hauptsystem bereitgestellt.</li>
   <li>Für die Buchhaltung gibt es einen Export aller Rechnungen als Tabelle (CSV).</li>
   <li>Jeder Kunde hat ein Guthabenkonto im Hauptsystem, das bei kostenfrei gewordenen Stornos und Überzahlungen gefüllt und bei der nächsten Buchung verrechnet wird.</li>
 </ul>
 
-<h2>6. Was der Betreiber im System tut</h2>
+<h2>6. Gutscheine und Vereinsmitgliedschaft</h2>
+
+<h3>Gutscheine</h3>
+<p>Sie beschreiben zwei Vorgänge, die das System künftig beherrscht: Jemand <b>kauft</b> einen Slot für später, ohne Datum und Uhrzeit. Und jemand <b>löst</b> einen Code bei der Buchung ein – entweder einen gekauften oder einen, den Sie selbst ausgestellt haben.</p>
+<table>
+  <tr><th>Art</th><th>Wie sie entsteht</th><th>Was sie wert ist</th></tr>
+  <tr><td>Gekaufter Gutschein</td><td>Ein Kunde kauft ihn im Portal und bezahlt online. Er kann ihn verschenken.</td><td>Ein Eurobetrag. Im Portal wird er als Produkt verkauft („eine Stunde Hauptzeit“), damit der Käufer weiß, was er bekommt.</td></tr>
+  <tr><td>Gratis-Code</td><td>Sie stellen ihn in der Verwaltung aus – für Werbung, als Entschädigung oder für eine Eröffnungsaktion.</td><td>Kein Geldwert, sondern eine Freischaltung: eine bestimmte Dauer, wahlweise auf ein Feld oder einen Zeitraum begrenzt, einmal oder mehrfach einlösbar.</td></tr>
+</table>
+<p>Eingelöst wird direkt bei der Buchung. Reicht der Gutschein nicht – etwa weil der Termin teurer ist –, zahlt der Kunde die Differenz online. Bleibt etwas übrig, bleibt es auf dem Gutschein stehen und kann beim nächsten Mal genutzt werden.</p>
+<div class="box">
+  <div class="t">Warum ein Eurobetrag und nicht „eine Stunde“</div>
+  Eine Stunde kostet nicht immer dasselbe: Der Preis hängt vom Feld, vom Wochentag, von der Uhrzeit und davon ab, ob der Einlösende Mitglied ist. Ein Gutschein über „eine Stunde“ müsste all das offenlassen – und Sie trügen jede Preiserhöhung zwischen Kauf und Einlösung. Mit einem Betrag ist immer klar, was er wert ist. Wenn Sie es anders wollen, sagen Sie Bescheid; es ist eine der offenen Fragen.
+</div>
+<div class="box warn">
+  <div class="t">Umsatzsteuer bei Gutscheinen – bitte vom Steuerberater bestätigen lassen</div>
+  Weil derselbe Gutschein von einem Mitglied (7 %) oder einem Nicht-Mitglied (19 %) eingelöst werden kann, steht beim Kauf noch nicht fest, welche Steuer anfällt. Das Gesetz nennt so etwas einen <i>Mehrzweckgutschein</i>: Der Kaufbeleg weist <b>keine</b> Umsatzsteuer aus, die Steuer entsteht erst bei der Einlösung. Würde auf dem Kaufbeleg Steuer stehen, schuldeten Sie sie doppelt. Ihre eigenen Gratis-Codes sind keine Gutscheine in diesem Sinn, weil niemand dafür bezahlt hat.
+</div>
+
+<h3>Vereinsmitgliedschaft</h3>
+<p>Sie haben gefragt, woher das System weiß, ob jemand Vereinsmitglied ist. Die Antwort: Es weiß es nicht von allein – Sie entscheiden es. Der Ablauf folgt Ihrem Vorschlag eines Freischaltprozesses.</p>
+<ol class="steps">
+  <li><b>Antrag.</b> Der Kunde beantragt im Portal die Freischaltung als DJK-Mitglied und gibt dabei seine Mitgliedsnummer an. Bis zur Freischaltung sieht er die Preise für Nicht-Mitglieder.</li>
+  <li><b>Prüfung.</b> Sie bekommen eine E-Mail, prüfen gegen die Mitgliederliste des Vereins und schalten frei. Das System setzt dabei ein Enddatum, üblicherweise das Saisonende.</li>
+  <li><b>Ablauf.</b> Danach gilt der Kunde automatisch wieder als Nicht-Mitglied. Es braucht keinen Vorgang, der etwas zurücksetzt – der Status läuft von selbst aus.</li>
+  <li><b>Jährliche Prüfung.</b> Vor jeder Saison bekommen Sie eine Liste aller Mitglieder zum Abhaken: verlängern oder beenden, auch für viele auf einmal.</li>
+</ol>
+<div class="box">
+  <div class="t">Warum die Prüfliste vor die Saison gehört, nicht ans Ende</div>
+  Mitglieder buchen die ersten Termine der neuen Saison schon im Buchungsfenster davor – bei 14 Tagen Vorlauf also rund zwei Wochen vor dem ersten Spieltag. Ist die Liste zu diesem Zeitpunkt noch nicht abgearbeitet, sehen Ihre Mitglieder die Preise für Nicht-Mitglieder und melden sich bei Ihnen. Deshalb schlagen wir vor, die Prüfung acht Wochen vor Saisonstart anzustoßen.
+</div>
+<p>Endet eine Mitgliedschaft vorzeitig, bleiben bereits bestätigte Buchungen zu ihrem Preis bestehen – wie bei jeder Preisänderung. Betroffene künftige Termine erscheinen in Ihrer Klärungsliste, und Sie entscheiden von Fall zu Fall.</p>
+
+<h2>7. Was der Betreiber im System tut</h2>
 <p>Die Verwaltungsoberfläche ist Teil des Hauptsystems und nur über die gesicherte VPN-Verbindung erreichbar, mit Benutzername, Passwort und zweitem Faktor (App-Code).</p>
 <table>
   <tr><th>Bereich</th><th>Was dort möglich ist</th></tr>
   <tr><td>Belegungsplan</td><td>Kalender je Feld (Tag/Woche). Buchungen, Dauerbuchungen und Sperren per Klick anlegen, ändern, stornieren. Ohne Buchungsfenster, ohne Zahlungsschritt.</td></tr>
   <tr><td>Stammdaten</td><td>Felder, Raster, Betriebszeiten, Saison, Ausnahmetage, Kundengruppen, Preisregeln, alle Fristen und Vorläufe.</td></tr>
-  <tr><td>Kunden</td><td>Liste und Suche, Kundengruppe und Zahlungsart ändern, Guthaben buchen, Auszahlung abhaken, Historie.</td></tr>
-  <tr><td>Rechnungen</td><td>Übersicht, PDF, auf bezahlt setzen, Stornorechnung, Monatslauf, CSV-Export.</td></tr>
+  <tr><td>Kunden</td><td>Liste und Suche, Mitgliedschaft freischalten, verlängern oder beenden, Guthaben buchen, Auszahlung abhaken, Historie. Dazu die jährliche Prüfliste der auslaufenden Mitgliedschaften.</td></tr>
+  <tr><td>Rechnungen</td><td>Übersicht, PDF, auf bezahlt setzen, Storno- und Teil-Stornorechnung, CSV-Export.</td></tr>
+  <tr><td>Gutscheine</td><td>Verkaufte Gutscheine mit Restwert, eigene Gratis-Codes ausstellen (einzeln oder als Serie), Code sperren, Einlösungen einsehen.</td></tr>
   <tr><td>Halle</td><td>Live-Zustand von Licht, Heizung, Tür je Feld; letzter Kontakt; Ereignisse; Handbetrieb ein/aus.</td></tr>
-  <tr><td>Klärung</td><td>Offene Stornos, die noch nachgebucht werden können; unzuordenbare Zahlungen; Anwesenheit ohne Buchung; Änderungsprotokoll.</td></tr>
+  <tr><td>Klärung</td><td>Kostenpflichtige Stornos (dort gewähren Sie bei Bedarf Kulanz); unzuordenbare Zahlungen; Anwesenheit ohne Buchung; Änderungsprotokoll.</td></tr>
 </table>
-<p>Der Betreiber erhält E-Mails bei: Halle ohne Verbindung, Anwesenheit ohne Buchung, Tür außerhalb einer Buchung, Störung der Haussteuerung, fehlgeschlagener Zahlung, Anfrage einer Dauerbuchung.</p>
+<p>Der Betreiber erhält E-Mails bei: Halle ohne Verbindung, Anwesenheit ohne Buchung, Tür außerhalb einer Buchung, <b>fünf Fehleingaben am Tastenfeld</b>, Störung der Haussteuerung, fehlgeschlagener Zahlung, <b>Antrag auf Vereinsmitgliedschaft</b>.</p>
 
-<h2>7. Die Halle: Licht, Heizung, Tür und Anwesenheit</h2>
+<h2>8. Die Halle: Licht, Heizung, Tür und Anwesenheit</h2>
 <table>
   <tr><th>Was</th><th>Verhalten (Werte einstellbar)</th></tr>
-  <tr><td>Heizung</td><td>Eine Stunde vor der ersten Buchung eines Blocks auf Spieltemperatur, nach der letzten zurück auf Grundtemperatur. Zwischen aufeinanderfolgenden Buchungen bleibt sie an.</td></tr>
+  <tr><td>Heizung</td><td>30 Minuten vor der ersten Buchung eines Blocks auf 18 °C, nach der letzten zurück auf 0 °C. Zwischen aufeinanderfolgenden Buchungen bleibt sie an. Hallenweit, nicht je Feld.</td></tr>
   <tr><td>Licht</td><td>Je Feld: 5 Minuten vor Beginn an, 5 Minuten nach Ende aus. Folgt eine Buchung direkt, bleibt es an.</td></tr>
-  <tr><td>Tür</td><td>Der Zahlencode der Buchung öffnet ab 15 Minuten vor Beginn bis zum Ende. Ein Betreiber-Code öffnet immer. Nach fünf Fehleingaben sperrt das Tastenfeld 15 Minuten und meldet es.</td></tr>
+  <tr><td>Tür</td><td>Der Zahlencode der Buchung öffnet ab 15 Minuten vor Beginn bis zum Ende. Ein Betreiber-Code öffnet immer. Nach fünf Fehleingaben wird der Betreiber benachrichtigt, <b>das Tastenfeld bleibt aber aktiv</b> – niemand steht vor verschlossener Tür, weil jemand vor ihm falsch getippt hat.</td></tr>
   <tr><td>Anwesenheit</td><td>Sensoren je Feld erkennen, ob gespielt wird. Ein Termin gilt als durchgeführt, wenn der Zahlencode eingegeben oder Anwesenheit erkannt wurde. Spiel ohne Buchung wird nach 10 Minuten gemeldet.</td></tr>
   <tr><td>Handbetrieb</td><td>Ein Schalter setzt die Automatik aus, etwa für Turniere oder Wartung. Beim Zurückschalten wird der Sollzustand sofort hergestellt.</td></tr>
   <tr><td>Ausfall</td><td>Ohne Internet läuft alles nach dem letzten Plan weiter. Neue Buchungen aus dieser Zeit kennt die Halle nicht; sie werden dem Betreiber in der Verwaltung markiert.</td></tr>
 </table>
-<p>Die Steuerung selbst übernimmt die Haussteuerung Home Assistant. Beachhub sagt ihr nur, was wann geschaltet werden soll, und hört auf ihre Sensoren. Welche Geräte in der neuen Halle verbaut werden (Tastenfeld, Türöffner, Sensoren, Heizungsanbindung), sollte in der Bauplanung mit Blick auf die Anbindung an Home Assistant festgelegt werden; siehe Abschnitt 12.</p>
+<p>Die Steuerung selbst übernimmt die Haussteuerung Home Assistant. Beachhub sagt ihr nur, was wann geschaltet werden soll, und hört auf ihre Sensoren. Welche Geräte in der neuen Halle verbaut werden (Tastenfeld, Türöffner, Sensoren, Heizungsanbindung), sollte in der Bauplanung mit Blick auf die Anbindung an Home Assistant festgelegt werden. Ihr Vorschlag, dafür mit dem Hallenhersteller Hupfauer zu sprechen, ist der richtige Weg; wir nehmen gern teil. Welches Gerät zu welchem Feld gehört, wird ausschließlich in der Halle eingestellt – das Hauptsystem kennt keine Geräte, sondern liefert nur den Belegungsplan.</p>
+<div class="box warn">
+  <div class="t">Zur Heizung: 30 Minuten von 0 °C auf 18 °C</div>
+  Wir übernehmen Ihre Werte. Ob eine Traglufthalle mit Sandfläche das in einer halben Stunde schafft, ist eine Frage an den Heizungsplaner. Der Wert lässt sich jederzeit ändern, und das System zeichnet die tatsächlich gemessene Temperatur auf, damit Sie ihn nach den ersten Betriebswochen anpassen können. Beachten Sie außerdem: 0 °C muss dem Frostschutz des Geräts entsprechen, nicht „aus“.
+</div>
 
-<h2>8. Spielergruppen: ein Service für die Kunden</h2>
+<h2>9. Spielergruppen: ein Service für die Kunden</h2>
 <p>Viele Buchungen, besonders Dauerbuchungen, werden von einer Person für eine Gruppe gemacht. Die Kosten sollen auf die Mitspieler verteilt werden, und die Mitspieler wollen sich für Termine an- und abmelden. Beachhub bietet dafür im Portal eine Gruppenverwaltung nach dem Vorbild des SportAbo-Managers, einer bereits vorhandenen Anwendung des Entwicklungsteams.</p>
 <ul>
   <li>Der Kunde, der gebucht hat, lädt Mitspieler per E-Mail ein. Diese melden sich ebenfalls ohne Passwort an und sehen die Termine der Gruppe.</li>
@@ -237,10 +288,10 @@
   Die Gruppenverwaltung ist reine Buchführung unter Freunden und existiert nur im Portal. Das Hauptsystem weiß nichts von Mitspielern, Zusagen oder Gruppenkassen. Für den Betreiber gibt es weiterhin genau einen Kunden pro Buchung, der die Rechnung erhält und verantwortlich bleibt. Ob genügend Mitspieler zugesagt haben, ändert nichts an der Buchung; stornieren muss der Kunde bewusst selbst.
 </div>
 
-<h2>9. Sicherheit und Datenschutz</h2>
+<h2>10. Sicherheit und Datenschutz</h2>
 <table>
   <tr><th>Ort</th><th>Welche Daten liegen dort</th><th>Schutz</th></tr>
-  <tr><td>Buchungsportal (Internet)</td><td>E-Mail, Anzeigename, Kundengruppe, eigene Buchungen mit Zahlencode, Gruppendaten (Mitspieler-E-Mails, Zusagen, Gruppenkasse)</td><td>Verschlüsselte Verbindung, Anmeldung ohne Passwort, Schutz gegen Missbrauch, keine Zahlungsdaten (die bleiben bei Stripe), keine Adressen, keine Rechnungen</td></tr>
+  <tr><td>Buchungsportal (Internet)</td><td>E-Mail, Anzeigename, Kundengruppe, eigene Buchungen mit Zahlencode, Gruppendaten (Mitspieler-E-Mails, Zusagen, Gruppenkasse)</td><td>Verschlüsselte Verbindung, Anmeldung ohne Passwort, Schutz gegen Missbrauch, keine Zahlungsdaten (die bleiben beim Zahlungsdienst), keine Adressen, keine Rechnungen</td></tr>
   <tr><td>Hauptsystem (Cloud)</td><td>Alle Daten inklusive Adressen, Rechnungen, Zahlungshistorie, Änderungsprotokoll</td><td>Aus dem Internet unsichtbar, nur per VPN, verschlüsselte Festplatte, tägliche verschlüsselte Sicherung an einen zweiten Ort, Wiederherstellung wird vor Saisonstart getestet</td></tr>
   <tr><td>Halle</td><td>Buchungszeiten, Zahlencodes nur verschlüsselt</td><td>Keine Personendaten. Bei Diebstahl des Rechners sind keine Kundendaten betroffen</td></tr>
 </table>
@@ -248,24 +299,25 @@
   <li>Alle Verbindungen zwischen den Bausteinen werden nur vom Hauptsystem beziehungsweise von der Halle aus aufgebaut. Ein Angreifer im Internet findet keinen Weg zum Hauptsystem.</li>
   <li>Alles, was das Hauptsystem an Portal und Halle liefert, ist digital unterschrieben. Gefälschte oder veraltete Daten werden verworfen und gemeldet.</li>
   <li>Kunden können ihr Konto löschen. Gruppendaten werden sofort gelöscht; Kundendaten werden anonymisiert. Rechnungen müssen gesetzlich zehn Jahre aufbewahrt werden und bleiben so lange erhalten.</li>
-  <li>Datenschutzerklärung, Verträge zur Auftragsverarbeitung mit dem Rechenzentrum und mit Stripe sowie das Verarbeitungsverzeichnis erstellt der Betreiber. Das System liefert die technischen Angaben dafür.</li>
+  <li>Datenschutzerklärung, Verträge zur Auftragsverarbeitung mit dem Rechenzentrum und mit dem Zahlungsdienst sowie das Verarbeitungsverzeichnis erstellt der Betreiber. Das System liefert die technischen Angaben dafür.</li>
 </ul>
 
-<h2>10. Was das System bewusst nicht tut</h2>
+<h2>11. Was das System bewusst nicht tut</h2>
 <ul>
   <li>Kein Geld bewegen: keine Erstattungen, Überweisungen, Lastschriften. Auszahlungen macht der Betreiber.</li>
   <li>Keine Buchhaltung: Umsatzsteuervoranmeldung, Kontenabgleich und Mahnwesen laufen außerhalb. Es gibt einen Export.</li>
   <li>Keine Buchung mehrerer Felder auf einmal durch Kunden (Turniere legt der Betreiber an).</li>
   <li>Keine Strafgebühren bei Nichterscheinen, nur die Information.</li>
   <li>Kein Ersatz für die Haussteuerung: Beachhub steuert Home Assistant, ersetzt es nicht.</li>
-  <li>Keine Verwaltung von Mitgliedschaften, Beiträgen oder Kursen.</li>
+  <li>Keine Verwaltung von Beiträgen oder Kursen. Beachhub führt lediglich mit, wer bis wann als DJK-Mitglied freigeschaltet ist – die Mitgliederverwaltung des Vereins bleibt davon unberührt und ist weiterhin die maßgebliche Quelle.</li>
+  <li>Kein Bankabgleich: Ob eine Saisonrechnung bezahlt wurde, hakt der Betreiber selbst ab.</li>
 </ul>
 
-<h2>11. Umsetzung in Stufen</h2>
+<h2>12. Umsetzung in Stufen</h2>
 <table>
   <tr><th>Stufe</th><th>Ergebnis</th><th>Nutzen für den Betreiber</th></tr>
   <tr><td>1</td><td>Hauptsystem mit Verwaltungsoberfläche: Felder, Zeiten, Preise, Kunden, Belegungsplan, Sperren, Dauerbuchungen, Rechnungen</td><td>Belegung und Rechnungen laufen bereits über das System, Buchungen trägt der Betreiber noch selbst ein</td></tr>
-  <tr><td>2</td><td>Buchungsportal mit Anmeldung, Buchung, Storno und Online-Zahlung</td><td>Kunden buchen und bezahlen selbst</td></tr>
+  <tr><td>2</td><td>Buchungsportal mit Anmeldung, Buchung, Storno, Online-Zahlung, Gutscheinkauf und Antrag auf Mitgliedschaft</td><td>Kunden buchen und bezahlen selbst</td></tr>
   <tr><td>3</td><td>Hallensteuerung: Licht, Heizung, Tür per Zahlencode, Betrieb ohne Internet</td><td>Keine Schlüsselübergabe, kein manuelles Schalten</td></tr>
   <tr><td>4</td><td>Spielergruppen im Portal</td><td>Weniger Rückfragen von Gruppen, Mehrwert für Dauerkunden</td></tr>
   <tr><td>5</td><td>Anwesenheitserkennung, Meldungen, Klärungslisten, Export, Feinschliff</td><td>Kontrolle über Nutzung ohne Buchung, weniger Nacharbeit</td></tr>
@@ -273,41 +325,70 @@
 <p>Jede Stufe ist für sich nutzbar. Die Reihenfolge stellt sicher, dass die Daten von Anfang an am richtigen Ort liegen. Ziel ist, dass die Stufen 1 bis 3 zur Eröffnung Ende 2027 in Betrieb sind; Stufe 1 kann schon vorher für die Planung der ersten Saison (Dauerbuchungen, Preise) genutzt werden.</p>
 
 <div class="pb"></div>
-<h2>12. Entscheidungen des Betreibers</h2>
-<p>Diese Punkte müssen vor Beginn der jeweiligen Stufe geklärt sein. Die Vorschläge sind die Werte, mit denen die Entwickler sonst starten.</p>
+<h2>13. Entscheidungen des Betreibers</h2>
+<p>Ihre Antworten vom 10. September 2026 sind eingearbeitet. Was noch offen ist, steht in der zweiten Tabelle; die zugehörigen Fragen finden Sie ausformuliert im Dokument „Rückfragen zur zweiten Runde“.</p>
+
+<h3>Beantwortet</h3>
 <table class="check">
-  <tr><th></th><th>Frage</th><th>Vorschlag</th><th>Entscheidung</th></tr>
-  <tr><td>☐</td><td>Buchungsfenster: Wie viele Tage im Voraus sind freie Slots buchbar? Mindestvorlauf vor Beginn?</td><td>14 Tage, 60 Minuten</td><td></td></tr>
-  <tr><td>☐</td><td>Stornofrist für kostenfreie Stornierung</td><td>24 Stunden</td><td></td></tr>
-  <tr><td>☐</td><td>Frist für Online-Zahlung nach Reservierung</td><td>15 Minuten</td><td></td></tr>
-  <tr><td>☐</td><td>Teilweise Nachbuchung (z. B. eine von zwei Stunden): anteilig kostenfrei?</td><td>Ja</td><td></td></tr>
-  <tr><td>☐</td><td>Kundengruppen und ihre Zahlungsart</td><td>Privat (online), Verein (Rechnung), Mitglied (online)</td><td></td></tr>
-  <tr><td>☐</td><td>Umsatzsteuersatz auf Feldmiete, Kleinunternehmerregelung? Bitte mit Steuerberater klären</td><td>19 %</td><td></td></tr>
-  <tr><td>☐</td><td>Monatsrechnung: an welchem Tag erstellen, welches Zahlungsziel?</td><td>3. des Folgemonats, 14 Tage</td><td></td></tr>
-  <tr><td>☐</td><td>Dürfen Kunden Dauerbuchungen im Portal anfragen?</td><td>Ja, als Wunsch an den Betreiber</td><td></td></tr>
-  <tr><td>☐</td><td>Heizung: hallenweit oder je Zone? Welche Heizung wird verbaut, lässt sie sich an Home Assistant anbinden?</td><td>Hallenweit</td><td></td></tr>
-  <tr><td>☐</td><td>Heizvorlauf, Spieltemperatur, Grundtemperatur</td><td>60 Minuten, Werte vom Betreiber</td><td></td></tr>
-  <tr><td>☐</td><td>Zutritt: Welches Tastenfeld, welcher Türöffner werden verbaut? Anbindung an Home Assistant in der Bauplanung berücksichtigen</td><td>Tastenfeld und Türöffner mit Home-Assistant-Anbindung</td><td></td></tr>
-  <tr><td>☐</td><td>Anwesenheitssensoren je Feld in der Bauplanung vorsehen</td><td>Ein Sensor je Feld</td><td></td></tr>
-  <tr><td>☐</td><td>Stripe-Konto des Betreibers anlegen (Gewerbenachweis, Bankkonto)</td><td>Vor Stufe 2</td><td></td></tr>
-  <tr><td>☐</td><td>Betreiber-Meldungen nur per E-Mail oder zusätzlich per Push/Messenger?</td><td>Stufe 1 nur E-Mail</td><td></td></tr>
-  <tr><td>☐</td><td>Datenschutzerklärung, Auftragsverarbeitung, Verarbeitungsverzeichnis</td><td>Betreiber, vor Stufe 2</td><td></td></tr>
-  <tr><td>☐</td><td>Server-Anbieter und Standort für das Hauptsystem</td><td>Hetzner, Deutschland</td><td></td></tr>
+  <tr><th></th><th>Frage</th><th>Ihre Antwort</th></tr>
+  <tr><td>☑</td><td>Buchungsfenster und Mindestvorlauf</td><td>14 Tage, 60 Minuten</td></tr>
+  <tr><td>☑</td><td>Stornofrist für kostenfreie Stornierung</td><td>24 Stunden</td></tr>
+  <tr><td>☑</td><td>Frist für Online-Zahlung nach Reservierung</td><td>15 Minuten</td></tr>
+  <tr><td>☑</td><td>Kundengruppen</td><td><b>DJK-Mitglied und Nicht-Mitglied</b></td></tr>
+  <tr><td>☑</td><td>Umsatzsteuersatz</td><td><b>7 % für Mitglieder, 19 % für Nicht-Mitglieder</b></td></tr>
+  <tr><td>☑</td><td>Monatsrechnung</td><td><b>wird nicht angeboten;</b> Abos über eine Saisonrechnung, Einzelbuchungen über den Zahlungsdienst</td></tr>
+  <tr><td>☑</td><td>Dürfen Kunden Dauerbuchungen im Portal anfragen?</td><td>nein, <b>per E-Mail</b></td></tr>
+  <tr><td>☑</td><td>Heizung hallenweit oder je Zone?</td><td><b>hallenweit</b></td></tr>
+  <tr><td>☑</td><td>Heizvorlauf, Spieltemperatur, Grundtemperatur</td><td><b>30 Minuten, 18 °C, 0 °C</b></td></tr>
+  <tr><td>☑</td><td>Tastenfeld und Türöffner mit Home-Assistant-Anbindung</td><td>bestätigt; Schnittstellen mit Hupfauer klären</td></tr>
+  <tr><td>☑</td><td>Anwesenheitssensoren je Feld vorsehen</td><td>bestätigt, ein Sensor je Feld</td></tr>
+  <tr><td>☑</td><td>Türcode nach fünf Fehleingaben</td><td><b>Meldung an Sie, keine Sperrung</b></td></tr>
+  <tr><td>☑</td><td>Betreiber-Meldungen</td><td>Stufe 1 nur E-Mail</td></tr>
+  <tr><td>☑</td><td>Datenschutzerklärung, Auftragsverarbeitung, Verarbeitungsverzeichnis</td><td>Betreiber, vor Stufe 2</td></tr>
+  <tr><td>☑</td><td>Serverstandort</td><td>Deutschland</td></tr>
+  <tr><td>☑</td><td>Nachträgliche Erstattung, wenn ein zu spät abgesagter Platz neu vergeben wird</td><td><b>entfällt ersatzlos</b> – wer zu spät absagt, zahlt</td></tr>
 </table>
 
-<h2>13. Begriffe</h2>
+<h3>Noch offen</h3>
+<table class="check">
+  <tr><th></th><th>Frage</th><th>Womit wir vorerst arbeiten</th></tr>
+  <tr><td>☐</td><td>Gutschein: fester Eurobetrag oder garantiert eine Stunde?</td><td>fester Betrag; die Differenz zahlt der Einlösende</td></tr>
+  <tr><td>☐</td><td>Was passiert mit einem Restbetrag auf dem Gutschein?</td><td>bleibt auf dem Gutschein</td></tr>
+  <tr><td>☐</td><td>Gutscheinkauf ohne Portalkonto möglich?</td><td>nein, Konto erforderlich</td></tr>
+  <tr><td>☐</td><td>Gratis-Codes: einmal oder mehrfach einlösbar? Was schalten sie frei?</td><td>beides möglich, Sie legen es je Code fest</td></tr>
+  <tr><td>☐</td><td>Gültigkeitsdauer gekaufter Gutscheine</td><td>31.12. des dritten Jahres nach dem Kauf</td></tr>
+  <tr><td>☐</td><td><b>Können Abo-Kunden einzelne Termine absagen und Geld zurückbekommen?</b></td><td>nein, die Saison ist fest bezahlt</td></tr>
+  <tr><td>☐</td><td>Saisonrechnung: wann verschickt, welches Zahlungsziel, was bei Nichtzahlung?</td><td>sofort bei Anlage, 14 Tage, Termine bleiben gültig</td></tr>
+  <tr><td>☐</td><td>„Rechnungskunden bei der Onlinebuchung ausschließen“ – gar nicht buchen oder nur nicht auf Rechnung?</td><td>nur nicht auf Rechnung; jede Einzelbuchung wird online bezahlt</td></tr>
+  <tr><td>☐</td><td>Zählen nur Privatpersonen als DJK-Mitglied? Wie wird die Mitgliedschaft nachgewiesen?</td><td>Privatpersonen, Nachweis über die Mitgliedsnummer</td></tr>
+  <tr><td>☐</td><td>Saisonende und Stichtag der Mitglieder-Prüfliste</td><td>Prüfliste acht Wochen vor Saisonstart</td></tr>
+  <tr><td>☐</td><td><b>Steuerberater:</b> 7 % für Mitglieder zulässig? Gutscheine ohne Steuerausweis beim Kauf? Saisonrechnung im Voraus?</td><td>wie in diesem Dokument beschrieben</td></tr>
+  <tr><td>☐</td><td>Schafft die Heizung 0 °C → 18 °C in 30 Minuten?</td><td>Wert übernommen, jederzeit änderbar</td></tr>
+  <tr><td>☐</td><td>Türcode: wenige Sekunden Verzögerung ab dem fünften Fehlversuch (keine Sperre)?</td><td>ja</td></tr>
+  <tr><td>☐</td><td><b>Zahlungsdienst:</b> Ist Wero wichtig genug, um Mollie statt Stripe zu nehmen?</td><td>offen; der Anbieter bleibt wechselbar</td></tr>
+  <tr><td>☐</td><td>Termin mit der Firma Hupfauer zu den Schnittstellen der Halle</td><td>noch zu vereinbaren</td></tr>
+</table>
+
+<div class="box warn">
+  <div class="t">Zwei Punkte mit zeitlichem Druck</div>
+  Die <b>Umsatzsteuer</b> sollte vor der ersten echten Rechnung geklärt sein – rückwirkend geht das nur über Korrekturrechnungen. Und das <b>Gespräch mit Hupfauer</b> sollte stattfinden, solange die Bauplanung noch änderbar ist: Tastenfeld, Türöffner, Sensoren und die Heizungsanbindung lassen sich später nur mit Aufwand nachrüsten.
+</div>
+
+<h2>14. Begriffe</h2>
 <table>
   <tr><th>Begriff</th><th>Bedeutung</th></tr>
   <tr><td>Slot</td><td>Die kleinste buchbare Zeiteinheit eines Feldes, z. B. eine Stunde.</td></tr>
   <tr><td>Buchungsfenster</td><td>Zeitraum vor einem Termin, in dem Kunden freie Slots buchen können.</td></tr>
   <tr><td>Dauerbuchung</td><td>Wiederkehrende Buchung über eine Saison, vom Betreiber angelegt.</td></tr>
   <tr><td>Sperre</td><td>Vom Betreiber blockierter Zeitraum ohne Kunde.</td></tr>
-  <tr><td>Nachbuchung</td><td>Ein anderer Kunde bucht einen nach der Frist stornierten Slot; die Stornierung wird dadurch kostenfrei.</td></tr>
   <tr><td>Zahlencode (PIN)</td><td>Sechsstelliger Code je Buchung für die Tür, gültig nur im Zeitfenster der Buchung.</td></tr>
   <tr><td>Guthaben</td><td>Betrag, den ein Kunde beim Betreiber gut hat und der mit der nächsten Buchung verrechnet wird.</td></tr>
+  <tr><td>Saisonrechnung</td><td>Eine Rechnung über alle Termine eines Abos, gestellt bei Anlage des Abos und per Überweisung bezahlt. Ersetzt die frühere Monatsrechnung.</td></tr>
+  <tr><td>Mehrzweckgutschein</td><td>Ein Gutschein, bei dem beim Kauf noch nicht feststeht, welche Umsatzsteuer anfällt – hier, weil er von Mitgliedern und Nicht-Mitgliedern eingelöst werden kann. Die Steuer entsteht erst bei der Einlösung.</td></tr>
+  <tr><td>Gratis-Code</td><td>Ein vom Betreiber ausgestellter Code ohne Geldwert, der eine Leistung freischaltet (Werbung, Entschädigung).</td></tr>
   <tr><td>Home Assistant</td><td>Die Haussteuerung der Halle, die Geräte schaltet und Sensoren ausliest.</td></tr>
   <tr><td>VPN</td><td>Gesicherte private Verbindung, über die nur der Betreiber das Hauptsystem erreicht.</td></tr>
-  <tr><td>Stripe</td><td>Zahlungsdienstleister für die Online-Zahlung.</td></tr>
+  <tr><td>Zahlungsdienst</td><td>Der Dienstleister, über den die Online-Zahlung läuft (Stripe oder Mollie – die Wahl steht noch aus).</td></tr>
   <tr><td>Handbetrieb</td><td>Zustand der Halle, in dem die Automatik ausgesetzt ist.</td></tr>
 </table>
 <p class="small">Die technische Spezifikation für die Entwickler liegt im Projektarchiv unter docs/superpowers/specs/2026-09-05-beachhub-design.md.</p>

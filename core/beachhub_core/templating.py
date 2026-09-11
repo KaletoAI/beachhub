@@ -10,7 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-from beachhub_core import clock
+from beachhub_core import clock, navigation
 from beachhub_core.config import settings
 from beachhub_core.database import SessionLocal
 from beachhub_core.models import AdminUser
@@ -54,8 +54,24 @@ def prozent(v: Decimal) -> str:
     return f"{text.replace('.', ',')} %"
 
 
+def wert(v: Any) -> str:
+    """Ein Konfigurationswert, wie er im Eingabefeld stehen soll: Dezimalzahlen deutsch
+    mit Komma und ohne überflüssige Nullen, alles andere unverändert."""
+    if isinstance(v, Decimal):
+        text = format(v.normalize(), "f")
+        return text.replace(".", ",")
+    return str(v)
+
+
 templates.env.filters.update(
-    {"euro": euro, "lokal": f_lokal, "datum": f_datum, "uhrzeit": f_uhrzeit, "prozent": prozent}
+    {
+        "euro": euro,
+        "lokal": f_lokal,
+        "datum": f_datum,
+        "uhrzeit": f_uhrzeit,
+        "prozent": prozent,
+        "wert": wert,
+    }
 )
 templates.env.globals["wochentage"] = _WT
 
@@ -72,6 +88,9 @@ def render(request: Request, name: str, admin: AdminUser | None = None, **ctx: A
     if admin is not None:
         with SessionLocal() as db:
             uhr_override = clock.override(db)
+    # Die Navigation kommt aus dem angefragten Pfad, damit jede Seite ihre Unternavigation
+    # automatisch mitbringt, ohne sie selbst einzubinden.
+    bereich = navigation.bereich_fuer_pfad(request.url.path)
     resp = templates.TemplateResponse(
         request,
         name,
@@ -80,6 +99,11 @@ def render(request: Request, name: str, admin: AdminUser | None = None, **ctx: A
             "csrf_token": getattr(request.state, "csrf", ""),
             "flash": flash,
             "uhr_override": uhr_override,
+            "nav_bereiche": navigation.NAVIGATION,
+            "nav_bereich": bereich,
+            "nav_unterpunkt": (
+                navigation.unterpunkt_fuer_pfad(bereich, request.url.path) if bereich else None
+            ),
             **ctx,
         },
     )

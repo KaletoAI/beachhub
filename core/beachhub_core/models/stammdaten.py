@@ -14,9 +14,8 @@ class Feld(UUIDMixin, ZeitstempelMixin, Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
     aktiv: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     reihenfolge: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    ha_licht_entity: Mapped[str | None] = mapped_column(String(200))
-    ha_praesenz_entity: Mapped[str | None] = mapped_column(String(200))
-    heizzone: Mapped[str | None] = mapped_column(String(100))
+    # Welches Gerät zu welchem Feld gehört, weiß das Addon auf dem Home-Assistant-Server.
+    # Das Hauptsystem liefert nur den Belegungsplan je Feld.
     raster: Mapped[list["FeldRaster"]] = relationship(
         back_populates="feld", cascade="all, delete-orphan", order_by="FeldRaster.wochentag"
     )

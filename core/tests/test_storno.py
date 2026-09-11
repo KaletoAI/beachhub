@@ -45,11 +45,13 @@ def test_vor_frist_kostenfrei_mit_gutschrift(db: Session, welt) -> None:
     db.commit()
     s = storno.storniere(db, bu, durch="kunde")
     db.commit()
-    assert s.kostenfrei and not s.nachbuchung_offen and bu.status == "storniert"
+    assert s.kostenfrei and bu.status == "storniert"
     assert a.guthaben == Decimal("60.00")
 
 
-def test_nach_frist_kostenpflichtig_dann_nachbuchung(db: Session, welt) -> None:
+def test_nach_frist_kostenpflichtig_und_bleibt_es(db: Session, welt) -> None:
+    """Der Betreiber hat die Nachbuchungsregel gestrichen: Wer zu spät storniert, zahlt –
+    auch dann, wenn ein anderer Kunde den frei gewordenen Platz anschließend bucht."""
     f, a, b, _ = welt
     bu = buchungen.lege_an(
         db,
@@ -62,54 +64,29 @@ def test_nach_frist_kostenpflichtig_dann_nachbuchung(db: Session, welt) -> None:
     clock.set_override(db, date(2027, 11, 30))  # innerhalb der 48-h-Frist
     s = storno.storniere(db, bu, durch="kunde")
     db.commit()
-    assert not s.kostenfrei and s.nachbuchung_offen and a.guthaben == Decimal("0.00")
-    # anderer Kunde bucht 1 von 2 Stunden nach → anteilig
-    _ = buchungen.lege_an(
+    assert not s.kostenfrei and a.guthaben == Decimal("0.00")
+
+    # Ein anderer Kunde bucht den frei gewordenen Zeitraum vollständig.
+    buchungen.lege_an(
         db,
         feld_id=f.id,
         kunde_id=b.id,
         beginn=kombiniere(D, time(19)),
-        ende=kombiniere(D, time(20)),
-    )
-    db.commit()
-    db.refresh(s)
-    assert s.freigestellt_betrag == Decimal("30.00") and s.nachbuchung_offen and not s.kostenfrei
-    assert a.guthaben == Decimal("30.00")
-    n2 = buchungen.lege_an(
-        db,
-        feld_id=f.id,
-        kunde_id=b.id,
-        beginn=kombiniere(D, time(20)),
         ende=kombiniere(D, time(21)),
     )
     db.commit()
     db.refresh(s)
-    assert s.freigestellt_betrag == Decimal("60.00") and s.kostenfrei and not s.nachbuchung_offen
-    assert s.nachbuchung_buchung_id == n2.id and a.guthaben == Decimal("60.00")
+    assert not s.kostenfrei, "Storno darf durch eine spätere Buchung nicht kostenfrei werden"
+    assert a.guthaben == Decimal("0.00"), "Es darf kein Guthaben entstehen"
 
 
-def test_eigene_nachbuchung_zaehlt_nicht(db: Session, welt) -> None:
-    f, a, _, _ = welt
-    bu = buchungen.lege_an(
-        db,
-        feld_id=f.id,
-        kunde_id=a.id,
-        beginn=kombiniere(D, time(19)),
-        ende=kombiniere(D, time(20)),
-    )
-    db.commit()
-    clock.set_override(db, date(2027, 11, 30))
-    s = storno.storniere(db, bu, durch="kunde")
-    buchungen.lege_an(
-        db,
-        feld_id=f.id,
-        kunde_id=a.id,
-        beginn=kombiniere(D, time(19)),
-        ende=kombiniere(D, time(20)),
-    )
-    db.commit()
-    db.refresh(s)
-    assert s.nachbuchung_offen and s.freigestellt_betrag == Decimal("0.00")
+def test_storno_kennt_keine_nachbuchungsfelder() -> None:
+    from beachhub_core.models import Storno
+    from beachhub_core.services import storno as storno_service
+
+    for weg in ("nachbuchung_offen", "nachbuchung_buchung_id", "freigestellt_betrag"):
+        assert not hasattr(Storno, weg), f"Storno hat weiterhin das Feld {weg}"
+    assert not hasattr(storno_service, "pruefe_nachbuchung")
 
 
 def test_rechnungskunde_ohne_gutschrift_und_kulanz(db: Session, welt) -> None:
@@ -127,11 +104,7 @@ def test_rechnungskunde_ohne_gutschrift_und_kulanz(db: Session, welt) -> None:
     assert not s.kostenfrei and v1.guthaben == Decimal("0.00")
     storno.kulanz(db, s, admin_user_id=None, grund="Krankheit")
     db.commit()
-    assert (
-        s.kostenfrei
-        and s.freigestellt_betrag == Decimal("30.00")
-        and v1.guthaben == Decimal("0.00")
-    )
+    assert s.kostenfrei and v1.guthaben == Decimal("0.00")
 
 
 def test_zu_spaet_und_nicht_aktiv(db: Session, welt) -> None:

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Beachhub – Rückfragen zur zweiten Runde</title>
+<style>
+@page { size: A4; margin: 20mm 18mm 20mm 18mm;
+  @bottom-center { content: "Beachhub · Rückfragen · Seite " counter(page) " von " counter(pages); font-size: 9pt; color: #777; font-family: "DejaVu Sans", sans-serif; } }
+@page :first { @bottom-center { content: none; } }
+body { font-family: "DejaVu Sans", "Liberation Sans", Arial, sans-serif; font-size: 10pt; line-height: 1.45; color: #1f2933; }
+h1 { font-size: 20pt; margin: 0 0 2pt 0; color: #0b4f6c; }
+.sub { font-size: 11pt; color: #52606d; margin-bottom: 14pt; }
+h2 { font-size: 12.5pt; color: #0b4f6c; margin: 16pt 0 6pt 0; padding-bottom: 2pt; border-bottom: 1pt solid #0b4f6c; page-break-after: avoid; }
+p { margin: 0 0 6pt 0; }
+table { border-collapse: collapse; width: 100%; margin: 4pt 0 8pt 0; font-size: 9.5pt; }
+tr { page-break-inside: avoid; }
+thead { display: table-header-group; }
+th, td { border: 0.6pt solid #b8c2cc; padding: 4pt 6pt; vertical-align: top; text-align: left; }
+th { background: #e6eef3; }
+th.nr, td.nr { width: 22pt; text-align: center; color: #52606d; }
+th.frage { width: 46%; }
+th.vorschlag { width: 30%; }
+td.antwort { background: #fcfcfd; }
+.box { border: 0.8pt solid #0b4f6c; background: #f2f7fa; padding: 7pt 9pt; margin: 8pt 0 10pt 0; page-break-inside: avoid; }
+.box .t { font-weight: bold; color: #0b4f6c; margin-bottom: 2pt; }
+.box.warn { border-color: #b7791f; background: #fdf6e7; }
+.box.warn .t { color: #8a5a10; }
+.small { font-size: 9pt; color: #52606d; }
+</style>
+</head>
+<body>
+
+<h1>Rückfragen zur zweiten Runde</h1>
+<p class="sub">Beachhub · Stand 11. September 2026</p>
+
+<p>Vielen Dank für Ihre Antworten. Sie sind eingearbeitet; das aktualisierte Lösungskonzept liegt
+als eigenes Dokument bei. Aus Ihren Antworten haben sich einige neue Fragen ergeben, vor allem zu
+den Gutscheincodes und zur Saisonrechnung.</p>
+
+<p>Wir haben zu jeder Frage einen Vorschlag notiert und arbeiten vorerst damit weiter. Wenn Ihnen
+ein Vorschlag passt, genügt ein Haken. Nur dort, wo Sie es anders wollen, brauchen wir eine
+Antwort.</p>
+
+<div class="box warn">
+  <div class="t">Zwei Punkte, die nicht warten können</div>
+  <p style="margin:0">Die <b>Umsatzsteuer</b> (Frage 12) braucht die Bestätigung Ihres Steuerberaters, bevor die erste
+  Rechnung gestellt wird – rückwirkend lässt sich das nur mit Korrekturrechnungen geradeziehen.
+  Und die <b>Schnittstellen der Halle</b> (Frage 14): Das Gespräch mit Hupfauer sollte stattfinden,
+  solange die Bauplanung noch änderbar ist.</p>
+</div>
+
+<h2>Gutscheine</h2>
+
+<p>Sie beschreiben zwei Vorgänge: Jemand kauft einen Slot für später, ohne Datum und Uhrzeit. Und
+jemand löst einen Code bei der Buchung ein – entweder einen gekauften oder einen, den Sie selbst
+ausgestellt haben. Daraus ergeben sich einige Detailfragen.</p>
+
+<table>
+<tr><th class="nr">Nr</th><th class="frage">Frage</th><th class="vorschlag">Unser Vorschlag</th><th>Ihre Antwort</th></tr>
+<tr>
+  <td class="nr">1</td>
+  <td>Was genau steht auf einem gekauften Gutschein: ein fester Eurobetrag (z. B. 30 €) oder „eine Stunde"? Der Unterschied zeigt sich, wenn der Preis bis zur Einlösung steigt: Beim Eurobetrag zahlt der Einlösende die Differenz, bei „einer Stunde" tragen Sie die Erhöhung.</td>
+  <td>Fester Eurobetrag. Im Portal verkaufen wir ihn trotzdem als „eine Stunde Hauptzeit", damit es sich für den Käufer natürlich anfühlt.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">2</td>
+  <td>Ein Nicht-Mitglied kauft einen Gutschein über 35 €. Ein Mitglied löst ihn ein, sein Termin kostet aber nur 25 €. Was passiert mit den 10 € Rest?</td>
+  <td>Der Rest bleibt auf dem Gutschein und kann beim nächsten Mal eingelöst werden.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">3</td>
+  <td>Muss man ein Konto im Portal haben, um einen Gutschein zu kaufen? Ein Geschenk kauft oft jemand, der selbst nie spielt.</td>
+  <td>Ja, Konto erforderlich. Ein Kauf ohne Anmeldung wäre möglich, kostet aber zusätzliche Entwicklung.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">4</td>
+  <td>Ihre eigenen Codes (Werbung, Entschädigung): Soll ein Code nur einmal gelten, oder soll es auch Codes geben, die viele Leute einlösen können – etwa „ERÖFFNUNG2027" für die erste Stunde gratis?</td>
+  <td>Beides möglich; Sie legen je Code fest, wie oft er gilt.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">5</td>
+  <td>Was genau schaltet ein solcher Code frei – eine bestimmte Dauer, ein bestimmtes Feld, bestimmte Uhrzeiten?</td>
+  <td>Sie geben je Code an: maximale Dauer, optional Feld und Zeitraum.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">6</td>
+  <td>Wie lange soll ein gekaufter Gutschein gültig sein?</td>
+  <td>Bis zum 31.12. des dritten Jahres nach dem Kauf. Kürzere Fristen sind rechtlich angreifbar. Ihre eigenen Werbecodes dürfen kurz befristet sein.</td>
+  <td class="antwort"></td>
+</tr>
+</table>
+
+<h2>Abos und Saisonrechnung</h2>
+
+<table>
+<tr><th class="nr">Nr</th><th class="frage">Frage</th><th class="vorschlag">Unser Vorschlag</th><th>Ihre Antwort</th></tr>
+<tr>
+  <td class="nr">7</td>
+  <td><b>Wichtig:</b> Kann ein Abo-Kunde einzelne Termine absagen und bekommt dafür Geld zurück? Oder ist die Saison fest bezahlt, egal ob gespielt wird? Davon hängt ab, ob die Saisonrechnung einmal gestellt wird oder ständig korrigiert werden muss.</td>
+  <td>Fest bezahlt. Absagen sind möglich, ändern aber nichts am Preis. Sie können im Einzelfall trotzdem Kulanz gewähren.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">8</td>
+  <td>Wann soll die Saisonrechnung verschickt werden und mit welchem Zahlungsziel?</td>
+  <td>Sofort bei Anlage des Abos, Zahlungsziel 14 Tage.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">9</td>
+  <td>Was passiert, wenn die Saisonrechnung bis zum ersten Termin nicht bezahlt ist? Soll der Türcode trotzdem funktionieren?</td>
+  <td>Ja, die Termine bleiben gültig. Sie sehen offene Rechnungen in der Übersicht und mahnen außerhalb des Systems.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">10</td>
+  <td>Sie schreiben: „Ich würde Rechnungskunden bei der Onlinebuchung ausschließen." Meinen Sie damit, dass Abo-Kunden gar nicht online buchen dürfen – oder nur, dass niemand online auf Rechnung buchen kann?</td>
+  <td>Die zweite Lesart: Es gibt im Portal keine Zahlung auf Rechnung. Wer online einen Einzeltermin bucht, zahlt sofort – auch ein Abo-Kunde.</td>
+  <td class="antwort"></td>
+</tr>
+</table>
+
+<h2>Vereinsmitgliedschaft</h2>
+
+<p>Ihr Vorschlag eines Freischaltprozesses ist übernommen: Der Kunde beantragt die Mitgliedschaft
+im Portal, Sie schalten sie frei, und sie läuft zum Saisonende automatisch ab. Vor jeder neuen
+Saison bekommen Sie eine Liste aller Mitglieder zum Abhaken.</p>
+
+<table>
+<tr><th class="nr">Nr</th><th class="frage">Frage</th><th class="vorschlag">Unser Vorschlag</th><th>Ihre Antwort</th></tr>
+<tr>
+  <td class="nr">11</td>
+  <td>Zählen nur Privatpersonen als DJK-Mitglied? Oder auch eine Abteilung oder Mannschaft der DJK, die als Abo-Kunde auftritt? Und wie weisen Kunden ihre Mitgliedschaft nach – über die Mitgliedsnummer?</td>
+  <td>Privatpersonen; Nachweis über die Mitgliedsnummer, die Sie gegen Ihre Mitgliederliste prüfen.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">12</td>
+  <td><b>Für den Steuerberater.</b> Bitte bestätigen lassen: (a) 7 % für Mitglieder sind bei Ihrer Halle zulässig; (b) Gutscheine werden beim Kauf <i>ohne</i> Umsatzsteuer belegt, die Steuer entsteht erst bei der Einlösung; (c) Ihre eigenen Gratis-Codes lösen keine Steuer aus; (d) eine Rechnung für die gesamte Saison im Voraus ist in Ordnung.</td>
+  <td>—</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">13</td>
+  <td>Welches Datum ist das Saisonende, zu dem die Mitgliedschaften ablaufen? Und wann im Jahr möchten Sie die Prüfliste bearbeiten?</td>
+  <td>Prüfliste acht Wochen vor Saisonstart – damit Mitglieder schon bei den ersten Buchungen den richtigen Preis sehen.</td>
+  <td class="antwort"></td>
+</tr>
+</table>
+
+<h2>Halle und Technik</h2>
+
+<table>
+<tr><th class="nr">Nr</th><th class="frage">Frage</th><th class="vorschlag">Unser Vorschlag</th><th>Ihre Antwort</th></tr>
+<tr>
+  <td class="nr">14</td>
+  <td><b>Gespräch mit Hupfauer.</b> Wir brauchen von dort: Wie lässt sich die Heizung ansteuern und auslesen, welches Tastenfeld und welcher Türöffner sind vorgesehen, und gibt es eine Schnittstelle zu Home Assistant? Wir nehmen gern an dem Gespräch teil.</td>
+  <td>Termin vereinbaren, solange die Bauplanung offen ist.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">15</td>
+  <td>Sie geben 30 Minuten Vorlauf von 0 °C auf 18 °C an. Ist das mit dem Heizungsplaner abgestimmt? Eine Traglufthalle mit Sandfläche braucht erfahrungsgemäß länger.</td>
+  <td>Wir übernehmen 30 Minuten. Der Wert ist jederzeit änderbar, und wir zeichnen die tatsächliche Temperatur auf, damit Sie ihn nach den ersten Wochen anpassen können.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">16</td>
+  <td>Türcode: keine Sperre, verstanden. Wären Sie einverstanden, dass das Tastenfeld ab dem fünften Fehlversuch ein paar Sekunden wartet, bevor es weitere Eingaben annimmt? Das bremst reines Durchprobieren, fällt einem normalen Nutzer aber nicht auf.</td>
+  <td>Ja – keine Sperre, nur eine kurze Verzögerung.</td>
+  <td class="antwort"></td>
+</tr>
+<tr>
+  <td class="nr">17</td>
+  <td><b>Bezahlsystem.</b> Wir haben verglichen: Stripe ist bei Kartenzahlung minimal günstiger (etwa 12 Cent je Buchung), kann aber <b>kein Wero</b>. Mollie deckt Karte, PayPal, Wero und Sofortüberweisung in einem Vertrag ab. Ist Ihnen Wero wichtig genug, um Mollie zu nehmen?</td>
+  <td>Mollie, wenn Wero gewünscht ist. Das System ist so gebaut, dass der Anbieter später wechselbar bleibt.</td>
+  <td class="antwort"></td>
+</tr>
+</table>
+
+<h2>Was wir aus Ihren Antworten bereits umgesetzt haben</h2>
+
+<p>Ohne Rückfrage übernommen: Buchungsfenster 14 Tage und Mindestvorlauf 60 Minuten, Stornofrist
+24 Stunden ohne nachträgliche Erstattung, Zahlungsfrist 15 Minuten, die beiden Kundengruppen DJK-Mitglied und Nicht-Mitglied
+mit 7 % und 19 %, keine Monatsrechnung, Abos nur per E-Mail, Heizung hallenweit mit Ihren Werten,
+Türcode ohne Sperre, Betreiber-Meldungen per E-Mail, Serverstandort Deutschland.</p>
+
+<p class="small">Zum Begriff <b>Nachbuchung</b>, den Sie nicht zuordnen konnten: Gemeint war eine
+Regel, nach der jemand sein Geld zurückbekommt, wenn er zu spät absagt und der Platz anschließend
+noch anderweitig gebucht wird. Diese Regel haben wir ersatzlos gestrichen. Es gilt jetzt schlicht:
+Wer nach Ablauf der Frist absagt, zahlt. Wenn Sie im Einzelfall anders entscheiden möchten, können
+Sie jede Stornierung von Hand kostenfrei stellen.</p>
+
+</body>
+</html>
