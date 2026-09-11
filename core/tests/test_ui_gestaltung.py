@@ -67,3 +67,18 @@ def test_feldseite_ordnet_keine_geraete_zu(eingeloggt: TestClient, db: Session) 
 def test_feldmodell_kennt_keine_geraetezuordnung() -> None:
     for weg in ("ha_licht_entity", "ha_praesenz_entity", "heizzone"):
         assert not hasattr(Feld, weg), f"Feld hat weiterhin die Spalte {weg}"
+
+
+def test_favicon_wird_ausgeliefert(client: TestClient) -> None:
+    """Ohne Symbol fragt jeder Browser /favicon.ico an und erzeugt einen 404 im Log."""
+    svg = client.get("/static/favicon.svg")
+    assert svg.status_code == 200
+    assert "image/svg+xml" in svg.headers["content-type"]
+
+    ico = client.get("/favicon.ico")
+    assert ico.status_code == 200, "/favicon.ico darf nicht ins Leere laufen"
+
+
+def test_seiten_verweisen_auf_das_symbol(eingeloggt: TestClient) -> None:
+    for seite in ("/admin", "/admin/login"):
+        assert 'rel="icon"' in eingeloggt.get(seite).text, f"{seite} nennt kein Symbol"
