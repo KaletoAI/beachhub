@@ -152,11 +152,20 @@ def woche(
 @router.get("/belegung/buchung/neu", response_class=HTMLResponse, response_model=None)
 def buchung_neu(
     request: Request,
-    feld: str,
-    beginn: str,
+    feld: str = "",
+    beginn: str = "",
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
+    # Die Seite setzt einen gewählten Slot voraus. Ohne ihn – aufgerufen über ein Lesezeichen
+    # oder einen alten Link – soll der Betreiber im Belegungsplan landen und nicht auf einer
+    # technischen Fehlerseite: Der Plan ist das Werkzeug, mit dem man den Slot auswählt.
+    if not feld or not beginn:
+        return mit_flash(
+            RedirectResponse("/admin/belegung", status_code=303),
+            "Bitte im Belegungsplan auf den freien Zeitraum klicken, den Sie buchen möchten.",
+            "ok",
+        )
     try:
         f = db.get(Feld, uuid.UUID(feld))
         start = _lokal(beginn) if f is not None else None

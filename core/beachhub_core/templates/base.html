@@ -25,11 +25,13 @@
     {% endif %}
   </div>
   {% if admin and nav_bereich and nav_bereich.unterpunkte %}
-  <nav class="unternav" aria-label="{{ nav_bereich.name }}">
-    {% for u in nav_bereich.unterpunkte %}
-    <a href="{{ u.pfad }}"{% if nav_unterpunkt and u.pfad == nav_unterpunkt.pfad %} aria-current="page"{% endif %}>{{ u.name }}</a>
-    {% endfor %}
-  </nav>
+  <div class="unternav">
+    <nav class="unternavzeile" aria-label="{{ nav_bereich.name }}">
+      {% for u in nav_bereich.unterpunkte %}
+      <a href="{{ u.pfad }}"{% if nav_unterpunkt and u.pfad == nav_unterpunkt.pfad %} aria-current="page"{% endif %}>{{ u.name }}</a>
+      {% endfor %}
+    </nav>
+  </div>
   {% endif %}
 </header>
 <main>
