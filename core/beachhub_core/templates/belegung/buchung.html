@@ -21,9 +21,7 @@
   <p>Durch: {{ b.storno.durch }}</p>
   <p>Grund: {{ b.storno.grund }}</p>
   <p>Kostenfrei: {{ "ja" if b.storno.kostenfrei else "nein" }}</p>
-  <p>Freigestellter Betrag: {{ b.storno.freigestellt_betrag|euro }}</p>
-  <p>Nachbuchung offen: {{ "ja" if b.storno.nachbuchung_offen else "nein" }}</p>
-  {% if b.storno.nachbuchung_offen %}
+  {% if not b.storno.kostenfrei %}
   <form method="post" action="/admin/belegung/buchung/{{ b.id }}/kulanz" class="karte schmal">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Kulanzgrund <input name="grund" required></label>

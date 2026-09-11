@@ -6,7 +6,7 @@ Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
 {% if s.kostenfrei -%}
 Die Stornierung ist für Sie kostenfrei.
 {%- else -%}
-Wird der Platz bis zum Termin von jemand anderem gebucht, entfällt der Betrag. Wir informieren Sie.
+Da die Stornofrist bereits abgelaufen war, bleibt der Betrag fällig.
 {%- endif %}
 
 Viele Grüße

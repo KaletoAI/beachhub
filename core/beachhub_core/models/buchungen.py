@@ -116,11 +116,4 @@ class Storno(UUIDMixin, Base):
     durch: Mapped[str] = mapped_column(String(10), nullable=False)  # kunde | betreiber | system
     kostenfrei: Mapped[bool] = mapped_column(Boolean, nullable=False)
     grund: Mapped[str] = mapped_column(String(300), default="", nullable=False)
-    nachbuchung_offen: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    nachbuchung_buchung_id: Mapped[uuid.UUID | None] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("buchung.id")
-    )
-    freigestellt_betrag: Mapped[Decimal] = mapped_column(
-        DECIMAL(10, 2), default=Decimal("0.00"), nullable=False
-    )
     buchung: Mapped[Buchung] = relationship(back_populates="storno", foreign_keys=[buchung_id])

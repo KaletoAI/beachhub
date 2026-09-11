@@ -2,7 +2,7 @@
 
 Stand: 2026-09-11 · Status: Entwurf zur Abstimmung · Zielgruppe: Entwicklungsteam
 
-Diese Fassung arbeitet die Antworten des Betreibers vom 10. September 2026 ein. Wesentlich geändert: zwei Kundengruppen mit eigenem Umsatzsteuersatz (3.2), Mitgliedsstatus mit Freischaltung und Jahresprüfung (3.2), Gutscheine und Freischaltcodes (3.9a), Saisonrechnung statt Monatsrechnung (3.9), Zahlungsanbieter offen hinter einem Adapter (3.8), Türcode ohne Sperre (3.10), Heizwerte des Betreibers (3.10), Gerätezuordnung nur noch im Hallendienst (3.1) und die Hosting-Entscheidung für das Portal (11).
+Diese Fassung arbeitet die Antworten des Betreibers vom 10. September 2026 ein. Wesentlich geändert: zwei Kundengruppen mit eigenem Umsatzsteuersatz (3.2), Mitgliedsstatus mit Freischaltung und Jahresprüfung (3.2), Gutscheine und Freischaltcodes (3.9a), Saisonrechnung statt Monatsrechnung (3.9), Zahlungsanbieter offen hinter einem Adapter (3.8), Türcode ohne Sperre (3.10), Heizwerte des Betreibers (3.10), Gerätezuordnung nur noch im Hallendienst (3.1), die Hosting-Entscheidung für das Portal (11) und der ersatzlose Wegfall der Nachbuchung (3.7).
 
 ## 1. Ziel
 
@@ -81,14 +81,14 @@ Nummerierung `A-<Bereich>-<Nr>` zur Referenz in Tickets und Tests.
 - **A-SPERR-1** Betreiber-Sperren: Feld(er), Zeitraum, Grund (Turnier, Wartung, Eigenbedarf, Feiertag). Sperren blockieren Buchungen, erzeugen keine Kosten und erscheinen im Portal als „nicht verfügbar“ ohne Grund.
 - **A-SPERR-2** Sperren über bestehenden Buchungen erfordern eine Entscheidung je betroffener Buchung (behalten oder kostenfrei stornieren mit Benachrichtigung).
 
-### 3.7 Storno und Nachbuchung
+### 3.7 Storno
 
 - **A-STORNO-1** Kostenfreies Storno bis `storno_frist_stunden` vor Slotbeginn (konfigurierbar, Start: 24 h). Der Slot wird sofort wieder frei.
-- **A-STORNO-2** Storno nach der Frist: Zahlungspflicht bleibt bestehen, der Slot wird trotzdem freigegeben. Das Storno merkt sich `nachbuchung_offen = true`.
-- **A-STORNO-3** Wird der freigegebene Zeitraum (ganz) bis Slotbeginn von einem *anderen* Kunden bestätigt gebucht, wird das Storno rückwirkend kostenfrei: Der Betrag wird dem Kunden als Guthaben gutgeschrieben, bei Saisonrechnungen über eine Teil-Stornorechnung (A-RECH-7). Teilweise Nachbuchung (z. B. 1 von 2 Stunden) macht anteilig kostenfrei. **Offen (Ⓞ-4):** Der Betreiber hat zu diesem Punkt „Verstehe das Thema Nachbuchung nicht" vermerkt. Die Regel ist die komplexeste Stelle des Stornomoduls; sie kann ersatzlos entfallen, wenn er sie nicht will.
+- **A-STORNO-2** Storno nach der Frist: Die Zahlungspflicht bleibt bestehen, der Slot wird trotzdem sofort freigegeben. Bucht danach ein anderer Kunde diesen Zeitraum, ändert das am fälligen Betrag nichts.
+- **A-STORNO-3** *(entfallen)* **Keine Nachbuchung.** Ein nach der Frist storniertes Entgelt bleibt fällig, unabhängig davon, ob der Platz anschließend anderweitig belegt wird. Die frühere Regel – ein anderer Kunde bucht den Zeitraum, das Storno wird rückwirkend (anteilig) kostenfrei – ist auf Entscheidung des Betreibers ersatzlos gestrichen, nachdem er anmerkte, den Begriff nicht zuordnen zu können. Damit entfallen die Felder `nachbuchung_offen`, `nachbuchung_buchung_id` und `freigestellt_betrag` am Storno, der Hook in `buchungen.NACH_ANLAGE` und die anteilige Verrechnung. Der einzige Weg, ein kostenpflichtiges Storno nachträglich freizustellen, ist die Kulanz des Betreibers (A-STORNO-4).
 - **A-STORNO-4** Der Betreiber kann jedes Storno manuell auf kostenfrei setzen (Kulanz), mit Grund und Auditeintrag.
 - **A-STORNO-5** Storno durch den Kunden ist nur bis Slotbeginn möglich.
-- **A-STORNO-6** **Jede Gutschrift braucht einen Korrekturbeleg.** Wird eine Buchung kostenfrei (Frist, Nachbuchung, Kulanz), deren Rechnung bereits gestellt ist, entsteht das Guthaben ausschließlich zusammen mit einer (Teil-)Stornorechnung über die betroffene Position. Ohne sie bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG). Guthabenbuchungen der Art `storno_gutschrift` dürfen deshalb nur über den Dienst entstehen, der zuvor die Stornoposition erzeugt. *Dies korrigiert eine bestehende Lücke in `services/storno.py`, die mit einem einheitlichen Satz von 19 % nur formal falsch war und mit zwei Sätzen nicht mehr tragbar ist.*
+- **A-STORNO-6** **Jede Gutschrift braucht einen Korrekturbeleg.** Wird eine Buchung kostenfrei (Frist oder Kulanz), deren Rechnung bereits gestellt ist, entsteht das Guthaben ausschließlich zusammen mit einer (Teil-)Stornorechnung über die betroffene Position. Ohne sie bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG). Guthabenbuchungen der Art `storno_gutschrift` dürfen deshalb nur über den Dienst entstehen, der zuvor die Stornoposition erzeugt. *Dies korrigiert eine bestehende Lücke in `services/storno.py`, die mit einem einheitlichen Satz von 19 % nur formal falsch war und mit zwei Sätzen nicht mehr tragbar ist.*
 - **A-STORNO-7** Eine mit einem Freischaltcode (A-GUT-2) bezahlte Buchung erzeugt bei Storno **niemals** Guthaben – der Code hatte keinen Geldwert. Der Betreiber kann stattdessen einen neuen Code ausstellen.
 
 ### 3.8 Zahlung
@@ -160,7 +160,7 @@ Zwei Vorgänge, die der Betreiber unterscheidet: Jemand **kauft** einen Slot in 
 ### 3.12 Benachrichtigungen
 
 - **A-MAIL-1** Portal versendet nur: Login-Codes, Gruppen-Mails (A-GRUP-8).
-- **A-MAIL-2** Hauptsystem versendet: Buchungsbestätigung mit PIN, Ablehnung, Zahlungsfrist abgelaufen, Stornobestätigung (mit Hinweis auf mögliche Nachbuchung), Nachbuchung erfolgt (Guthaben), Rechnung, Saisonrechnung, Gutscheincode mit Kaufbeleg, Mitgliedschaft freigeschaltet bzw. beendet, Erinnerung vor Ablauf der Mitgliedschaft, Erinnerung 24 h vor Termin mit PIN, Kontolöschung. Betreiber-Alarme (3.10) ebenfalls per E-Mail.
+- **A-MAIL-2** Hauptsystem versendet: Buchungsbestätigung mit PIN, Ablehnung, Zahlungsfrist abgelaufen, Stornobestätigung (mit Angabe, ob kostenfrei), Rechnung, Saisonrechnung, Gutscheincode mit Kaufbeleg, Mitgliedschaft freigeschaltet bzw. beendet, Erinnerung vor Ablauf der Mitgliedschaft, Erinnerung 24 h vor Termin mit PIN, Kontolöschung. Betreiber-Alarme (3.10) ebenfalls per E-Mail.
 - **A-MAIL-3** Alle Mails sind Templates mit Betreiberdaten aus der Konfiguration.
 
 ### 3.13 Admin-UI (Hauptsystem)
@@ -171,7 +171,7 @@ Zwei Vorgänge, die der Betreiber unterscheidet: Jemand **kauft** einen Slot in 
 - **A-ADM-4** Rechnungen: Liste, Filter, PDF, auf bezahlt setzen, Storno- und Teil-Stornorechnung, CSV-Export. Kein Monatslauf mehr (A-RECH-3).
 - **A-ADM-8** Gutscheine: Liste mit Status und Restwert, Freischaltcodes ausstellen (einzeln oder als Serie) mit Einschränkungen und Gültigkeit, Code sperren, Einlösungen je Gutschein einsehen.
 - **A-ADM-5** Halle: Live-Status (Planversion, Kontakt, HA-Status, Licht/Heizung/Tür je Feld), Ereignisliste, Alarme, Handbetrieb.
-- **A-ADM-6** Stornos mit `nachbuchung_offen`, Klärungsliste (unzuordenbare Zahlungen, Präsenz ohne Buchung), Audit-Log.
+- **A-ADM-6** Liste der kostenpflichtigen Stornos (Arbeitsliste für Kulanzentscheidungen), Klärungsliste (unzuordenbare Zahlungen, Präsenz ohne Buchung), Audit-Log.
 - **A-ADM-7** Login mit Benutzername/Passwort und TOTP-2FA; mehrere Admin-Benutzer mit Rollen `admin` und `lesend`.
 
 ## 4. Nichtfunktionale Anforderungen
@@ -203,7 +203,7 @@ PostgreSQL. Alle Tabellen mit `id` (UUID), `created_at`, `updated_at`.
 | `dauerbuchung` | kunde_id, feld_id, wochentag, start, ende, gueltig_von, gueltig_bis, pin_hash, pin_klar (verschlüsselt), beendet_am |
 | `buchung` | feld_id, kunde_id, beginn, ende (tstzrange-Exklusion je feld_id für Status ≠ storniert/verfallen/abgelehnt), status, preis, **ust_satz** (festgeschrieben, A-TARIF-3), **kundengruppe_id** (zum Leistungsdatum, A-KUND-6), zahlungsart (`online`/`saison`/`manuell`), pin_hash, pin_klar (verschlüsselt), dauerbuchung_id?, anfrage_id (Portal-Anfrage, unique), reserviert_bis?, rechnung_position_id?, anwesenheit (`unbekannt`/`bestaetigt`/`nicht_erschienen`) |
 | `sperre` | feld_id?, beginn, ende, grund (tstzrange-Exklusion gegen buchung) |
-| `storno` | buchung_id, zeitpunkt, durch (`kunde`/`betreiber`/`system`), kostenfrei, grund, nachbuchung_offen, nachbuchung_buchung_id?, freigestellt_betrag |
+| `storno` | buchung_id, zeitpunkt, durch (`kunde`/`betreiber`/`system`), kostenfrei, grund |
 | `zahlung` | kunde_id, buchung_id?, provider (Zahlungsdienst, `guthaben` oder `gutschein`), provider_ref (unique), betrag, status, empfangen_am, rohdaten_json. Beim Gutscheinkauf bleibt `buchung_id` leer; bei der Einlösung entsteht eine Zeile mit `provider = gutschein`, so dass Guthaben + Gutschein + Restzahlung einer Buchung stets ihren Preis ergeben |
 | `guthaben_buchung` | kunde_id, betrag (±), art (`storno_gutschrift`/`verrechnung`/`auszahlung`/`manuell`/`ueberzahlung`), bezug_id?, notiz, admin_user_id? |
 | `rechnung` | nummer (unique, lückenlos), **art** (`einzel`/`saison`/`storno`/`gutschein`), kunde_id, datum, leistung_von, leistung_bis, netto, ust, brutto, status, pdf_pfad, pdf_sha256, storniert_durch_id?, **dauerbuchung_id?** (bei `saison`), **korrigiert_rechnung_id?** (bei `storno`, auch für Teil-Stornos) |
@@ -279,7 +279,7 @@ Der Plan wird bei jedem Abruf als Ganzes ersetzt (Version steigt monoton). Ein A
 | `konto_geaendert` | anzeigename | ok |
 | `konto_loeschen` | – | ok (Anonymisierung terminiert) |
 | `buchung_anfragen` | feld_id, beginn, ende, **gutschein_code?** | `reserviert` (buchung_id, preis, guthaben_verrechnet, gutschein_verrechnet, checkout_url?, reserviert_bis) oder `bestaetigt` (voll aus Guthaben und/oder Gutschein) oder `abgelehnt` (grund: belegt, außerhalb_fenster, außerhalb_betriebszeit, kein_tarif, konto_gesperrt, gutschein_ungueltig) |
-| `buchung_stornieren` | buchung_id | ok (kostenfrei ja/nein, nachbuchung_offen) oder abgelehnt |
+| `buchung_stornieren` | buchung_id | ok (kostenfrei ja/nein) oder abgelehnt |
 | `mitgliedschaft_beantragen` | hinweis_text | ok (Antrag vermerkt, Betreiber entscheidet) |
 | `gutschein_kaufen` | betrag oder produkt, empfaenger_email? | `reserviert` (checkout_url) oder abgelehnt |
 | `zahlung_eingegangen` | provider, rohdaten, signatur_header? | ok / ignoriert |
@@ -297,7 +297,7 @@ Das Hauptsystem behandelt jede Nutzlast als nicht vertrauenswürdig: Konto muss 
 |---|---|---|
 | `belegung` | je Feld: Liste belegter Zeiträume im Buchungsfenster (nur beginn/ende, ohne Kunde), Betriebszeiten, Raster, Fenster-Parameter | nach jeder Änderung (debounced 2 s), nächtlich voll |
 | `tarife` | Preisregeln je Kundengruppe (nur die für Kunden sichtbaren) | bei Änderung, nächtlich |
-| `konto:<id>` | Kundengruppe, **Mitgliedsstatus (`mitglied_bis`, Antrag offen ja/nein)**, Guthaben, **eigene Gutscheine (Code, Restwert, gültig bis)**, eigene Buchungen (id, feld, beginn, ende, status, preis, pin_klar, storno-Info), Rechnungsliste (nummer, datum, brutto, status), offene Reservierungen mit checkout_url | nach jeder Antwort auf eine Anfrage des Kontos, bei Statusänderungen (Anwesenheit, Nachbuchung, Rechnung, Freischaltung), nächtlich |
+| `konto:<id>` | Kundengruppe, **Mitgliedsstatus (`mitglied_bis`, Antrag offen ja/nein)**, Guthaben, **eigene Gutscheine (Code, Restwert, gültig bis)**, eigene Buchungen (id, feld, beginn, ende, status, preis, pin_klar, storno-Info), Rechnungsliste (nummer, datum, brutto, status), offene Reservierungen mit checkout_url | nach jeder Antwort auf eine Anfrage des Kontos, bei Statusänderungen (Anwesenheit, Rechnung, Freischaltung), nächtlich |
 
 **Fehlerfälle.** Hauptsystem nicht erreichbar → Portal zeigt „Anfrage gesendet, Bestätigung folgt per E-Mail“; nach `antwort_hinweis_sekunden` (Start: 120) ein Hinweis. Reservierungen mit Zahlungsfrist werden vom Hauptsystem beim Verfall bereinigt, auch wenn der Kunde nie zurückkam. Signaturfehler oder Versionsrückschritt im Lesestand → Dokument verwerfen, Alarm an Betreiber.
 
@@ -331,7 +331,7 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
 
 **Mitgliedschaft.** Kunde beantragt im Portal → Klärungsliste und Mail an den Betreiber → Betreiber prüft gegen die Vereinsverwaltung und setzt `mitglied_bis` → Mail an Kunden, Lesestand aktualisiert, Portal zeigt ab sofort Mitgliedspreise. Acht Wochen vor Saisonstart erzeugt das System die Prüfliste der auslaufenden Mitgliedschaften.
 
-**Storno nach Frist mit Nachbuchung.** Kunde storniert (T-10 h, Frist 24 h) → Storno kostenpflichtig, `nachbuchung_offen` → Slot im Lesestand frei → anderer Kunde bucht und bestätigt → Hauptsystem erkennt beim Bestätigen: Zeitraum deckt offenes Storno → Storno kostenfrei: Stornorechnung über die Position **und** Guthaben-Buchung `storno_gutschrift` (A-STORNO-6) → Mail an beide. Bleibt der Slot bis Beginn frei: Storno bleibt kostenpflichtig. Nachbuchung durch denselben Kunden zählt nicht.
+**Storno nach Frist.** Kunde storniert (T-10 h, Frist 24 h) → Storno kostenpflichtig, der Betrag bleibt fällig → Slot im Lesestand sofort wieder frei → bucht ihn ein anderer Kunde, ist das ein davon unabhängiger Vorgang. Der Betreiber sieht das Storno in der Liste der kostenpflichtigen Stornos und kann es aus Kulanz freistellen; dann entstehen Stornorechnung und Guthaben zusammen (A-STORNO-6).
 
 **Hallentag.** 17:55 Heizung auf Spieltemperatur (erste Buchung 19:00, Vorlauf 60 min, Plan lokal) → 18:45 PIN-Freigabe → 18:55 Licht Feld 2 an → 19:02 PIN eingegeben, Tür öffnet, Ereignis `pin_akzeptiert` → Präsenz Feld 2 erkannt → 21:05 Licht aus, keine Folgebuchung → Heizung Grundtemperatur → Ereignisse gehen gebündelt ans Hauptsystem, Buchung wird `durchgeführt`.
 
@@ -365,7 +365,7 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
     docs/        Spezifikation, Betreiberdokument, Betriebshandbuch
   ```
   Ein Python-Projekt je Verzeichnis mit eigenem `pyproject.toml`; `shared` als lokales Paket. Ein Workflow in GitHub Actions: Lint (ruff), Typen (mypy), Tests (pytest) je Teil, Vertragstests über `shared`.
-- **Tests:** Fachlogik (Tarifauflösung, Fenster, Kollision, Storno/Nachbuchung, Rechnungsnummern, Kostenteilung) als reine Unit-Tests; Integrationstests je App gegen temporäre Datenbank; Vertragstests: Nachrichten aus `shared` werden von Sender und Empfänger validiert; Hallendienst gegen einen HA-Simulator (Fake-REST/WS) inkl. Offline-Szenario (Verbindung kappen, 72 h simulierte Uhr). Uhr überall injizierbar (`clock`).
+- **Tests:** Fachlogik (Tarifauflösung, Fenster, Kollision, Storno, Rechnungsnummern, Kostenteilung) als reine Unit-Tests; Integrationstests je App gegen temporäre Datenbank; Vertragstests: Nachrichten aus `shared` werden von Sender und Empfänger validiert; Hallendienst gegen einen HA-Simulator (Fake-REST/WS) inkl. Offline-Szenario (Verbindung kappen, 72 h simulierte Uhr). Uhr überall injizierbar (`clock`).
 - **Betrieb:** Portal hinter Caddy (automatisches TLS); Hauptsystem hinter Caddy auf WireGuard-IP; Halle als Container neben HA (HA OS: als Add-on-Container möglich, sonst Docker). Logs strukturiert (JSON), Alarme per E-Mail; einfache Health-Endpunkte.
 - **Hosting des Portals.** Geprüft wurde die Vorgabe, das Portal auf einem Hetzner-Webhosting-Paket zu betreiben. Ergebnis: **Weder S noch M tragen dieses Portal.**
 
@@ -409,6 +409,7 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
 | O-14 | Betreiber-Alarme | Stufe 1 nur E-Mail |
 | O-15 | Datenschutzerklärung, AV-Verträge, Verarbeitungsverzeichnis | Betreiber, vor Stufe 2 |
 | O-16 | Serverstandort Deutschland | bestätigt |
+| O-17 | Nachbuchung nach verspätetem Storno | **entfällt ersatzlos** – ein nach der Frist storniertes Entgelt bleibt fällig |
 
 Neu hinzugekommen: Gutscheincodes (Kauf und Einlösung, Abschnitt 3.9a) und ein Freischaltprozess für die Vereinsmitgliedschaft (A-KUND-4 bis A-KUND-6).
 
@@ -419,7 +420,6 @@ Neu hinzugekommen: Gutscheincodes (Kauf und Einlösung, Abschnitt 3.9a) und ein 
 | Ⓞ-1 | Portal und Hauptsystem als getrennte Container auf demselben Proxmox-Host – die Trennung ist damit schwächer als bei getrennter Hardware | akzeptiert zugunsten der Betriebskosten (Abschnitt 11) |
 | Ⓞ-2 | „Rechnungskunden bei der Onlinebuchung ausschließen": Sollen Abo-Kunden gar nicht online buchen dürfen, oder nur nicht auf Rechnung? | Zahlungsart „Rechnung" gibt es im Portal nicht; jede Einzelbuchung wird online bezahlt (A-ZAHL-1) |
 | Ⓞ-3 | Darf ein Abo-Kunde einzelne Termine absagen und Geld zurückbekommen, oder ist die Saison fest bezahlt? | fest bezahlt; nur so bleibt die Saisonrechnung stabil (A-DAUER-3) |
-| Ⓞ-4 | Nachbuchung: Soll es die Regel überhaupt geben („Verstehe das Thema nicht"), und wenn ja, auch anteilig? | vorerst beibehalten, anteilig (A-STORNO-3) |
 | Ⓞ-5 | Gutschein: fester Eurobetrag oder garantiert eine Stunde? | fester Betrag, Differenz zahlt der Einlösende (A-GUT-1) |
 | Ⓞ-6 | Gutscheinkauf ohne Portalkonto möglich? | nein, Konto erforderlich (A-GUT-8) |
 | Ⓞ-7 | Zählen nur Privatpersonen als DJK-Mitglied, oder auch eine Abteilung, die als Abo-Kunde auftritt? Wie wird die Mitgliedschaft nachgewiesen? | Privatpersonen, Nachweis über Mitgliedsnummer im Antrag |

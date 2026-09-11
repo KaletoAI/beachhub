@@ -40,7 +40,7 @@
   <div class="sub">Anforderungen und Lösungskonzept für Buchung, Abrechnung und Steuerung der Beachhalle</div>
   <p>Dieses Dokument beschreibt, was das neue System für die Beachhalle leisten soll und wie es aufgebaut wird. Es richtet sich an den Betreiber der Halle als Auftraggeber. Es enthält bewusst keine technischen Details; diese stehen in einer separaten Spezifikation für die Entwickler.</p>
   <p>Am Ende steht eine Liste von Entscheidungen, die der Betreiber treffen muss, bevor die Umsetzung beginnt.</p>
-  <p>Diese Ausgabe arbeitet Ihre Antworten vom 10. September 2026 ein. Wesentlich geändert haben sich: die Kundengruppen und ihre Steuersätze, die Abrechnung von Abos (Saisonrechnung statt Monatsrechnung), der Freischaltprozess für die Vereinsmitgliedschaft, die neu hinzugekommenen Gutscheincodes und die Werte für Heizung und Türcode. Die verbliebenen Fragen stehen in einem eigenen kurzen Dokument.</p>
+  <p>Diese Ausgabe arbeitet Ihre Antworten vom 10. September 2026 ein. Wesentlich geändert haben sich: die Kundengruppen und ihre Steuersätze, die Abrechnung von Abos (Saisonrechnung statt Monatsrechnung), der Freischaltprozess für die Vereinsmitgliedschaft, die neu hinzugekommenen Gutscheincodes, die Werte für Heizung und Türcode sowie der Wegfall der nachträglichen Erstattung bei verspäteter Absage. Die verbliebenen Fragen stehen in einem eigenen kurzen Dokument.</p>
   <div class="meta">
     Stand: 11. September 2026<br>
     Status: Entwurf zur Abstimmung<br>
@@ -175,7 +175,7 @@
   <ul>
     <li>Bis zur Stornofrist (Vorschlag: 24 Stunden vor Beginn) ist die Stornierung kostenfrei.</li>
     <li>Nach der Frist bleibt der Preis fällig. Der Slot wird trotzdem sofort wieder freigegeben.</li>
-    <li>Bucht ein anderer Kunde den freigewordenen Slot bis zum Termin, wird die Stornierung nachträglich kostenfrei: Der Kunde bekommt den Betrag als Guthaben, und es entsteht eine Stornorechnung. Beide Kunden werden per E-Mail informiert. <i>(Dies ist die „Nachbuchung“, zu der Sie angemerkt haben, dass Ihnen der Begriff nichts sagt – wir können die Regel auch weglassen.)</i></li>
+    <li>Wird der Platz danach von jemand anderem gebucht, ändert das nichts: Der Betrag bleibt fällig.</li>
     <li>Der Betreiber kann jede Stornierung aus Kulanz auf kostenfrei setzen.</li>
   </ul>
 </div>
@@ -256,7 +256,7 @@
   <tr><td>Rechnungen</td><td>Übersicht, PDF, auf bezahlt setzen, Storno- und Teil-Stornorechnung, CSV-Export.</td></tr>
   <tr><td>Gutscheine</td><td>Verkaufte Gutscheine mit Restwert, eigene Gratis-Codes ausstellen (einzeln oder als Serie), Code sperren, Einlösungen einsehen.</td></tr>
   <tr><td>Halle</td><td>Live-Zustand von Licht, Heizung, Tür je Feld; letzter Kontakt; Ereignisse; Handbetrieb ein/aus.</td></tr>
-  <tr><td>Klärung</td><td>Offene Stornos, die noch nachgebucht werden können; unzuordenbare Zahlungen; Anwesenheit ohne Buchung; Änderungsprotokoll.</td></tr>
+  <tr><td>Klärung</td><td>Kostenpflichtige Stornos (dort gewähren Sie bei Bedarf Kulanz); unzuordenbare Zahlungen; Anwesenheit ohne Buchung; Änderungsprotokoll.</td></tr>
 </table>
 <p>Der Betreiber erhält E-Mails bei: Halle ohne Verbindung, Anwesenheit ohne Buchung, Tür außerhalb einer Buchung, <b>fünf Fehleingaben am Tastenfeld</b>, Störung der Haussteuerung, fehlgeschlagener Zahlung, <b>Antrag auf Vereinsmitgliedschaft</b>.</p>
 
@@ -346,6 +346,7 @@
   <tr><td>☑</td><td>Betreiber-Meldungen</td><td>Stufe 1 nur E-Mail</td></tr>
   <tr><td>☑</td><td>Datenschutzerklärung, Auftragsverarbeitung, Verarbeitungsverzeichnis</td><td>Betreiber, vor Stufe 2</td></tr>
   <tr><td>☑</td><td>Serverstandort</td><td>Deutschland</td></tr>
+  <tr><td>☑</td><td>Nachträgliche Erstattung, wenn ein zu spät abgesagter Platz neu vergeben wird</td><td><b>entfällt ersatzlos</b> – wer zu spät absagt, zahlt</td></tr>
 </table>
 
 <h3>Noch offen</h3>
@@ -361,7 +362,6 @@
   <tr><td>☐</td><td>„Rechnungskunden bei der Onlinebuchung ausschließen“ – gar nicht buchen oder nur nicht auf Rechnung?</td><td>nur nicht auf Rechnung; jede Einzelbuchung wird online bezahlt</td></tr>
   <tr><td>☐</td><td>Zählen nur Privatpersonen als DJK-Mitglied? Wie wird die Mitgliedschaft nachgewiesen?</td><td>Privatpersonen, Nachweis über die Mitgliedsnummer</td></tr>
   <tr><td>☐</td><td>Saisonende und Stichtag der Mitglieder-Prüfliste</td><td>Prüfliste acht Wochen vor Saisonstart</td></tr>
-  <tr><td>☐</td><td>„Nachbuchung“ – soll es die Regel überhaupt geben, und anteilig?</td><td>vorerst ja, anteilig</td></tr>
   <tr><td>☐</td><td><b>Steuerberater:</b> 7 % für Mitglieder zulässig? Gutscheine ohne Steuerausweis beim Kauf? Saisonrechnung im Voraus?</td><td>wie in diesem Dokument beschrieben</td></tr>
   <tr><td>☐</td><td>Schafft die Heizung 0 °C → 18 °C in 30 Minuten?</td><td>Wert übernommen, jederzeit änderbar</td></tr>
   <tr><td>☐</td><td>Türcode: wenige Sekunden Verzögerung ab dem fünften Fehlversuch (keine Sperre)?</td><td>ja</td></tr>
@@ -381,7 +381,6 @@
   <tr><td>Buchungsfenster</td><td>Zeitraum vor einem Termin, in dem Kunden freie Slots buchen können.</td></tr>
   <tr><td>Dauerbuchung</td><td>Wiederkehrende Buchung über eine Saison, vom Betreiber angelegt.</td></tr>
   <tr><td>Sperre</td><td>Vom Betreiber blockierter Zeitraum ohne Kunde.</td></tr>
-  <tr><td>Nachbuchung</td><td>Ein anderer Kunde bucht einen nach der Frist stornierten Slot; die Stornierung wird dadurch kostenfrei.</td></tr>
   <tr><td>Zahlencode (PIN)</td><td>Sechsstelliger Code je Buchung für die Tür, gültig nur im Zeitfenster der Buchung.</td></tr>
   <tr><td>Guthaben</td><td>Betrag, den ein Kunde beim Betreiber gut hat und der mit der nächsten Buchung verrechnet wird.</td></tr>
   <tr><td>Saisonrechnung</td><td>Eine Rechnung über alle Termine eines Abos, gestellt bei Anlage des Abos und per Überweisung bezahlt. Ersetzt die frühere Monatsrechnung.</td></tr>

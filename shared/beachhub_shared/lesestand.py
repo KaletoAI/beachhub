@@ -76,8 +76,6 @@ class TarifeInhalt(BaseModel):
 
 class StornoInfo(BaseModel):
     kostenfrei: bool
-    nachbuchung_offen: bool
-    freigestellt_betrag: Decimal
 
 
 class KontoBuchung(BaseModel):

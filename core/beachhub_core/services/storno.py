@@ -1,8 +1,7 @@
 import uuid
 from datetime import timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
@@ -20,6 +19,10 @@ def _gutschrift(
     """Onlinezahler, die bereits bestätigt (= bezahlt) waren, bekommen Guthaben.
 
     Rechnungskunden nicht.
+
+    Hinweis: Solange eine Gutschrift ohne zugehörige Stornorechnung entsteht, bleibt
+    Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (A-STORNO-6 der Spezifikation).
+    Das ist mit der Umstellung auf zwei Steuersätze zu beheben.
     """
     if buchung.zahlungsart == "online" and betrag > 0:
         guthaben.buche(
@@ -65,8 +68,6 @@ def storniere(
         durch=durch,
         kostenfrei=kostenfrei,
         grund=grund,
-        nachbuchung_offen=not kostenfrei,
-        freigestellt_betrag=buchung.preis if kostenfrei else Decimal("0.00"),
     )
     db.add(s)
     quelle = "admin" if durch == "betreiber" else ("portal" if durch == "kunde" else "system")
@@ -88,62 +89,15 @@ def storniere(
     return s
 
 
-def _ueberlappung_minuten(a: Buchung, b: Buchung) -> int:
-    von, bis = max(a.beginn, b.beginn), min(a.ende, b.ende)
-    return max(0, int((bis - von).total_seconds() // 60))
-
-
-def pruefe_nachbuchung(db: Session, neue: Buchung) -> None:
-    offene = db.scalars(
-        select(Storno)
-        .join(Buchung, Storno.buchung_id == Buchung.id)
-        .where(
-            Storno.nachbuchung_offen.is_(True),
-            Buchung.feld_id == neue.feld_id,
-            Buchung.kunde_id != neue.kunde_id,
-            Buchung.beginn < neue.ende,
-            Buchung.ende > neue.beginn,
-        )
-    ).all()
-    for s in offene:
-        alt = s.buchung
-        gesamt = int((alt.ende - alt.beginn).total_seconds() // 60)
-        anteil = (alt.preis * Decimal(_ueberlappung_minuten(alt, neue)) / Decimal(gesamt)).quantize(
-            Decimal("0.01"), rounding=ROUND_HALF_UP
-        )
-        neu_frei = min(alt.preis, s.freigestellt_betrag + anteil)
-        zusatz = neu_frei - s.freigestellt_betrag
-        if zusatz <= 0:
-            continue
-        vorher = audit.als_dict(s)
-        s.freigestellt_betrag = neu_frei
-        s.nachbuchung_buchung_id = neue.id
-        if neu_frei >= alt.preis:
-            s.kostenfrei = True
-            s.nachbuchung_offen = False
-        _gutschrift(db, alt, zusatz, s.id, "system")
-        db.flush()
-        audit.protokolliere(
-            db,
-            quelle="system",
-            objekt_typ="storno",
-            objekt_id=s.id,
-            vorher=vorher,
-            nachher=audit.als_dict(s),
-        )
-        from beachhub_core.services import lesestand
-
-        lesestand.markiere_geaendert(db, f"konto:{alt.kunde_id}")
-
-
 def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: str) -> None:
+    """Stellt ein kostenpflichtiges Storno nachträglich frei. Ein bereits kostenfreies
+    Storno bleibt unberührt – sonst entstünde ein zweites Mal Guthaben."""
+    if s.kostenfrei:
+        return
     vorher = audit.als_dict(s)
-    rest = s.buchung.preis - s.freigestellt_betrag
     s.kostenfrei = True
-    s.nachbuchung_offen = False
-    s.freigestellt_betrag = s.buchung.preis
     s.grund = (s.grund + " | " if s.grund else "") + f"Kulanz: {grund}"
-    _gutschrift(db, s.buchung, rest, s.id, "admin")
+    _gutschrift(db, s.buchung, s.buchung.preis, s.id, "admin")
     db.flush()
     audit.protokolliere(
         db,
@@ -159,7 +113,5 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
     lesestand.markiere_geaendert(db, f"konto:{s.buchung.kunde_id}")
 
 
-# Verdrahtung der Hooks aus Task 8/9 – einmalig beim Import
+# Verdrahtung der Hooks – einmalig beim Import
 sperren.STORNIERE = storniere
-if pruefe_nachbuchung not in buchungen.NACH_ANLAGE:
-    buchungen.NACH_ANLAGE.append(pruefe_nachbuchung)

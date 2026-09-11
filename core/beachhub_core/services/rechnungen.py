@@ -169,9 +169,7 @@ def abrechenbare_buchungen(
             s = db.scalar(select(Storno).where(Storno.buchung_id == b.id))
             if s is None or s.kostenfrei:
                 continue
-            rest = b.preis - s.freigestellt_betrag
-            if rest > 0:
-                out.append((b, rest))
+            out.append((b, b.preis))
         else:
             out.append((b, b.preis))
     return out

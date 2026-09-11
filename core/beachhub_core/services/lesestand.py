@@ -169,13 +169,7 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
                 status=b.status,
                 preis=b.preis,
                 pin=pin.entschluessele(b.pin_verschluesselt) if zeige_pin else None,  # type: ignore[arg-type]
-                storno=schema.StornoInfo(
-                    kostenfrei=s.kostenfrei,
-                    nachbuchung_offen=s.nachbuchung_offen,
-                    freigestellt_betrag=s.freigestellt_betrag,
-                )
-                if s
-                else None,
+                storno=schema.StornoInfo(kostenfrei=s.kostenfrei) if s else None,
             )
         )
     rechnungen = db.scalars(

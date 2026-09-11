@@ -92,7 +92,7 @@ def test_storno_ueber_ui(eingeloggt: TestClient, db: Session, welt) -> None:
     )
     assert r.status_code == 303
     db.refresh(b)
-    assert b.status == "storniert" and b.storno.nachbuchung_offen and not b.storno.kostenfrei
+    assert b.status == "storniert" and not b.storno.kostenfrei
 
 
 def test_sperre_mit_entscheidung(eingeloggt: TestClient, db: Session, welt) -> None:
