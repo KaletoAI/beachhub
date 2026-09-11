@@ -75,6 +75,7 @@ def favicon() -> FileResponse:
     Ohne die Route stünde in jedem Log ein 404."""
     return FileResponse(static_dir / "favicon.svg", media_type="image/svg+xml")
 
+
 csrf = [Depends(verify_csrf)]
 app.include_router(admin_auth.router, prefix="/admin", dependencies=csrf)
 app.include_router(dashboard.router, prefix="/admin", dependencies=csrf)
