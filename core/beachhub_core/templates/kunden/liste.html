@@ -15,7 +15,7 @@
     <td>{{ k.kundengruppe.name }}</td>
     <td>{{ k.zahlungsart }}</td>
     <td>{{ k.guthaben|euro }}</td>
-    <td><a href="/admin/kunden/{{ k.id }}">öffnen</a></td>
+    <td><a class="aktion" href="/admin/kunden/{{ k.id }}">öffnen</a></td>
   </tr>{% endfor %}
 </table>
 </div>

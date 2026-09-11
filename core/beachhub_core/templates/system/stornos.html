@@ -10,7 +10,7 @@
     <td>{{ s.buchung.beginn|lokal }} – {{ s.buchung.ende|uhrzeit }}</td>
     <td class="rechts">{{ s.buchung.preis|euro }}</td>
     <td class="rechts">{{ s.freigestellt_betrag|euro }}</td>
-    <td><a href="/admin/belegung/buchung/{{ s.buchung_id }}">öffnen</a></td>
+    <td><a class="aktion" href="/admin/belegung/buchung/{{ s.buchung_id }}">öffnen</a></td>
   </tr>{% endfor %}
 </table>
 {% if not stornos %}<p>Keine offenen Stornos.</p>{% endif %}

@@ -4,20 +4,18 @@
 {% if not felder %}
 <p>Kein aktives Feld vorhanden. Bitte zunächst ein Feld in den Stammdaten anlegen.</p>
 {% else %}
-<div class="karte zeile">
-  <form method="get" action="/admin/belegung" id="belegung-feld-form">
+<div class="karte werkzeuge">
+  <form method="get" action="/admin/belegung" id="belegung-feld-form" class="werkzeuge">
     <label>Feld <select name="feld">
       {% for x in felder %}<option value="{{ x.id }}" {% if x.id == feld.id %}selected{% endif %}>{{ x.name }}</option>{% endfor %}
     </select></label>
     <input type="hidden" name="woche" value="{{ montag.isoformat() }}">
     <button>Anzeigen</button>
   </form>
-  <nav>
-    <a href="/admin/belegung?feld={{ feld.id }}&woche={{ vorher.isoformat() }}">« Vorherige Woche</a>
-    <a href="/admin/belegung?feld={{ feld.id }}&woche={{ nachher.isoformat() }}">Nächste Woche »</a>
+  <nav class="aktionen" aria-label="Woche wechseln">
+    <a class="aktion" href="/admin/belegung?feld={{ feld.id }}&woche={{ vorher.isoformat() }}">« Vorherige Woche</a>
+    <a class="aktion" href="/admin/belegung?feld={{ feld.id }}&woche={{ nachher.isoformat() }}">Nächste Woche »</a>
   </nav>
-  <a href="/admin/belegung/sperre/neu">Sperre anlegen</a>
-  <a href="/admin/belegung/dauer/neu">Dauerbuchung anlegen</a>
 </div>
 
 <div class="karte">
@@ -35,7 +33,7 @@
           {{ z.slot.beginn|uhrzeit }} {{ z.sperre.grund }}
           <form method="post" action="/admin/belegung/sperre/{{ z.sperre.id }}/loeschen" class="inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button class="link" title="Sperre löschen">×</button>
+            <button class="aktion" title="Sperre löschen">×</button>
           </form>
         </div>
         {% endif %}

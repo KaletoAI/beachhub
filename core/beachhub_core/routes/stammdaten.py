@@ -98,9 +98,6 @@ def feld_aendern(
     name: str = Form(...),
     reihenfolge: str = Form("0"),
     aktiv: str = Form(""),
-    ha_licht_entity: str = Form(""),
-    ha_praesenz_entity: str = Form(""),
-    heizzone: str = Form(""),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
@@ -115,9 +112,6 @@ def feld_aendern(
             name=name.strip(),
             reihenfolge=t_int(reihenfolge) or 0,
             aktiv=aktiv == "1",
-            ha_licht_entity=ha_licht_entity or None,
-            ha_praesenz_entity=ha_praesenz_entity or None,
-            heizzone=heizzone or None,
         )
         db.commit()
     except FORM_FEHLER as e:
@@ -487,7 +481,7 @@ def konfiguration_seite(
         request,
         "stammdaten/konfiguration.html",
         admin=admin,
-        werte=werte,
+        gruppen=konfiguration.gruppiert(werte),
         defaults=konfiguration.DEFAULTS,
     )
 

@@ -24,3 +24,14 @@ def test_unbekannter_schluessel_wirft() -> None:
 
     with pytest.raises(KeyError):
         konfiguration.DEFAULTS["gibt_es_nicht"]
+
+
+def test_dezimalwert_nimmt_komma_und_punkt(db: Session) -> None:
+    """Die Konfigurationsseite zeigt Dezimalzahlen deutsch mit Komma; sie muss sie deshalb
+    auch so wieder entgegennehmen."""
+    konfiguration.setze(db, "ust_satz", "7,5")
+    db.commit()
+    assert konfiguration.hole(db, "ust_satz") == Decimal("7.5")
+    konfiguration.setze(db, "ust_satz", "19.00")
+    db.commit()
+    assert konfiguration.hole(db, "ust_satz") == Decimal("19.00")

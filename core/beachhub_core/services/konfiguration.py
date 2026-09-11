@@ -1,6 +1,7 @@
 """Konfigurationswerte: Defaults im Code, Überschreibung in der Tabelle `konfiguration`."""
 
 import uuid
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
@@ -30,9 +31,111 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
 _TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool"}
 
 
+@dataclass(frozen=True)
+class Beschreibung:
+    """Wie ein Konfigurationswert in der Verwaltung erscheint. Ohne diese Angaben stünden
+    dort die technischen Schlüssel untereinander, die niemand ohne Spezifikation deutet."""
+
+    gruppe: str
+    name: str
+    einheit: str = ""
+    hilfe: str = ""
+
+
+BESCHREIBUNGEN: dict[str, Beschreibung] = {
+    "fenster_tage": Beschreibung(
+        "Buchung und Storno",
+        "Buchungsfenster",
+        "Tage",
+        "So viele Tage im Voraus sehen Kunden freie Zeiten und können sie buchen.",
+    ),
+    "mindestvorlauf_minuten": Beschreibung(
+        "Buchung und Storno",
+        "Mindestvorlauf",
+        "Minuten",
+        "So kurz vor Beginn ist eine Buchung noch möglich.",
+    ),
+    "storno_frist_stunden": Beschreibung(
+        "Buchung und Storno",
+        "Stornofrist",
+        "Stunden vor Beginn",
+        "Bis zu dieser Frist ist die Stornierung kostenfrei.",
+    ),
+    "zahlungsfrist_minuten": Beschreibung(
+        "Zahlung und Rechnung",
+        "Zahlungsfrist",
+        "Minuten",
+        "So lange bleibt eine Reservierung nach der Buchung für die Online-Zahlung bestehen.",
+    ),
+    "ust_satz": Beschreibung(
+        "Zahlung und Rechnung",
+        "Umsatzsteuersatz",
+        "Prozent",
+        "Gilt für alle Rechnungen.",
+    ),
+    "rechnung_tag_im_folgemonat": Beschreibung(
+        "Zahlung und Rechnung",
+        "Tag des Rechnungslaufs",
+        "Tag im Folgemonat",
+    ),
+    "rechnung_zahlungsziel_tage": Beschreibung(
+        "Zahlung und Rechnung",
+        "Zahlungsziel",
+        "Tage",
+    ),
+    "heiz_vorlauf_minuten": Beschreibung(
+        "Halle",
+        "Heizvorlauf",
+        "Minuten",
+        "So lange vor der ersten Buchung eines Blocks heizt die Halle auf Spieltemperatur.",
+    ),
+    "spiel_temperatur": Beschreibung("Halle", "Spieltemperatur", "Grad"),
+    "grund_temperatur": Beschreibung(
+        "Halle", "Grundtemperatur", "Grad", "Temperatur außerhalb der Buchungen."
+    ),
+    "licht_vorlauf_minuten": Beschreibung("Halle", "Licht an vor Beginn", "Minuten"),
+    "licht_nachlauf_minuten": Beschreibung("Halle", "Licht aus nach Ende", "Minuten"),
+    "zutritt_vorlauf_minuten": Beschreibung(
+        "Halle",
+        "Zahlencode gültig ab",
+        "Minuten vor Beginn",
+        "Bis zum Ende der Buchung bleibt der Code gültig.",
+    ),
+    "antwort_hinweis_sekunden": Beschreibung(
+        "Portal und Zugang",
+        "Hinweis auf verzögerte Antwort",
+        "Sekunden",
+        "So lange wartet das Portal auf die Antwort des Hauptsystems, bevor es den Kunden "
+        "um Geduld bittet.",
+    ),
+    "pin_laenge": Beschreibung("Portal und Zugang", "Länge des Zahlencodes", "Stellen"),
+}
+
+# Reihenfolge der Gruppen auf der Konfigurationsseite.
+GRUPPEN: list[str] = ["Buchung und Storno", "Zahlung und Rechnung", "Halle", "Portal und Zugang"]
+
+
+def gruppiert(werte: dict[str, Any]) -> list[tuple[str, list[tuple[str, Any, Beschreibung]]]]:
+    """Ordnet die Werte den Gruppen zu, in der Reihenfolge von GRUPPEN."""
+    return [
+        (
+            gruppe,
+            [
+                (schluessel, werte[schluessel], BESCHREIBUNGEN[schluessel])
+                for schluessel in DEFAULTS
+                if schluessel in werte and BESCHREIBUNGEN[schluessel].gruppe == gruppe
+            ],
+        )
+        for gruppe in GRUPPEN
+    ]
+
+
 def _parse(typ: type, roh: str) -> Any:
     if typ is bool:
         return roh.lower() in ("1", "true", "ja")
+    if typ is Decimal:
+        # Die Oberfläche zeigt Dezimalzahlen deutsch mit Komma und bekommt sie so zurück.
+        roh = roh.strip().replace(",", ".")
     return typ(roh)
 
 
