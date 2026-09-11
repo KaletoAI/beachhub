@@ -6,6 +6,12 @@ import pytest
 from beachhub_core.navigation import NAVIGATION, bereich_fuer_pfad
 from fastapi.testclient import TestClient
 
+ALLE_NAVIGATIONSZIELE = [
+    ziel
+    for bereich in NAVIGATION
+    for ziel in ([bereich.pfad] + [u.pfad for u in bereich.unterpunkte])
+]
+
 # Seiten, die ohne angelegte Stammdaten erreichbar sind.
 SEITEN = [
     "/admin",
@@ -86,3 +92,19 @@ def test_unterseiten_bleiben_im_richtigen_bereich() -> None:
 
 def test_unbekannter_pfad_hat_keinen_bereich() -> None:
     assert bereich_fuer_pfad("/admin/gibtsnicht") is None
+
+
+@pytest.mark.parametrize("ziel", ALLE_NAVIGATIONSZIELE)
+def test_jedes_navigationsziel_ist_erreichbar(eingeloggt: TestClient, ziel: str) -> None:
+    """Ein Menüpunkt, der ohne weiteren Kontext eine Fehlerseite liefert, ist ein Fehler.
+    Geprüft wird bewusst ohne angelegte Stammdaten: Wer frisch installiert, klickt genau
+    so durch das Menü."""
+    antwort = eingeloggt.get(ziel, follow_redirects=True)
+    assert antwort.status_code == 200, f"{ziel} antwortet mit {antwort.status_code}"
+
+
+def test_unternavigation_ist_wie_das_hauptmenue_ausgerichtet(eingeloggt: TestClient) -> None:
+    """Beide Zeilen brauchen denselben zentrierten Inhaltsbereich, sonst beginnt das
+    Untermenü auf breiten Bildschirmen am linken Rand, während der Titel eingerückt ist."""
+    text = eingeloggt.get("/admin/tarife").text
+    assert 'class="unternavzeile"' in text

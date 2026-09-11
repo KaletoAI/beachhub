@@ -332,3 +332,16 @@ def test_woche_zeigt_sperre_zelle(eingeloggt: TestClient, db: Session, welt) -> 
     c.post("/admin/belegung/sperre", data=daten)
     seite = c.get(f"/admin/belegung?feld={f.id}&woche=2027-11-29")
     assert seite.status_code == 200 and 'class="zelle sperre"' in seite.text
+
+
+def test_buchung_neu_ohne_slot_fuehrt_in_den_plan(eingeloggt: TestClient, welt) -> None:
+    """Der Pfad wird normalerweise mit Feld und Beginn aufgerufen. Ohne diese Angaben –
+    über ein Lesezeichen etwa – gehörte der Betreiber in den Belegungsplan geführt und
+    nicht auf eine technische Fehlerseite (vorher: HTTP 422 mit JSON-Rumpf)."""
+    antwort = eingeloggt.get("/admin/belegung/buchung/neu", follow_redirects=False)
+    assert antwort.status_code == 303
+    assert antwort.headers["location"] == "/admin/belegung"
+
+    seite = eingeloggt.get("/admin/belegung/buchung/neu", follow_redirects=True)
+    assert seite.status_code == 200
+    assert "Belegungsplan" in seite.text

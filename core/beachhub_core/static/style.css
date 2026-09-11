@@ -41,18 +41,22 @@ header.top { background:var(--kopf); color:var(--kopf-fg); box-shadow:var(--scha
 }
 .abmelden button.aktion:hover { background:rgba(255,255,255,.26); border-bottom-color:rgba(255,255,255,.25); }
 
+/* Der Balken läuft über die volle Breite, sein Inhalt sitzt im selben zentrierten
+   Bereich wie Hauptmenü und Seiteninhalt – sonst beginnt das Untermenü auf breiten
+   Bildschirmen am linken Rand, während Titel und Marke eingerückt sind. */
 .unternav {
-  display:flex; gap:.1rem; flex-wrap:wrap;
   background:var(--karte); border-top:1px solid var(--rand); border-bottom:1px solid var(--rand);
-  padding:0 1rem;
 }
-.unternav { max-width:none; }
-.unternav a {
+.unternavzeile {
+  display:flex; gap:.1rem; flex-wrap:wrap;
+  max-width:1200px; margin:0 auto; padding:0 1rem;
+}
+.unternavzeile a {
   color:var(--gedaempft); text-decoration:none; padding:.5rem .75rem;
   border-bottom:2px solid transparent; margin-bottom:-1px; white-space:nowrap; font-size:.94rem;
 }
-.unternav a:hover { color:var(--akzent-text); border-bottom-color:var(--rand-stark); }
-.unternav a[aria-current] { color:var(--akzent-text); border-bottom-color:var(--akzent); font-weight:600; }
+.unternavzeile a:hover { color:var(--akzent-text); border-bottom-color:var(--rand-stark); }
+.unternavzeile a[aria-current] { color:var(--akzent-text); border-bottom-color:var(--akzent); font-weight:600; }
 
 main { max-width:1200px; margin:0 auto; padding:0 1rem 2.5rem; }
 h1 { font-size:1.45rem; margin:.25rem 0 1.1rem; font-weight:650; }
