@@ -1,4 +1,4 @@
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from beachhub_hall.soll import laufende_buchung, sollzustand, zusammenlegen, zutritt_offen
@@ -66,12 +66,23 @@ def test_ohne_plan_licht_aus_und_heizung_unangetastet() -> None:
 
 
 def test_abgelaufener_plan_gibt_grundzustand() -> None:
-    plan = baue_plan([buchung(F1, t(19, tag=date(2027, 12, 9)), t(20, tag=date(2027, 12, 9)))])
-    nach_ablauf = plan.gueltig_bis + timedelta(hours=1)
-    soll = sollzustand(plan, FELDER, nach_ablauf, False)
-    assert soll.licht == {F1: False, F2: False}
-    assert soll.heizung == Decimal("0.0")
-    assert zutritt_offen(plan, nach_ablauf) == []
+    gb = t(0) + timedelta(days=7)  # gueltig_bis von baue_plan() ohne ab=
+    b = buchung(F1, gb - timedelta(hours=1), gb + timedelta(hours=1))
+    plan = baue_plan([b])
+    assert plan.gueltig_bis == gb
+
+    kurz_vor_ablauf = gb - timedelta(seconds=1)
+    soll_vorher = sollzustand(plan, FELDER, kurz_vor_ablauf, False)
+    assert soll_vorher.licht[F1] is True
+    assert soll_vorher.heizung == Decimal("18.0")
+    assert zutritt_offen(plan, kurz_vor_ablauf) == [b]
+    assert laufende_buchung(plan, F1, kurz_vor_ablauf) == b
+
+    soll_nach = sollzustand(plan, FELDER, gb, False)
+    assert soll_nach.licht == {F1: False, F2: False}
+    assert soll_nach.heizung == Decimal("0.0")
+    assert zutritt_offen(plan, gb) == []
+    assert laufende_buchung(plan, F1, gb) is None
 
 
 def test_nur_zugeordnete_felder_werden_gesteuert() -> None:
@@ -102,3 +113,28 @@ def test_zeitumstellung_winterzeit() -> None:
     assert sollzustand(plan, FELDER, t(18, 55, tag=tag), False).licht[F1] is True
     assert sollzustand(plan, FELDER, t(18, 29, tag=tag), False).heizung == Decimal("0.0")
     assert sollzustand(plan, FELDER, t(18, 30, tag=tag), False).heizung == Decimal("18.0")
+
+
+def test_zeitumstellung_winterzeit_direkt_an_der_ruecksetzung() -> None:
+    """Buchung beginnt um 03:00 MEZ (= 02:00 UTC), direkt nach der Rückstellung von 03:00 MESZ
+    (= 01:00 UTC) auf 02:00 MESZ. Vor- und Nachlauf werden intern in UTC gerechnet: eine
+    Ortszeit-Arithmetik würde den Lichtvorlauf fälschlich schon um 00:30 UTC statt 01:55 UTC
+    beginnen lassen (eine Stunde zu früh, weil sie die verdoppelte 02:00-03:00-Stunde ignoriert)."""
+    ab = datetime(2027, 10, 30, 22, 0, tzinfo=UTC)
+    beginn = datetime(2027, 10, 31, 2, 0, tzinfo=UTC)
+    plan = baue_plan([buchung(F1, beginn, beginn + timedelta(hours=2))], ab=ab)
+
+    assert sollzustand(plan, FELDER, datetime(2027, 10, 31, 1, 29, tzinfo=UTC), False).heizung == (
+        Decimal("0.0")
+    )
+    assert sollzustand(plan, FELDER, datetime(2027, 10, 31, 1, 30, tzinfo=UTC), False).heizung == (
+        Decimal("18.0")
+    )
+    assert (
+        sollzustand(plan, FELDER, datetime(2027, 10, 31, 1, 54, tzinfo=UTC), False).licht[F1]
+        is False
+    )
+    assert (
+        sollzustand(plan, FELDER, datetime(2027, 10, 31, 1, 55, tzinfo=UTC), False).licht[F1]
+        is True
+    )

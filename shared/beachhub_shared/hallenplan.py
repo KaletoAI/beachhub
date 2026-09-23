@@ -13,7 +13,7 @@ from decimal import Decimal
 from typing import Any, Literal
 
 from argon2.low_level import Type, hash_secret_raw
-from pydantic import BaseModel, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, Field, field_validator
 
 DOKUMENT = "hallenplan"
 
@@ -59,15 +59,15 @@ class PlanFeld(BaseModel):
 class PlanBuchung(BaseModel):
     buchung_id: str
     feld_id: str
-    beginn: datetime
-    ende: datetime
+    beginn: AwareDatetime
+    ende: AwareDatetime
     pin_hash: str
 
 
 class PlanSperre(BaseModel):
     feld_id: str | None
-    beginn: datetime
-    ende: datetime
+    beginn: AwareDatetime
+    ende: AwareDatetime
 
 
 class PlanKonfig(BaseModel):
@@ -90,8 +90,8 @@ class PinParameter(BaseModel):
 
 
 class HallenplanInhalt(BaseModel):
-    gueltig_ab: datetime
-    gueltig_bis: datetime
+    gueltig_ab: AwareDatetime
+    gueltig_bis: AwareDatetime
     felder: list[PlanFeld]
     buchungen: list[PlanBuchung]
     sperren: list[PlanSperre]

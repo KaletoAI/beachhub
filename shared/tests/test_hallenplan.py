@@ -14,6 +14,7 @@ from beachhub_shared.hallenplan import (
     PlanBuchung,
     PlanFeld,
     PlanKonfig,
+    PlanSperre,
     pin_hash,
 )
 from beachhub_shared.lesestand import Dokument
@@ -98,3 +99,31 @@ def test_plan_ueberlebt_den_weg_durch_ein_dokument() -> None:
 def test_lieferung_ohne_status_ist_erlaubt() -> None:
     lieferung = EreignisLieferung.model_validate({"dienst_id": str(uuid.uuid4()), "ereignisse": []})
     assert lieferung.status is None
+
+
+def test_naive_zeiten_werden_abgelehnt() -> None:
+    naiv = datetime(2027, 12, 1, 17, 0)
+    with pytest.raises(ValidationError):
+        PlanBuchung(buchung_id="b1", feld_id="f1", beginn=naiv, ende=T0, pin_hash="x")
+    with pytest.raises(ValidationError):
+        PlanBuchung(buchung_id="b1", feld_id="f1", beginn=T0, ende=naiv, pin_hash="x")
+    with pytest.raises(ValidationError):
+        PlanSperre(feld_id=None, beginn=naiv, ende=T0)
+    with pytest.raises(ValidationError):
+        HallenplanInhalt(
+            gueltig_ab=naiv,
+            gueltig_bis=T0 + timedelta(days=7),
+            felder=[],
+            buchungen=[],
+            sperren=[],
+            konfig=PlanKonfig(
+                heiz_vorlauf_minuten=30,
+                spiel_temperatur=Decimal("18.0"),
+                grund_temperatur=Decimal("0.0"),
+                licht_vorlauf_minuten=5,
+                licht_nachlauf_minuten=5,
+                zutritt_vorlauf_minuten=15,
+                praesenz_alarm_minuten=10,
+            ),
+            pin=P,
+        )
