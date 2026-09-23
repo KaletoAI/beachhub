@@ -1,8 +1,21 @@
 """Gemeinsame Testdaten. Alle Zeiten sind UTC-aware und werden aus Berliner Ortszeit gebildet."""
 
-from datetime import date, datetime, time
+import base64
+import uuid
+from collections.abc import Iterable
+from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 
 from argon2 import PasswordHasher
+from beachhub_shared.hallenplan import (
+    HallenplanInhalt,
+    PinParameter,
+    PlanBuchung,
+    PlanFeld,
+    PlanKonfig,
+    PlanSperre,
+    pin_hash,
+)
 from beachhub_shared.zeit import kombiniere
 
 F1 = "11111111-1111-1111-1111-111111111111"
@@ -53,3 +66,55 @@ class FakeSchlaf:
 
     async def __call__(self, sekunden: float) -> None:
         self.aufrufe.append(sekunden)
+
+
+PIN_PARAMETER = PinParameter(
+    salt_b64=base64.b64encode(b"0123456789abcdef").decode(),
+    time_cost=1,
+    memory_cost=1024,
+    parallelism=1,
+    hash_len=32,
+)
+KONFIG = PlanKonfig(
+    heiz_vorlauf_minuten=30,
+    spiel_temperatur=Decimal("18.0"),
+    grund_temperatur=Decimal("0.0"),
+    licht_vorlauf_minuten=5,
+    licht_nachlauf_minuten=5,
+    zutritt_vorlauf_minuten=15,
+    praesenz_alarm_minuten=10,
+)
+
+
+def buchung(
+    feld: str, beginn: datetime, ende: datetime, pin: str = "123456", buchung_id: str | None = None
+) -> PlanBuchung:
+    return PlanBuchung(
+        buchung_id=buchung_id or str(uuid.uuid4()),
+        feld_id=feld,
+        beginn=beginn,
+        ende=ende,
+        pin_hash=pin_hash(pin, PIN_PARAMETER),
+    )
+
+
+def baue_plan(
+    buchungen: Iterable[PlanBuchung],
+    *,
+    ab: datetime | None = None,
+    sperren: Iterable[PlanSperre] = (),
+    konfig: PlanKonfig = KONFIG,
+) -> HallenplanInhalt:
+    start = ab or t(0)
+    return HallenplanInhalt(
+        gueltig_ab=start,
+        gueltig_bis=start + timedelta(days=7),
+        felder=[
+            PlanFeld(id=F1, name="Feld 1", aktiv=True),
+            PlanFeld(id=F2, name="Feld 2", aktiv=True),
+        ],
+        buchungen=list(buchungen),
+        sperren=list(sperren),
+        konfig=konfig,
+        pin=PIN_PARAMETER,
+    )
