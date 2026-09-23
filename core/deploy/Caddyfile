@@ -4,23 +4,32 @@
 
 # Admin-UI – nur über WireGuard. Die Hallenschnittstelle ist hier bewusst nicht erreichbar.
 https://10.8.0.1:8443 {
+	bind 10.8.0.1
 	tls internal
 	respond /hall/* 404
 	reverse_proxy 127.0.0.1:8000
 }
 
 # Hallendienst – nur über WireGuard und nur mit Client-Zertifikat der internen CA
-# (erzeugt mit `beachhub-core zertifikate`, siehe docs/betrieb/portal.md).
-https://10.8.0.1:8444 {
+# (erzeugt mit `beachhub-core zertifikate`, siehe docs/betrieb/portal.md). Eigener interner
+# Hostname statt der IP: Für eine IP-Adresse schicken TLS-Clients kein SNI (RFC 6066); ohne SNI
+# griffe die client_auth-Richtlinie unten nie – Caddy verweigerte entweder mit 421 (strict SNI
+# Host) oder ließe den Handshake ganz ohne Zertifikatsprüfung durch. `kern.beachhub.wg` muss beim
+# Hallendienst über `extra_hosts` auf die WireGuard-Adresse des Hauptsystems zeigen (siehe
+# hall/docker-compose.yml, docs/betrieb/hallendienst.md, Abschnitt 2).
+https://kern.beachhub.wg:8444 {
+	bind 10.8.0.1
 	tls internal {
 		client_auth {
 			mode require_and_verify
 			trust_pool file /etc/caddy/beachhub-ca.crt
 		}
 	}
-	# Planabruf (GET, kein Body) sowie Ereignis-/Statuslieferungen (POST, kleines JSON, bis zu
-	# 500 Ereignisse je Lieferung) – 256 KB ist reichlich Puffer und begrenzt beliebig große
-	# Anfragen von einem kompromittierten oder fehlerhaften Client.
+	# Planabruf (GET, kein Body) sowie Ereignis-/Statuslieferungen (POST, kleines JSON). Das
+	# Schema erlaubt bis zu 500 Ereignisse je Lieferung; der Hallendienst selbst liefert nie mehr
+	# als 200 (hall/beachhub_hall/aufgaben/melder.py, MAX_JE_LIEFERUNG) – 256 KB ist reichlich
+	# Puffer für beides und begrenzt beliebig große Anfragen von einem kompromittierten oder
+	# fehlerhaften Client.
 	request_body {
 		max_size 256KB
 	}

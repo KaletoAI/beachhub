@@ -1,13 +1,13 @@
 """Ende-zu-Ende: der echte Hallendienst-Client gegen die echte Core-App, ohne Netz.
 
 Prüft den ganzen Vertrag: Plan signiert abholen und prüfen, PIN mit den Plan-Parametern
-finden, 304, Ereignis zurückliefern und im Hauptsystem wiederfinden.
+finden, 304, Ereignis zurückliefern und im Hauptsystem wiederfinden, sowie plan_neu über den
+Status-Teil der Lieferung (unverändert → False, nach einer neuen Buchung → True).
 """
 
 import asyncio
 import uuid
 from datetime import date, time
-from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -15,9 +15,9 @@ import pytest
 from beachhub_core import clock
 from beachhub_core.config import settings
 from beachhub_core.main import app
-from beachhub_core.models import Betriebszeit, Ereignis, Feld, FeldRaster, Kundengruppe, Tarif
-from beachhub_core.services import buchungen, kunden, lesestand
-from beachhub_shared.hallenplan import EreignisLieferung, pin_hash
+from beachhub_core.models import Ereignis
+from beachhub_core.services import buchungen, lesestand
+from beachhub_shared.hallenplan import EreignisLieferung, HallenStatus, pin_hash
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
@@ -33,21 +33,11 @@ TOKEN = "hall-token-0123456789abcdef"
 
 
 def test_halle_holt_plan_und_liefert_ereignisse(
-    db: Session, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    db: Session, welt, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(settings, "hall_token", TOKEN)
-    Path(settings.signatur_privatschluessel_pfad).unlink(missing_ok=True)
-    oeffentlich = lesestand.erzeuge_schluessel()
-    f = Feld(name="Feld 1", reihenfolge=1)
-    f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    g = Kundengruppe(name="Privat")
-    db.add_all([f, g, Tarif(name="Std", preis=Decimal("30.00"))])
-    for wt in range(7):
-        db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
-    db.flush()
-    k = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=g.id)
-    db.commit()
-    clock.set_override(db, date(2027, 11, 25))
+    f, k = welt
+    oeffentlich = lesestand.oeffentlicher_schluessel()
     b = buchungen.lege_an(
         db,
         feld_id=f.id,
@@ -60,8 +50,9 @@ def test_halle_holt_plan_und_liefert_ereignisse(
     jetzt = clock.now(db)
     sitzungen = oeffne(tmp_path / "hall.sqlite")
     uhr = SimulierteUhr(jetzt)
+    dienst_id = uuid.uuid4()
 
-    async def ablauf() -> int:
+    async def ablauf() -> tuple[int, bool, bool]:
         core = CoreClient("http://core.test", TOKEN, transport=httpx.ASGITransport(app=app))
         try:
             roh = await core.hole_plan(0)
@@ -73,15 +64,45 @@ def test_halle_holt_plan_und_liefert_ereignisse(
                 treffer = hall_plan.buchungen_mit_pin(hdb, pin_hash("271828", inhalt.pin))
             assert [t.buchung_id for t in treffer] == [str(b.id)]
             assert await core.hole_plan(dok.version) is None
+
             ereignisse = Ereignisse(sitzungen, uhr)
             ereignisse.melde("pin_akzeptiert", feld_id=str(f.id), buchung_id=str(b.id))
-            antwort = await core.sende_ereignisse(
-                EreignisLieferung(dienst_id=uuid.uuid4(), ereignisse=ereignisse.unbestaetigt())
+            status = HallenStatus(
+                planversion=dok.version,
+                letzter_abruf=None,
+                ha_erreichbar=True,
+                handbetrieb=False,
+                version_dienst="test",
             )
-            return antwort.bestaetigt_bis
+            erste = await core.sende_ereignisse(
+                EreignisLieferung(
+                    dienst_id=dienst_id, ereignisse=ereignisse.unbestaetigt(), status=status
+                )
+            )
+
+            # Eine neue Buchung markiert den Hallenplan als geändert (lesestand.markiere_geaendert
+            # hängt hallenplan.DOKUMENT automatisch an "belegung" an) – derselbe planversion-Wert
+            # muss jetzt plan_neu=True auslösen, auch ohne neuen Planabruf der Halle.
+            buchungen.lege_an(
+                db,
+                feld_id=f.id,
+                kunde_id=k.id,
+                pin_klar="481516",
+                beginn=kombiniere(date(2027, 11, 28), time(19)),
+                ende=kombiniere(date(2027, 11, 28), time(20)),
+            )
+            db.commit()
+            zweite = await core.sende_ereignisse(
+                EreignisLieferung(dienst_id=dienst_id, ereignisse=[], status=status)
+            )
+            return erste.bestaetigt_bis, erste.plan_neu, zweite.plan_neu
         finally:
             await core.schliesse()
 
-    assert asyncio.run(ablauf()) == 1
+    bestaetigt_bis, plan_neu_unveraendert, plan_neu_nach_neuer_buchung = asyncio.run(ablauf())
+    assert bestaetigt_bis == 1
+    assert plan_neu_unveraendert is False
+    assert plan_neu_nach_neuer_buchung is True
+
     e = db.query(Ereignis).one()
     assert e.typ == "pin_akzeptiert" and e.buchung_id == b.id and e.feld_id == f.id

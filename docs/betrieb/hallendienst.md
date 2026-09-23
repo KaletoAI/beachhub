@@ -21,31 +21,43 @@ meldet Ereignisse zurück. Fällt das Internet aus, arbeitet er mit dem gespeich
 Auf dem Hauptsystem:
 
 1. `docker compose -f core/docker-compose.yml exec app beachhub-core zertifikate --ziel
-   /app/data/zertifikate` ausführen (siehe `docs/betrieb/portal.md`). Der Befehl legt Ergebnisse
-   **auf dem Datenvolume** ab (`/app/data/…`), nicht im beschreibbaren Container-Dateisystem –
-   sonst gingen sie beim nächsten `docker compose build`/Neuanlegen des Containers verloren. Es
-   entstehen dort u. a. `ca.crt`/`ca.key` (interne CA, gemeinsamer Vertrauensanker für beide
-   mTLS-Kanäle des Hauptsystems: `client_auth`-`trust_pool` sowohl für Caddy des Portals auf
-   `:8443` (`docs/betrieb/portal.md`, Abschnitt 2) als auch für Caddy des Hauptsystems auf der
-   Hallenschnittstelle `:8444` (siehe `docs/betrieb/hauptsystem.md` „Hallendienst anbinden“) –
-   `ca.crt` kommt deshalb nie auf den Hallenrechner, sie ist trust_pool der Caddy-Sites, nicht
-   Ausweis eines Teilnehmers; `ca.key` verlässt das Hauptsystem ohnehin nie) sowie
-   `halle.crt`/`halle.key` (Client-Zertifikat, mit dem sich die Halle bei Caddy ausweist – von
-   derselben CA signiert wie `portal-kanal.crt`; die Trennung zwischen den Kanälen `:8443`
-   (Portal) und `:8444` (Halle) übernehmen die unterschiedlichen Ports und die je Kanal eigenen
-   Token, nicht die Zertifikate selbst).
+   /app/data/zertifikate` ausführen (siehe `docs/betrieb/portal.md`) – das ist bei der
+   Ersteinrichtung des Hauptsystems bereits geschehen (`docs/betrieb/hauptsystem.md`, Abschnitt 2,
+   dort **vor** dem ersten `docker compose up -d`); ein erneuter Aufruf hier ist unschädlich
+   (vorhandene Schlüssel bleiben erhalten, es werden nur fehlende Zertifikate nachgezogen). Der
+   Befehl legt Ergebnisse **auf dem Datenvolume** ab (`/app/data/…`), nicht im beschreibbaren
+   Container-Dateisystem – sonst gingen sie beim nächsten `docker compose build`/Neuanlegen des
+   Containers verloren. Es entstehen dort u. a. `ca.crt`/`ca.key` (interne CA, gemeinsamer
+   Vertrauensanker für beide mTLS-Kanäle des Hauptsystems: `client_auth`-`trust_pool` sowohl für
+   Caddy des Portals auf `:8443` (`docs/betrieb/portal.md`, Abschnitt 2) als auch für Caddy des
+   Hauptsystems auf der Hallenschnittstelle `:8444` (siehe `docs/betrieb/hauptsystem.md`
+   „Hallendienst anbinden“) – `ca.crt` kommt deshalb nie auf den Hallenrechner, sie ist trust_pool
+   der Caddy-Sites, nicht Ausweis eines Teilnehmers; `ca.key` verlässt das Hauptsystem ohnehin
+   nie) sowie `halle.crt`/`halle.key` (Client-Zertifikat, mit dem sich die Halle bei Caddy
+   ausweist – von derselben CA signiert wie `portal-kanal.crt`; die Trennung zwischen den Kanälen
+   `:8443` (Portal) und `:8444` (Halle) übernehmen die unterschiedlichen Ports und die je Kanal
+   eigenen Token, nicht die Zertifikate selbst).
 2. **Root-Zertifikat von Caddy exportieren.** Die Hallenschnittstelle (Port 8444) nutzt
    `tls internal`, also Caddys **eigene**, interne Root-CA – eine andere CA als die `ca.crt` aus
    Schritt 1. Nur mit dieser Root-CA kann der Hallendienst das Server-Zertifikat von Caddy prüfen
-   (Einstellung `CORE_CA`). `caddy_data` ist ein Named Volume, kein Bind-Mount, daher per
-   `docker compose cp` exportieren:
+   (Einstellung `CORE_CA`), das Caddy für den Hostnamen `kern.beachhub.wg` ausstellt (siehe unten,
+   Schritt 3). `caddy_data` ist ein Named Volume, kein Bind-Mount, daher per `docker compose cp`
+   exportieren:
 
    ```bash
    docker compose -f core/docker-compose.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
    ```
-3. In `core/.env` `HALL_TOKEN` auf einen langen Zufallswert setzen
+3. **Hostnamen der Hallenschnittstelle eintragen.** Caddy hört auf `kern.beachhub.wg:8444`, nicht
+   auf die nackte IP `10.8.0.1`: Für eine IP-Adresse schicken TLS-Clients kein SNI (RFC 6066), und
+   ohne SNI kann Caddy seine `client_auth`-Richtlinie keiner Verbindung zuordnen – der Handshake
+   schlägt dann für jeden Client fehl, mit oder ohne Zertifikat (Details:
+   `docs/betrieb/hauptsystem.md`, Abschnitt „5b. Hallendienst anbinden“). `hall/.env.example`
+   setzt bereits `CORE_URL=https://kern.beachhub.wg:8444`; in `hall/docker-compose.yml` löst
+   `extra_hosts: ["kern.beachhub.wg:10.8.0.1"]` den Namen auf die WireGuard-Adresse des
+   Hauptsystems auf – weicht diese ab, den Eintrag entsprechend anpassen.
+4. In `core/.env` `HALL_TOKEN` auf einen langen Zufallswert setzen
    (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) und das Hauptsystem neu starten.
-4. Den öffentlichen Signaturschlüssel von der Seite **System** im Admin-UI kopieren.
+5. Den öffentlichen Signaturschlüssel von der Seite **System** im Admin-UI kopieren.
 
 Auf den Hallenrechner kopieren: `halle.crt`, `halle.key` (aus `core/data/zertifikate/`, Schritt 1)
 sowie `caddy-root.crt` (aus Schritt 2) nach `hall/zertifikate/`. Die `ca.crt` aus Schritt 1 bleibt
@@ -55,6 +67,28 @@ auf dem Hauptsystem.
 `hall/zertifikate/` liegen. `docker-compose.yml` bindet `./zertifikate` als Verzeichnis ein;
 existiert eine der Dateien noch nicht, legt Docker beim Start selbst ein Verzeichnis mit diesem
 Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensanker für den Server.
+
+**Rotation:**
+
+- **Client-Zertifikat** (`halle.crt`) läuft nach einem Jahr ab. Schritt 1 erneut ausführen – die
+  Schlüsseldatei (`halle.key`) bleibt dabei unverändert, nur `halle.crt` wird neu ausgestellt.
+  Neues `halle.crt` auf den Hallenrechner kopieren (`halle.key` bleibt dort unverändert) und den
+  Hallendienst neu starten (`docker compose restart hall`), sonst verbindet er sich weiter mit dem
+  alten, demnächst abgelaufenen Zertifikat.
+- **Schlüsselrotation** (z. B. bei Verdacht auf Kompromittierung): vor dem erneuten Aufruf von
+  Schritt 1 auf dem Hauptsystem `halle.key` (und `halle.crt`) löschen – der Befehl legt dann ein
+  neues Schlüsselpaar samt Zertifikat an; danach `halle.crt` **und** `halle.key` neu auf den
+  Hallenrechner kopieren und den Hallendienst neu starten.
+- **Wechsel der internen CA** (`ca.crt`/`ca.key` gemeinsam entfernt und Schritt 1 erneut
+  ausgeführt – nicht jeder erneute Aufruf des Befehls, siehe Schritt 1): danach auf dem
+  Hauptsystem die Caddy-Site `:8444` neu laden (`docker compose restart caddy`, lädt den neuen
+  `trust_pool`) sowie `halle.crt`/`halle.key` (neue CA-Signatur) erneut auf den Hallenrechner
+  kopieren – **nicht** `ca.crt` selbst, die bleibt auf dem Hauptsystem.
+- **Caddys eigene interne Root-CA** (Quelle für `caddy-root.crt`, `CORE_CA`) ändert sich nur, wenn
+  das Docker-Volume `caddy_data` neu angelegt wird, z. B. nach einer Wiederherstellung des
+  Hauptsystems ohne dieses Volume (es ist nicht Teil des Backups, siehe
+  `docs/betrieb/hauptsystem.md`, Abschnitt 6). Dann Schritt 2 wiederholen und `caddy-root.crt`
+  erneut auf den Hallenrechner kopieren.
 
 ## 3. Home Assistant einrichten
 
@@ -253,4 +287,5 @@ Beispieldateien dieses Dokuments bereits ohne echtes HA und ohne echtes Hauptsys
 | Mail „Halle hat den Plan verworfen“ | Signatur oder Version passt nicht | `CORE_PUBLIC_KEY` mit der System-Seite vergleichen |
 | Dienst startet nicht: „master_pin_hash fehlt“ | Platzhalter in `hall.toml` | `beachhub-hall master-pin` ausführen und eintragen |
 | Dienst startet nicht: Zertifikatsfehler | `halle.crt`/`halle.key`/`caddy-root.crt` fehlen oder Docker hat leere Verzeichnisse an ihrer Stelle angelegt | `docker compose down`, `hall/zertifikate/` prüfen (Abschnitt 2), danach `docker compose up -d` |
+| Hauptsystem dauerhaft „nicht erreichbar“, obwohl WireGuard steht | `kern.beachhub.wg` löst nicht auf die WireGuard-Adresse des Hauptsystems auf (`extra_hosts` in `hall/docker-compose.yml` fehlt/falsch) oder `CORE_URL` weicht vom Hostnamen aus dem Caddyfile ab | `docker compose exec hall getent hosts kern.beachhub.wg` prüfen; `extra_hosts`/`CORE_URL` korrigieren (Abschnitt 2, Schritt 3), danach `docker compose up -d` |
 | `docker stop`/`docker compose down` dauert ungewöhnlich lange oder Tür bleibt bei `switch.*`-Türöffnern offen | `stop_grace_period` in `docker-compose.yml` zu knapp für das geordnete Herunterfahren | `stop_grace_period` erhöhen; der Dienst fängt `SIGTERM` ab und schaltet einen offenen Türöffner beim Herunterfahren aus, braucht dafür aber Zeit |
