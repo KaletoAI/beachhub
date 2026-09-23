@@ -29,7 +29,14 @@ def anfordern(
     nummer: str, konto: Konto = Depends(auth.konto_pflicht), db: Session = Depends(get_db)
 ) -> RedirectResponse:
     inhalt = lesestand.konto(db, konto.kunde_id)
-    if inhalt is None or nummer not in {r.nummer for r in inhalt.rechnungen}:
+    # Ruling Fix-Runde 1: die Länge hier mitprüfen (Grenze aus kanal.RechnungAnfordern,
+    # max_length=20) – die echten Rechnungsnummern sind immer kürzer, aber ohne diese Prüfung
+    # würde ein Lesestand mit einer zu langen Nummer weiter unten eine rohe ValidationError aus
+    # `model_validate` auslösen (500) statt der üblichen Fehlermeldung.
+    gueltig = (
+        inhalt is not None and len(nummer) <= 20 and nummer in {r.nummer for r in inhalt.rechnungen}
+    )
+    if not gueltig:
         return mit_flash(
             RedirectResponse("/rechnungen", status_code=303),
             "Diese Rechnung gibt es nicht.",
@@ -39,8 +46,12 @@ def anfordern(
     validiert = kanal.RechnungAnfordern.model_validate(nutzlast).model_dump(mode="json")
     # Doppelklick-Schutz wie beim Buchen (Task 12) und Stornieren (Task 14, Controller-Ruling
     # Task 15): Konto-Zeile sperren, solange auf ein Duplikat geprüft und ggf. angelegt wird.
+    # `nur_offen=True` (Ruling Fix-Runde 1): eine schon beantwortete Anfrage nie wiederverwenden
+    # – ihr Einmal-Link kann bereits verbraucht sein.
     db.get(Konto, konto.id, with_for_update=True)
-    bestehende = anfragen.bestehende(db, konto.id, "rechnung_anfordern", validiert, uhr.jetzt())
+    bestehende = anfragen.bestehende(
+        db, konto.id, "rechnung_anfordern", validiert, uhr.jetzt(), nur_offen=True
+    )
     if bestehende is not None:
         db.commit()  # Sperre freigeben, auch wenn nichts geschrieben wurde.
         return RedirectResponse(f"/anfrage/{bestehende.id}", status_code=303)

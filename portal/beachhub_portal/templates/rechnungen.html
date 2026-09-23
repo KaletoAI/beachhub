@@ -12,7 +12,7 @@
     <li>
       <strong>{{ r.nummer }}</strong> vom {{ r.datum|datum }} · {{ r.brutto|euro }}
       <span class="badge{% if r.status == 'bezahlt' %} ok{% endif %}">{{ r.status }}</span>
-      <form method="post" action="/rechnungen/{{ r.nummer }}/anfordern" class="inline">
+      <form method="post" action="/rechnungen/{{ r.nummer|urlencode }}/anfordern" class="inline">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <button class="leise">PDF herunterladen</button>
       </form>

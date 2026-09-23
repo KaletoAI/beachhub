@@ -5,6 +5,7 @@ Das Portal entscheidet nichts. Es legt Anfragen ab, liefert sie aus und merkt si
 
 import base64
 import binascii
+import logging
 import re
 import uuid
 from dataclasses import dataclass
@@ -20,6 +21,8 @@ from beachhub_portal import uhr
 from beachhub_portal.models import Anfrage, KanalKontakt, Konto
 from beachhub_portal.services import lesestand, rechnung_link, wecker
 
+logger = logging.getLogger(__name__)
+
 ERNEUT_NACH = timedelta(seconds=60)
 HOECHSTENS = 50
 # Ruling Task 12: Ein Doppelklick (beim Buchen wie beim Stornieren, Task 14) darf keine zweite
@@ -31,12 +34,25 @@ DOPPELKLICK_FENSTER = timedelta(minutes=2)
 
 
 def bestehende(
-    db: Session, konto_id: uuid.UUID, typ: str, nutzlast: dict[str, Any], jetzt: datetime
+    db: Session,
+    konto_id: uuid.UUID,
+    typ: str,
+    nutzlast: dict[str, Any],
+    jetzt: datetime,
+    *,
+    nur_offen: bool = False,
 ) -> Anfrage | None:
     """Findet eine wiederverwendbare Anfrage desselben Kontos/Typs mit identischer (validierter)
     Nutzlast für den Doppelklick-Schutz (Ruling Task 12). Gemeinsam genutzt von
-    `routes/buchen.py` (Buchen) und `routes/buchungen.py` (Storno, Task 14, Review-Minor aus
-    Task 12: die Duplikatlogik gehört als Service-Funktion hierher statt in eine einzelne Route)."""
+    `routes/buchen.py` (Buchen), `routes/buchungen.py` (Storno, Task 14, Review-Minor aus
+    Task 12: die Duplikatlogik gehört als Service-Funktion hierher statt in eine einzelne Route)
+    und `routes/rechnungen.py` (Anfordern, Task 15).
+
+    `nur_offen=True` (Controller-Ruling Fix-Runde 1, Task 15): eine erst kürzlich beantwortete
+    Anfrage wird nie wiederverwendet – bei `rechnung_anfordern` ist ihr Einmal-Link nach dem
+    ersten Abruf verbraucht (Task 15, `rechnung_link.einloesen`); ein Kunde, der die Rechnung
+    schon heruntergeladen hat, würde beim erneuten Anfordern sonst bis zu zwei Minuten lang auf
+    den toten Link umgeleitet (404) statt eine neue Anfrage zu bekommen."""
     kandidaten = db.scalars(
         select(Anfrage)
         .where(
@@ -49,7 +65,11 @@ def bestehende(
     for a in kandidaten:
         if a.status != Anfrage.BEANTWORTET:
             return a
-        if a.beantwortet_am is not None and jetzt - a.beantwortet_am <= DOPPELKLICK_FENSTER:
+        if (
+            not nur_offen
+            and a.beantwortet_am is not None
+            and jetzt - a.beantwortet_am <= DOPPELKLICK_FENSTER
+        ):
             return a
     return None
 
@@ -161,23 +181,37 @@ def beantworte(db: Session, anfrage_id: uuid.UUID, antwort: kanal.Antwort, jetzt
         daten.pop("dateiname", None)
         rechnung_konto = db.get(Konto, a.konto_id) if a.konto_id is not None else None
         if antwort.pdf_base64 and rechnung_konto is not None:
-            try:
-                pdf = base64.b64decode(antwort.pdf_base64, validate=True)
-            except (binascii.Error, ValueError):
+            if len(antwort.pdf_base64) > rechnung_link.MAX_PDF_BASE64_LEN:
+                # Ruling Fix-Runde 1: Größe schon an der Base64-Zeichenkette prüfen, bevor
+                # überhaupt dekodiert wird – ein absichtlich riesiger String soll nicht erst
+                # vollständig in Speicher entpackt werden, um ihn dann zu verwerfen.
                 daten = {"status": "fehler"}
             else:
-                if len(pdf) > rechnung_link.MAX_PDF_BYTES:
-                    # Ruling: Größenlimit statt 500 – ein zu großes/defektes PDF wird als Fehler
-                    # beantwortet, ohne die Datei überhaupt erst zu schreiben.
+                try:
+                    pdf = base64.b64decode(antwort.pdf_base64, validate=True)
+                except (binascii.Error, ValueError):
                     daten = {"status": "fehler"}
                 else:
-                    daten["link_token"] = rechnung_link.lege_an(
-                        db,
-                        konto_id=rechnung_konto.id,
-                        rechnung_nr=str(a.nutzlast_json.get("rechnung_nr", "")),
-                        pdf=pdf,
-                        jetzt=jetzt,
-                    )
+                    if len(pdf) > rechnung_link.MAX_PDF_BYTES:
+                        # Ruling: Größenlimit statt 500 – ein zu großes/defektes PDF wird als
+                        # Fehler beantwortet, ohne die Datei überhaupt erst zu schreiben.
+                        daten = {"status": "fehler"}
+                    else:
+                        try:
+                            daten["link_token"] = rechnung_link.lege_an(
+                                db,
+                                konto_id=rechnung_konto.id,
+                                rechnung_nr=str(a.nutzlast_json.get("rechnung_nr", "")),
+                                pdf=pdf,
+                                jetzt=jetzt,
+                            )
+                        except OSError:
+                            # Ruling Fix-Runde 1: z. B. Platte voll – darf nicht den ganzen
+                            # Stapel aus `POST /core/antworten` mit 500 abbrechen.
+                            logger.exception(
+                                "Rechnungs-PDF für Anfrage %s konnte nicht gespeichert werden", a.id
+                            )
+                            daten = {"status": "fehler"}
     a.status = Anfrage.BEANTWORTET
     a.antwort_json = daten
     a.beantwortet_am = jetzt

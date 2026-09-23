@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from beachhub_portal.config import settings
-from beachhub_portal.models import RechnungLink
+from beachhub_portal.models import Anfrage, RechnungLink
 from beachhub_portal.sicherheit import hash_token
 
 DAUER = timedelta(minutes=10)
@@ -18,6 +18,9 @@ DAUER = timedelta(minutes=10)
 # deutet auf ein defektes oder manipuliertes Dokument im Hauptsystem hin und soll die
 # Verarbeitung nicht mit einem 500 abbrechen lassen (siehe services/anfragen.beantworte).
 MAX_PDF_BYTES = 10 * 1024 * 1024
+# Ruling Fix-Runde 1: Grenze für die Base64-Zeichenkette selbst, bevor dekodiert wird
+# (Standard-Base64-Aufblähung: 4 Zeichen je 3 Bytes, plus Padding).
+MAX_PDF_BASE64_LEN = MAX_PDF_BYTES * 4 // 3 + 4
 
 
 def lege_an(
@@ -27,7 +30,10 @@ def lege_an(
     `DATA_DIR/rechnungen_tmp` mit den Rechten 0600 (Ordner 0700) und legt die Link-Zeile an.
     Committet nicht selbst – der Aufrufer (`anfragen.beantworte`, Tests) entscheidet über die
     Transaktion. Liefert das Klartext-Token; gespeichert wird nur dessen Hash."""
-    ordner = settings.data_dir / "rechnungen_tmp"
+    # Absolut und aufgelöst speichern (Ruling Fix-Runde 1): ein relativer DATA_DIR-Pfad wäre vom
+    # Arbeitsverzeichnis des jeweiligen Prozesses abhängig – der Aufräum-Job und ein künftiger
+    # zweiter Einstiegspunkt (z. B. CLI) starten nicht zwingend aus demselben Verzeichnis.
+    ordner = (settings.data_dir / "rechnungen_tmp").resolve()
     ordner.mkdir(parents=True, exist_ok=True)
     os.chmod(ordner, 0o700)
     pfad = ordner / f"{uuid.uuid4()}.pdf"
@@ -70,5 +76,14 @@ def einloesen(
     if os.path.exists(pfad):
         os.unlink(pfad)
     db.delete(link)
+    # Ruling Fix-Runde 1: den verbrauchten Link auch aus der gespeicherten Antwort der Anfrage
+    # entfernen – sonst zeigt `anfragen.stand()` (über `antwort_json["link_token"]`) weiter auf
+    # einen Link, den es nicht mehr gibt, und der Kunde liefe beim erneuten Öffnen der
+    # Anfrageseite ins Leere (404) statt eine neue Rechnung anfordern zu können.
+    a = db.scalar(select(Anfrage).where(Anfrage.antwort_json["link_token"].astext == token))
+    if a is not None and a.antwort_json is not None and "link_token" in a.antwort_json:
+        bereinigt = dict(a.antwort_json)
+        bereinigt.pop("link_token", None)
+        a.antwort_json = bereinigt
     db.commit()
     return (nummer, daten) if daten is not None else None

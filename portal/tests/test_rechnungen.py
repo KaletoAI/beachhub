@@ -1,10 +1,13 @@
 import base64
 import os
+import threading
 import uuid
 from datetime import timedelta
 
+import pytest
 from beachhub_portal import jobs, uhr
 from beachhub_portal.config import settings
+from beachhub_portal.database import engine
 from beachhub_portal.models import (
     Anfrage,
     CodeFehlversuch,
@@ -18,7 +21,7 @@ from beachhub_portal.services import anfragen, rechnung_link
 from beachhub_shared import kanal
 from fastapi.testclient import TestClient
 from hilfen import KUNDE_ID, konto, speichere
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 RECHNUNG = {"nummer": "2027-00001", "datum": "2027-11-20", "brutto": "30.00", "status": "bezahlt"}
@@ -104,6 +107,60 @@ def test_antwort_wird_einmal_link(angemeldet: TestClient, db: Session) -> None:
     assert _tmp_pdfs() == []
 
 
+def test_link_token_wird_nach_download_aus_anfrage_entfernt(
+    angemeldet: TestClient, db: Session
+) -> None:
+    """Controller-Ruling Fix-Runde 1: Nach dem Einlösen darf `antwort_json["link_token"]` nicht
+    mehr auf den (jetzt gelöschten) Link zeigen – `anfragen.stand()` läse sonst weiter einen
+    toten Link."""
+    a = _bereitstellen(db, angemeldet.konto_id)
+    ziel = angemeldet.get(f"/anfrage/{a.id}", follow_redirects=False).headers["location"]
+    angemeldet.get(ziel)
+    db.refresh(a)
+    assert "link_token" not in a.antwort_json
+    assert a.antwort_json["status"] == "ok"
+
+
+def test_erneut_anfordern_nach_download_erzeugt_neue_anfrage(
+    angemeldet: TestClient, db: Session
+) -> None:
+    """Controller-Ruling Fix-Runde 1: `bestehende(nur_offen=True)` darf eine schon beantwortete
+    (und damit ggf. schon heruntergeladene) Anfrage nie wiederverwenden – sonst würde ein
+    erneutes Anfordern bis zu zwei Minuten lang auf den verbrauchten, toten Link umleiten."""
+    a = _bereitstellen(db, angemeldet.konto_id)
+    ziel = angemeldet.get(f"/anfrage/{a.id}", follow_redirects=False).headers["location"]
+    angemeldet.get(ziel)  # Download verbraucht den Link.
+    r = angemeldet.post(
+        "/rechnungen/2027-00001/anfordern",
+        data={"csrf_token": angemeldet.csrf},
+        follow_redirects=False,
+    )
+    neu = db.scalar(select(Anfrage).where(Anfrage.id != a.id))
+    assert neu is not None
+    assert r.headers["location"] == f"/anfrage/{neu.id}"
+
+
+def test_gleichzeitiger_abruf_nur_einer_bekommt_pdf(angemeldet: TestClient, db: Session) -> None:
+    """Controller-Ruling Fix-Runde 1: Zwei gleichzeitige Abrufe desselben Tokens – genau einer
+    bekommt das PDF (200), der andere 404 (Zeilensperre in `rechnung_link.einloesen`)."""
+    a = _bereitstellen(db, angemeldet.konto_id)
+    ziel = angemeldet.get(f"/anfrage/{a.id}", follow_redirects=False).headers["location"]
+
+    ergebnisse: list[int] = []
+    schranke = threading.Barrier(2)
+
+    def _abrufen() -> None:
+        schranke.wait()
+        ergebnisse.append(angemeldet.get(ziel).status_code)
+
+    threads = [threading.Thread(target=_abrufen) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(ergebnisse) == [200, 404]
+
+
 def test_link_nur_fuer_eigenes_konto(angemeldet: TestClient, db: Session) -> None:
     fremd = Konto(email="b@x.de", anzeigename="B")
     db.add(fremd)
@@ -172,6 +229,52 @@ def test_pdf_ungueltiges_base64_wird_fehler(angemeldet: TestClient, db: Session)
     db.refresh(a)
     assert a.antwort_json["status"] == "fehler"
     assert _tmp_pdfs() == []
+
+
+def test_pdf_speichern_schlaegt_fehl_wird_fehler_statt_absturz(
+    angemeldet: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Controller-Ruling Fix-Runde 1: Ein OSError aus `rechnung_link.lege_an` (z. B. Platte voll)
+    darf `anfragen.beantworte` nicht mit einer Exception abbrechen lassen – sonst würde
+    `POST /core/antworten` mit 500 den ganzen Stapel an Antworten verwerfen."""
+    speichere(db, f"konto:{KUNDE_ID}", konto(rechnungen=[RECHNUNG]))
+    a = anfragen.stelle(
+        db,
+        typ="rechnung_anfordern",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"rechnung_nr": "2027-00001"},
+    )
+
+    def _kaputt(*args: object, **kwargs: object) -> str:
+        raise OSError("Platte voll")
+
+    monkeypatch.setattr(rechnung_link, "lege_an", _kaputt)
+    antwort = kanal.Antwort(
+        status="ok", pdf_base64=base64.b64encode(b"%PDF").decode(), dateiname="x.pdf"
+    )
+    ok = anfragen.beantworte(db, a.id, antwort, uhr.jetzt())
+    db.commit()
+    db.refresh(a)
+    assert ok is True
+    assert a.antwort_json["status"] == "fehler"
+
+
+def test_anfordern_zu_lange_nummer_wird_abgelehnt_statt_500(
+    angemeldet: TestClient, db: Session
+) -> None:
+    """Controller-Ruling Fix-Runde 1: Die Mitgliedschaftsprüfung schaut auch auf die Länge (≤ 20,
+    Grenze von `kanal.RechnungAnfordern`) – sonst würfe `model_validate` weiter unten eine rohe
+    ValidationError (500), falls der Lesestand je eine zu lange Nummer enthielte."""
+    lang = "2" * 25
+    speichere(db, f"konto:{KUNDE_ID}", konto(rechnungen=[{**RECHNUNG, "nummer": lang}]))
+    r = angemeldet.post(
+        f"/rechnungen/{lang}/anfordern",
+        data={"csrf_token": angemeldet.csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/rechnungen"
+    assert db.scalar(select(Anfrage)) is None
 
 
 def test_aufraeumen(db: Session, uhr_steht) -> None:
@@ -268,3 +371,60 @@ def test_aufraeumen_code_fehlversuch_sitzung_login_token_webhook(db: Session, uh
     assert len(db.scalars(select(LoginToken)).all()) == 1
     assert len(db.scalars(select(Sitzung)).all()) == 1
     assert len(db.scalars(select(WebhookEingang)).all()) == 1
+
+
+def test_aufraeumen_alte_offene_anfrage_bleibt(db: Session, uhr_steht) -> None:
+    """Controller-Ruling Fix-Runde 1: Eine alte, aber weiterhin offene Anfrage (das Hauptsystem
+    hat nie geantwortet) darf nicht verfallen – nur `beantwortet` löst die 30-Tage-Frist aus."""
+    jetzt = uhr_steht.jetzt
+    alt_offen = Anfrage(
+        typ="konto_loeschen",
+        nutzlast_json={},
+        erstellt_am=jetzt - timedelta(days=40),
+        status="offen",
+    )
+    db.add(alt_offen)
+    db.commit()
+    jobs.aufraeumen(db, jetzt)
+    assert db.get(Anfrage, alt_offen.id) is not None
+
+
+def test_aufraeumen_ein_schritt_scheitert_andere_trotzdem(
+    db: Session, uhr_steht, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Controller-Ruling Fix-Runde 1: Jeder Schritt läuft in seiner eigenen Transaktion –
+    scheitert einer dauerhaft (hier `login_token`, per Monkeypatch simuliert), löschen die
+    übrigen, unabhängigen Schritte trotzdem."""
+    jetzt = uhr_steht.jetzt
+    db.add(
+        LoginToken(
+            email="e@x.de",
+            token_hash="kaputter-schritt-token",
+            code_hash="kaputter-schritt-code",
+            laeuft_ab=jetzt - timedelta(minutes=1),
+        )
+    )
+    db.add(CodeFehlversuch(email="e@x.de", versucht_am=jetzt - timedelta(hours=25)))
+    db.commit()
+
+    def _kaputt(*args: object, **kwargs: object) -> int:
+        raise RuntimeError("defekt")
+
+    monkeypatch.setattr(jobs, "_login_token", _kaputt)
+
+    n = jobs.aufraeumen(db, jetzt)
+
+    assert n["login_token"] == 0
+    assert n["code_fehlversuch"] == 1
+    assert len(db.scalars(select(LoginToken)).all()) == 1  # Schritt scheiterte, nichts gelöscht
+    assert len(db.scalars(select(CodeFehlversuch)).all()) == 0  # anderer Schritt lief trotzdem
+
+
+def test_aufraeumen_zweiter_gleichzeitiger_lauf_wird_uebersprungen(db: Session, uhr_steht) -> None:
+    """Controller-Ruling Fix-Runde 1: `pg_try_advisory_lock` schützt vor einem gleichzeitigen
+    zweiten Lauf – hält eine andere Verbindung die Sperre, überspringt sich dieser Aufruf."""
+    with engine.connect() as andere_verbindung:
+        andere_verbindung.execute(text("SELECT pg_try_advisory_lock(:id)"), {"id": jobs._LOCK_ID})
+        n = jobs.aufraeumen(db, uhr_steht.jetzt)
+        andere_verbindung.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": jobs._LOCK_ID})
+    assert n == {}
