@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from beachhub_shared import kanal
+from beachhub_shared.zeit import BERLIN
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import select
@@ -30,9 +31,16 @@ DOPPELKLICK_FENSTER = timedelta(minutes=2)
 def _zeitpunkt(wert: str) -> datetime | None:
     try:
         dt = datetime.fromisoformat(wert)
-    except ValueError:
+        if dt.tzinfo is None:
+            return None
+        # slots.folge/tages_slots wandeln jeden Zeitpunkt über lokales_datum() in die lokale
+        # Zeitzone um; nahe den Grenzen des datetime-Bereichs (Jahr 1/9999) wirft diese Umrechnung
+        # OverflowError statt eines der beiden anderen, hier schon behandelten Fehler. Hier schon
+        # denselben Umrechnungsschritt versuchen, statt das erst 500 werden zu lassen.
+        dt.astimezone(BERLIN)
+    except (ValueError, OverflowError):
         return None
-    return dt if dt.tzinfo is not None else None
+    return dt
 
 
 @router.get("/buchen", response_class=HTMLResponse)

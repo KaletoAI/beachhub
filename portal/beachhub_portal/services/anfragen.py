@@ -129,6 +129,9 @@ HINWEIS = (
     "Deine Anfrage ist gespeichert. Das Buchungssystem ist gerade nicht erreichbar; "
     "du bekommst die Bestätigung per E-Mail."
 )
+FEHLER_TEXT = (
+    "Bei der Verarbeitung ist ein Fehler aufgetreten. Bitte versuche es später noch einmal."
+)
 GRUENDE: dict[str, str] = {
     "belegt": "Der Termin ist inzwischen vergeben. Bitte wähle einen anderen.",
     "ausserhalb_fenster": "Der Termin liegt außerhalb des Buchungsfensters.",
@@ -161,6 +164,18 @@ class Stand:
     zahlung_url: str | None = None
 
 
+def _gueltige_checkout_url(url: str | None) -> bool:
+    """Verteidigung gegen eine offene Weiterleitung (N-1: Das Hauptsystem ist zwar
+    vertrauenswürdig, das Portal erzeugt aber selbst kein Ziel aus dieser fremden Angabe, ohne
+    es zu prüfen): nur ein absoluter https-Link oder ein Pfad, der mit genau einem `/` beginnt
+    ("//host/…" wäre eine protokollrelative, vom Browser als fremder Host interpretierte URL)."""
+    if url is None:
+        return False
+    if url.startswith("https://"):
+        return True
+    return url.startswith("/") and not url.startswith("//")
+
+
 def _nach_zahlung(
     db: Session, antwort: dict[str, Any], kunde_id: uuid.UUID | None, weiter: bool
 ) -> Stand:
@@ -174,6 +189,8 @@ def _nach_zahlung(
             "abgelehnt", "Die Zahlungsfrist ist abgelaufen; der Termin wurde wieder freigegeben."
         )
     url = antwort.get("checkout_url")
+    if not _gueltige_checkout_url(url):
+        return Stand("fehler", FEHLER_TEXT)
     return Stand(
         "zahlung",
         "Bitte schließe die Zahlung ab. Sobald sie bestätigt ist, geht es hier automatisch weiter.",
@@ -202,11 +219,7 @@ def stand(
     antwort = a.antwort_json or {}
     status = antwort.get("status")
     if status == "fehler":
-        return Stand(
-            "fehler",
-            "Bei der Verarbeitung ist ein Fehler aufgetreten. "
-            "Bitte versuche es später noch einmal.",
-        )
+        return Stand("fehler", FEHLER_TEXT)
     if status in ("abgelehnt", "ignoriert"):
         return Stand(
             "abgelehnt", GRUENDE.get(str(antwort.get("grund")), "Die Anfrage wurde abgelehnt.")

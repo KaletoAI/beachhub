@@ -1,3 +1,4 @@
+import threading
 import uuid
 from datetime import date, time, timedelta
 
@@ -66,6 +67,14 @@ def test_belegter_oder_kaputter_termin(angemeldet: TestClient, welt) -> None:
     )
 
 
+def test_buchen_seite_zeitpunkt_ueberlauf_kein_500(angemeldet: TestClient, welt) -> None:
+    # Umrechnung auf die lokale Zeitzone würde für Jahre nahe der Grenze des datetime-Bereichs
+    # mit OverflowError scheitern (z. B. Jahr 9999 mit negativem Offset landet in UTC im Jahr
+    # 10000) – muss wie ein sonstiges kaputtes Datum als 409 behandelt werden, nicht als 500.
+    r = angemeldet.get("/buchen", params={"feld": FELD_ID, "beginn": "9999-12-31T23:00:00-05:00"})
+    assert r.status_code == 409 and "nicht mehr frei" in r.text
+
+
 def test_buchen_legt_anfrage_an(angemeldet: TestClient, welt, db: Session) -> None:
     ende = kombiniere(TAG, time(19))
     r = angemeldet.post(
@@ -103,6 +112,54 @@ def test_buchen_doppelklick_erzeugt_nur_eine_anfrage(
     assert len(db.scalars(select(Anfrage)).all()) == 1
 
 
+def test_buchen_doppelklick_gleichzeitig_erzeugt_nur_eine_anfrage(
+    angemeldet: TestClient, welt, db: Session
+) -> None:
+    # Echte Gleichzeitigkeit statt nacheinander: zwei Threads, jeder mit eigener DB-Session
+    # (get_db erzeugt je Anfrage eine neue SessionLocal) – prüft, dass die Konto-Sperre zwei
+    # tatsächlich parallele POSTs serialisiert statt beide anlegen zu lassen.
+    daten = {
+        "feld": FELD_ID,
+        "beginn": B17.isoformat(),
+        "ende": B18.isoformat(),
+        "csrf_token": angemeldet.csrf,
+    }
+    ergebnisse: list = []
+
+    def posten() -> None:
+        ergebnisse.append(angemeldet.post("/buchen", data=daten, follow_redirects=False))
+
+    t1 = threading.Thread(target=posten)
+    t2 = threading.Thread(target=posten)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert len(ergebnisse) == 2
+    orte = {r.headers["location"] for r in ergebnisse}
+    assert len(orte) == 1
+    assert len(db.scalars(select(Anfrage)).all()) == 1
+
+
+def test_buchen_kurz_nach_beantwortung_dieselbe_anfrage(
+    angemeldet: TestClient, welt, db: Session, uhr_steht
+) -> None:
+    daten = {
+        "feld": FELD_ID,
+        "beginn": B17.isoformat(),
+        "ende": B18.isoformat(),
+        "csrf_token": angemeldet.csrf,
+    }
+    r1 = angemeldet.post("/buchen", data=daten, follow_redirects=False)
+    a = db.scalar(select(Anfrage))
+    _antworte(db, a, status="abgelehnt", grund="belegt")
+    uhr_steht.weiter(seconds=90)  # unter dem Zwei-Minuten-Fenster
+    r2 = angemeldet.post("/buchen", data=daten, follow_redirects=False)
+    assert r1.headers["location"] == r2.headers["location"]
+    assert len(db.scalars(select(Anfrage)).all()) == 1
+
+
 def test_buchen_nach_beantwortung_und_wartezeit_neue_anfrage(
     angemeldet: TestClient, welt, db: Session, uhr_steht
 ) -> None:
@@ -133,6 +190,46 @@ def test_buchen_ueber_belegung_hinaus_abgewiesen(angemeldet: TestClient, welt, d
         follow_redirects=False,
     )
     assert r.headers["location"] == "/"
+    assert db.scalar(select(Anfrage)) is None
+
+
+def test_buchen_post_ueberlauf_kein_500(angemeldet: TestClient, welt, db: Session) -> None:
+    r = angemeldet.post(
+        "/buchen",
+        data={
+            "feld": FELD_ID,
+            "beginn": "0001-01-01T00:30:00+05:00",
+            "ende": B18.isoformat(),
+            "csrf_token": angemeldet.csrf,
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303 and r.headers["location"] == "/"
+    assert db.scalar(select(Anfrage)) is None
+
+
+def test_buchen_post_fehlerhafte_eingaben_erzeugen_keine_anfrage(
+    angemeldet: TestClient, welt, db: Session
+) -> None:
+    faelle = [
+        {"feld": "unbekannt", "beginn": B17.isoformat(), "ende": B18.isoformat()},
+        {"feld": FELD_ID, "beginn": B18.isoformat(), "ende": B17.isoformat()},  # ende vor beginn
+        {  # nicht am Raster ausgerichteter beginn
+            "feld": FELD_ID,
+            "beginn": kombiniere(TAG, time(17, 15)).isoformat(),
+            "ende": B18.isoformat(),
+        },
+        {  # ende über die (durch die Belegung um 19 Uhr endende) Folge hinaus
+            "feld": FELD_ID,
+            "beginn": B17.isoformat(),
+            "ende": kombiniere(TAG, time(22)).isoformat(),
+        },
+    ]
+    for daten in faelle:
+        r = angemeldet.post(
+            "/buchen", data={**daten, "csrf_token": angemeldet.csrf}, follow_redirects=False
+        )
+        assert r.status_code == 303 and r.headers["location"] == "/"
     assert db.scalar(select(Anfrage)) is None
 
 
@@ -182,6 +279,35 @@ def test_reserviert_leitet_einmal_zur_zahlung(angemeldet: TestClient, welt, db: 
     assert r.status_code == 200 and "Zur Zahlung" in r.text
 
 
+def test_checkout_url_https_wird_akzeptiert(angemeldet: TestClient, welt, db: Session) -> None:
+    a = _anfrage(db, angemeldet.konto_id)
+    ziel = "https://zahlungsanbieter.example/checkout/abc123"
+    _antworte(db, a, status="reserviert", buchung_id=uuid.uuid4(), checkout_url=ziel)
+    r = angemeldet.get(f"/anfrage/{a.id}?weiter=1", follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == ziel
+
+
+def test_checkout_url_offene_weiterleitung_wird_abgelehnt(
+    angemeldet: TestClient, welt, db: Session
+) -> None:
+    # Protokollrelative URL ("//host/pfad") wird vom Browser als absolutes Ziel auf einem
+    # fremden Host interpretiert – auch wenn das Hauptsystem an sich vertrauenswürdig ist, darf
+    # eine kaputte/manipulierte checkout_url nicht kommentarlos weiterleiten oder angezeigt
+    # werden.
+    a = _anfrage(db, angemeldet.konto_id)
+    _antworte(
+        db,
+        a,
+        status="reserviert",
+        buchung_id=uuid.uuid4(),
+        checkout_url="//boese.example/phish",
+    )
+    r = angemeldet.get(f"/anfrage/{a.id}?weiter=1", follow_redirects=False)
+    assert r.status_code == 200 and "Fehler aufgetreten" in r.text
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand").json()
+    assert stand["zustand"] == "fehler" and stand["ziel"] is None
+
+
 def test_nach_zahlung_bestaetigt(angemeldet: TestClient, welt, db: Session) -> None:
     a = _anfrage(db, angemeldet.konto_id)
     bid = uuid.uuid4()
@@ -211,6 +337,12 @@ def test_bestaetigt_abgelehnt_fehler(angemeldet: TestClient, welt, db: Session) 
     c = _anfrage(db, angemeldet.konto_id)
     _antworte(db, c, status="fehler")
     assert "Fehler aufgetreten" in angemeldet.get(f"/anfrage/{c.id}").text
+
+
+def test_ablehnungsgrund_ungueltig_text(angemeldet: TestClient, welt, db: Session) -> None:
+    a = _anfrage(db, angemeldet.konto_id)
+    _antworte(db, a, status="abgelehnt", grund="ungueltig")
+    assert "nicht verarbeitet werden" in angemeldet.get(f"/anfrage/{a.id}").text
 
 
 def test_fremde_anfrage_404(angemeldet: TestClient, welt, db: Session) -> None:
