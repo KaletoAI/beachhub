@@ -1,0 +1,30 @@
+{% extends "base.html" %}{% block title %}Belegung{% endblock %}
+{% block content %}
+<h1>Freie Zeiten</h1>
+{% if belegung is none %}
+<div class="karte"><p>Die Belegung wird gerade geladen. Bitte versuche es in einer Minute noch einmal.</p></div>
+{% else %}
+<nav class="tage" aria-label="Tag wählen">
+  {% for t in tage %}<a href="/?tag={{ t.isoformat() }}"{% if t == datum %} aria-current="page"{% endif %}>{{ t|tag }}</a>{% endfor %}
+</nav>
+{% if not konto %}<p class="hinweis"><a href="/anmelden">Melde dich an</a>, um Preise zu sehen und zu buchen.</p>{% endif %}
+{% for feld, liste in ansicht %}
+<section class="karte">
+  <h2>{{ feld.name }}</h2>
+  {% if liste %}
+  <div class="slots">
+    {% for s in liste %}
+    {% if s.zustand == "frei" %}
+    <a class="slot frei" href="/buchen?feld={{ feld.id }}&amp;beginn={{ s.beginn.isoformat()|urlencode }}">{{ s.beginn|uhrzeit }}{% if s.preis is not none %}<span class="preis">{{ s.preis|euro }}</span>{% endif %}</a>
+    {% else %}
+    <span class="slot {{ s.zustand }}">{{ s.beginn|uhrzeit }}<span class="preis">{{ "belegt" if s.zustand == "belegt" else "–" }}</span></span>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="hinweis">An diesem Tag ist das Feld nicht buchbar.</p>
+  {% endif %}
+</section>
+{% endfor %}
+{% endif %}
+{% endblock %}

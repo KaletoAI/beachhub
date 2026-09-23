@@ -12,7 +12,7 @@ from starlette.requests import Request
 
 from beachhub_portal import auth
 from beachhub_portal.config import INSECURE_SECRET, pruefe_produktionsstart, settings
-from beachhub_portal.routes import kanal, konto, oeffentlich
+from beachhub_portal.routes import belegung, kanal, konto, oeffentlich
 from beachhub_portal.templating import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -92,6 +92,7 @@ csrf = [Depends(auth.verify_csrf)]
 app.include_router(kanal.router, prefix="/core")
 app.include_router(oeffentlich.router, dependencies=csrf)
 app.include_router(konto.router, dependencies=csrf)
+app.include_router(belegung.router, dependencies=csrf)
 
 
 @app.exception_handler(StarletteHTTPException)
