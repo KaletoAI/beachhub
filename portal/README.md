@@ -16,13 +16,17 @@ python3.12 -m venv .venv && source .venv/bin/activate
 pip install -e ../shared -e .[dev]
 ```
 
-PostgreSQL bereitstellen – entweder per Compose (Container `db`, Port `127.0.0.1:5433`):
+PostgreSQL bereitstellen – entweder per Compose (Container `db`, Port `127.0.0.1:5433` – bewusst
+nicht `5432`, damit dieselbe Maschine gleichzeitig `core`s eigenen Compose-`db`-Dienst auf `5432`
+laufen haben kann; `PORTAL_DATABASE_URL`/`TEST_PORTAL_DATABASE_URL` unten dann auf Port `5433`
+setzen):
 
 ```bash
 docker compose up -d db
 ```
 
-oder eine lokal installierte PostgreSQL-16-Instanz. Die Datenbank `beachhub_portal` muss mit
+oder eine lokal installierte PostgreSQL-16-Instanz auf dem Standardport `5432` (passt zum
+Vorgabewert in `.env.example`). Die Datenbank `beachhub_portal` muss mit
 `TEMPLATE template0 ENCODING 'UTF8'` angelegt werden (ein `CREATE DATABASE` aus `template1`
 liefert auf manchen Systemen `SQL_ASCII`, woran psycopg3 beim ersten Connect abstürzt):
 
@@ -50,7 +54,9 @@ createdb -O beachhub --template=template0 --encoding=UTF8 beachhub_portal_test
 TEST_PORTAL_DATABASE_URL=postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_portal_test pytest -q
 ```
 
-Die Testdatenbank `beachhub_portal_test` wird beim Start von `docker compose up -d db` durch
+Port `5432` passt zu einer lokal installierten PostgreSQL; mit dem Compose-`db`-Dienst (s. o.,
+Port `5433`) `TEST_PORTAL_DATABASE_URL` entsprechend anpassen. Die Testdatenbank
+`beachhub_portal_test` wird beim Start von `docker compose up -d db` durch
 `deploy/init-test-db.sql` automatisch angelegt; bei lokaler PostgreSQL-Installation muss sie
 händisch erstellt werden (Befehl s. o.).
 

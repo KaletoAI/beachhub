@@ -1,6 +1,11 @@
 # Öffentliche Seite des Portals. Der Kanal des Hauptsystems (/core/*) ist hier gesperrt.
 {$PORTAL_DOMAIN} {
 	encode zstd gzip
+	# Anonyme Kunden-Requests sind alle Formulare (Anmeldung, Buchen, Storno, Testzahlung); 1 MB
+	# ist reichlich Puffer und begrenzt beliebig große Uploads von außen.
+	request_body {
+		max_size 1MB
+	}
 	@kanal path /core/*
 	respond @kanal 404
 	reverse_proxy 127.0.0.1:8001
