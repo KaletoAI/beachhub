@@ -40,12 +40,19 @@ ZUORDNUNG = Zuordnung(
 )
 
 
-def zustandswechsel(entity_id: str, state: str) -> dict[str, object]:
+def zustandswechsel(
+    entity_id: str, state: str, alter_state: str | None = None
+) -> dict[str, object]:
+    alt = (
+        None
+        if alter_state is None
+        else {"entity_id": entity_id, "state": alter_state, "attributes": {}}
+    )
     return {
         "event_type": "state_changed",
         "data": {
             "entity_id": entity_id,
-            "old_state": None,
+            "old_state": alt,
             "new_state": {"entity_id": entity_id, "state": state, "attributes": {}},
         },
     }
@@ -121,6 +128,27 @@ async def test_tastenfeld_code_als_zahl_oeffnet(a: Aufbau) -> None:
     assert len(a.ereignis("pin_akzeptiert")) == 1 and a.ereignis("pin_abgelehnt") == []
 
 
+async def test_tastenfeld_code_mit_leerzeichen_oeffnet(a: Aufbau) -> None:
+    a.plan(buchung(F1, t(19), t(21), pin=PIN))
+    a.uhr.stelle(t(19))
+    await a.zuhoerer.verarbeite(
+        {"event_type": "esphome.beachhub_pin", "data": {"code": f" {PIN} "}}
+    )
+    await a.zuhoerer.warte_auf_eingaben()
+    assert a.sim.zustaende["lock.eingang"]["state"] == "unlocked"
+
+
+async def test_tastenfeld_code_nie_geloggt(a: Aufbau, caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.DEBUG)
+    a.plan(buchung(F1, t(19), t(21), pin=PIN))
+    a.uhr.stelle(t(19))
+    await a.zuhoerer.verarbeite({"event_type": "esphome.beachhub_pin", "data": {"code": int(PIN)}})
+    await a.zuhoerer.warte_auf_eingaben()
+    await a.zuhoerer.verarbeite({"event_type": "esphome.beachhub_pin", "data": {"code": "000000"}})
+    await a.zuhoerer.warte_auf_eingaben()
+    assert PIN not in caplog.text and "000000" not in caplog.text
+
+
 async def test_handbetrieb_an_und_aus(a: Aufbau) -> None:
     await a.zuhoerer.verarbeite(zustandswechsel("input_boolean.beachhub_handbetrieb", "on"))
     await a.zuhoerer.verarbeite(zustandswechsel("input_boolean.beachhub_handbetrieb", "on"))
@@ -131,6 +159,24 @@ async def test_handbetrieb_an_und_aus(a: Aufbau) -> None:
     await a.zuhoerer.verarbeite(zustandswechsel("input_boolean.beachhub_handbetrieb", "off"))
     assert len(a.ereignis("handbetrieb_aus")) == 1
     assert a.steuerung_wecker.is_set()  # Rückkehr zur Automatik stellt den Sollzustand sofort her
+
+
+async def test_handbetrieb_unavailable_behaelt_zustand(a: Aufbau) -> None:
+    await a.zuhoerer.verarbeite(zustandswechsel("input_boolean.beachhub_handbetrieb", "on"))
+    await a.zuhoerer.verarbeite(
+        zustandswechsel("input_boolean.beachhub_handbetrieb", "unavailable")
+    )
+    assert a.ereignis("handbetrieb_aus") == []
+    with a.sitzungen() as db:
+        assert lies(db, "handbetrieb") is True
+
+
+async def test_handbetrieb_bleibt_nach_getrennt_erhalten(a: Aufbau) -> None:
+    await a.zuhoerer.verarbeite(zustandswechsel("input_boolean.beachhub_handbetrieb", "on"))
+    a.zuhoerer.getrennt()
+    assert a.lage.ha_verbunden is False
+    with a.sitzungen() as db:
+        assert lies(db, "handbetrieb") is True
 
 
 async def test_praesenz_mit_und_ohne_buchung(a: Aufbau) -> None:
@@ -153,6 +199,32 @@ async def test_praesenz_mit_und_ohne_buchung(a: Aufbau) -> None:
         assert F1 not in lies(db, "praesenz")
 
 
+async def test_praesenz_unavailable_behaelt_zustand(a: Aufbau) -> None:
+    a.plan(buchung(F1, t(19), t(21)))
+    a.uhr.stelle(t(19, 2))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "on"))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "unavailable"))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "on"))
+    assert len(a.ereignis("praesenz_start")) == 1
+    assert a.ereignis("praesenz_ende") == []
+
+
+async def test_kaputter_praesenz_eintrag_bei_off_kein_absturz(
+    a: Aufbau, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    with a.sitzungen() as db:
+        schreibe(
+            db, "praesenz", {F1: {"seit": "nicht-iso", "ohne_buchung_seit": None, "alarm": False}}
+        )
+        db.commit()
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "off"))
+    assert a.ereignis("praesenz_ende") == []
+    assert "Ungültiger Präsenz-Eintrag" in caplog.text
+    with a.sitzungen() as db:
+        assert F1 not in lies(db, "praesenz")
+
+
 async def test_tuer_offen_ausserhalb(a: Aufbau) -> None:
     a.plan(buchung(F1, t(19), t(21)))
     a.uhr.stelle(t(18, 50))  # im Zutrittsfenster
@@ -169,6 +241,31 @@ async def test_tuer_offen_ausserhalb(a: Aufbau) -> None:
     a.uhr.vor(minutes=3)
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1  # Master-PIN vor 3 min: kein Alarm
+
+
+async def test_tuer_offen_ausserhalb_nach_kulanzgrenze_erneut(a: Aufbau) -> None:
+    a.plan(buchung(F1, t(19), t(21)))
+    a.uhr.stelle(t(23))
+    await a.zuhoerer.verarbeite(
+        {"event_type": "esphome.beachhub_pin", "data": {"code": MASTER_PIN}}
+    )
+    await a.zuhoerer.warte_auf_eingaben()
+    a.uhr.vor(minutes=3)
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert a.ereignis("tuer_offen_ausserhalb") == []  # noch innerhalb der 5-min-Kulanz
+    a.uhr.vor(minutes=3)  # insgesamt 6 min seit dem Master-PIN: Kulanz überschritten
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
+async def test_tuer_attribut_update_loest_keinen_neuen_alarm_aus(a: Aufbau) -> None:
+    a.plan(buchung(F1, t(19), t(21)))
+    a.uhr.stelle(t(22))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+    # Attribut-Update: Zustand war schon "on", kein echter Übergang.
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on", alter_state="on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
 
 
 async def test_externe_aenderung_stoesst_steuerung_an(a: Aufbau) -> None:
@@ -189,6 +286,23 @@ async def test_ha_ausfall_wird_nach_2_minuten_einmal_gemeldet(
     aufbau.zuhoerer.pruefe_ausfall()
     aufbau.zuhoerer.pruefe_ausfall()
     assert len(aufbau.ereignis("ha_nicht_erreichbar")) == 1
+    await aufbau.client.schliesse()
+
+
+async def test_ausfall_schlafzeit_wird_auf_2_min_grenze_gekappt(
+    sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator
+) -> None:
+    """Ein großer Backoff darf `ha_nicht_erreichbar` nicht verspäten: die Schlafzeit vor dem
+    nächsten Verbindungsversuch wird auf die Restzeit bis zur 2-min-Grenze gekappt."""
+    aufbau = Aufbau(sitzungen, uhr, ha, url="http://127.0.0.1:9")
+    aufbau.zuhoerer.getrennt()  # ausfall_seit = t(17) (Konstruktionszeit == aktuelle Uhr)
+    # Rest (120 s) größer als der Backoff: nichts zu kappen.
+    assert aufbau.zuhoerer._naechster_schlaf(60.0) == 60.0
+    uhr.vor(minutes=1, seconds=30)  # Rest nur noch 30 s
+    assert aufbau.zuhoerer._naechster_schlaf(60.0) == pytest.approx(30.0)
+    assert aufbau.zuhoerer._naechster_schlaf(10.0) == 10.0  # kürzerer Backoff bleibt unverändert
+    uhr.vor(minutes=1)  # insgesamt 2:30 min: Grenze schon überschritten
+    assert aufbau.zuhoerer._naechster_schlaf(60.0) == 60.0
     await aufbau.client.schliesse()
 
 
@@ -216,13 +330,47 @@ async def test_wiederverbindung_ueber_websocket(a: Aufbau) -> None:
             await aufgabe
 
 
+async def test_laufen_uebersteht_ausnahme_in_verarbeite(
+    a: Aufbau, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.ERROR)
+    original = a.zuhoerer.verarbeite
+    aufrufe = 0
+
+    async def kaputt(event: dict[str, object]) -> None:
+        nonlocal aufrufe
+        aufrufe += 1
+        if aufrufe == 1:
+            raise RuntimeError("absichtlich kaputt")
+        await original(event)
+
+    monkeypatch.setattr(a.zuhoerer, "verarbeite", kaputt)
+    aufgabe = asyncio.create_task(a.zuhoerer.laufen())
+    try:
+        await warte_bis(lambda: a.sim.abonnements() == 2)
+        await a.sim.setze("input_boolean.beachhub_handbetrieb", "on")  # löst die Ausnahme aus
+        await warte_bis(lambda: aufrufe >= 1)
+        assert a.ereignis("handbetrieb_an") == []  # Ausnahme: kein Ereignis erzeugt
+        await a.sim.setze("input_boolean.beachhub_handbetrieb", "on")  # Zuhörer läuft weiter
+        await warte_bis(lambda: len(a.ereignis("handbetrieb_an")) == 1)
+    finally:
+        aufgabe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await aufgabe
+    assert "nicht verarbeitet" in caplog.text
+
+
 async def test_wartende_eingabe_wird_beim_herunterfahren_abgebrochen(a: Aufbau) -> None:
     a.plan(buchung(F1, t(19), t(21), pin=PIN))
     a.uhr.stelle(t(19))
     await a.zuhoerer.verarbeite({"event_type": "esphome.beachhub_pin", "data": {"code": int(PIN)}})
-    assert len(a.zuhoerer._eingaben) == 1
+    aufgaben = list(a.zuhoerer._eingaben)
+    assert len(aufgaben) == 1
     await a.zuhoerer.beende_eingaben()
     assert a.zuhoerer._eingaben == set()
+    assert aufgaben[0].cancelled()
+    assert a.sim.zustaende["lock.eingang"]["state"] == "locked"  # Tür bleibt zu
+    assert a.ereignis("pin_akzeptiert") == []
 
 
 async def test_status_sensoren(a: Aufbau) -> None:
@@ -240,6 +388,21 @@ async def test_status_sensoren(a: Aufbau) -> None:
     a.uhr.vor(minutes=6)
     await a.status.einmal()
     assert a.sim.geschrieben["binary_sensor.beachhub_verbunden"]["state"] == "off"
+
+
+async def test_letzter_kontakt_kaputt_schreibt_trotzdem_sensoren(
+    a: Aufbau, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    a.plan()
+    with a.sitzungen() as db:
+        schreibe(db, "letzter_kontakt", "nicht-iso")
+        db.commit()
+    await a.status.einmal()
+    g = a.sim.geschrieben
+    assert g["binary_sensor.beachhub_verbunden"]["state"] == "off"
+    assert g["sensor.beachhub_planversion"]["state"] == "1"
+    assert "Ungültiger Zeitpunkt" in caplog.text
 
 
 async def test_status_ohne_ha_kein_absturz(

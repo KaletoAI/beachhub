@@ -5,6 +5,10 @@ Verbindung meldet er einmal `ha_nicht_erreichbar`. Nach jeder (Wieder-)Verbindun
 Zustände neu ein – so gehen weder Handbetrieb noch Präsenz während eines Ausfalls verloren –
 und stößt Steuerung und Status an (HA hat die Status-Sensoren bei einem Neustart vergessen).
 
+Ein einzelnes kaputtes HA-Ereignis (unerwartete Struktur, kaputter eigener Zustand) darf den
+Zuhörer und damit den Dienst nicht mitreißen – `laufen()` fängt Ausnahmen je Ereignis und in der
+äußeren Schleife und verbindet danach neu, statt sich zu beenden.
+
 Jede Tastenfeld-Eingabe läuft als eigene Aufgabe (parallel zum Verarbeiten weiterer Ereignisse);
 `beende_eingaben()` bricht sie beim Herunterfahren des Dienstes ab und wartet, bis sie beendet
 sind – Task 11 ruft das vor `tuer.schliesse()` und `ha.schliesse()` auf.
@@ -31,6 +35,9 @@ logger = logging.getLogger(__name__)
 AUSFALL_MELDEN_NACH = timedelta(minutes=2)
 MASTER_TUER_KULANZ = timedelta(minutes=5)
 MAX_BACKOFF = 60.0
+# HA meldet zwischendurch "unavailable"/"unknown" (z. B. beim eigenen Neustart eines Sensors).
+# Nur "on"/"off" sind echte Zustandswechsel; alles andere behält den zuletzt bekannten Zustand.
+_ECHTE_ZUSTAENDE = ("on", "off")
 
 
 class HaZuhoerer:
@@ -73,29 +80,63 @@ class HaZuhoerer:
                     await self.verbunden()
                     backoff = self._backoff_start
                     while True:
-                        await self.verarbeite(await ws.naechstes())
+                        ereignis = await ws.naechstes()
+                        try:
+                            await self.verarbeite(ereignis)
+                        except Exception:
+                            # Ein kaputtes einzelnes Ereignis darf die Verbindung nicht
+                            # abreißen lassen – nie `ereignis`/`daten` loggen (könnte PINs
+                            # enthalten), nur den Ereignistyp.
+                            logger.exception(
+                                "HA-Ereignis %s nicht verarbeitet", ereignis.get("event_type")
+                            )
                 finally:
                     await ws.schliesse()
             except HaFehler as e:
                 logger.warning("HA-WebSocket getrennt: %s", e)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("HA-Zuhörer: unerwarteter Fehler, verbinde neu")
             self.getrennt()
             self.pruefe_ausfall()
-            await asyncio.sleep(backoff)
+            await asyncio.sleep(self._naechster_schlaf(backoff))
             backoff = min(MAX_BACKOFF, backoff * 2)
+            # Direkt nach dem (ggf. verkürzten) Schlaf erneut prüfen, statt erst nach dem
+            # nächsten Verbindungsversuch – sonst könnte `ha_nicht_erreichbar` bei großem
+            # Backoff verspätet gemeldet werden.
+            self.pruefe_ausfall()
+
+    def _naechster_schlaf(self, backoff: float) -> float:
+        """Begrenzt die Backoff-Schlafzeit auf die Restzeit bis zur 2-min-Ausfallmeldung, damit
+        `ha_nicht_erreichbar` pünktlich gemeldet wird, auch wenn der Backoff (bis 60 s) sonst
+        über die 2-min-Grenze hinaus schliefe."""
+        if self._ausfall_seit is None or self._ausfall_gemeldet:
+            return backoff
+        rest = (self._ausfall_seit + AUSFALL_MELDEN_NACH - self._uhr.jetzt()).total_seconds()
+        return backoff if rest <= 0 else min(backoff, rest)
 
     async def verbunden(self) -> None:
+        # Erst nach dem erfolgreichen Lesen aller Zustände als verbunden gelten – sonst würde
+        # ein Fehler mitten in verbunden() (z. B. REST nach erfolgreichem WebSocket-Handshake
+        # nicht erreichbar) den Ausfall fälschlich zurücksetzen.
+        zustaende = await self._ha.zustaende()
         self._lage.ha_verbunden = True
         self._ausfall_seit = None
         self._ausfall_gemeldet = False
-        for zustand in await self._ha.zustaende():
+        for zustand in zustaende:
             entity = zustand.get("entity_id")
             if isinstance(entity, str):
                 self._lage.ist[entity] = zustand
-        if self._z.handbetrieb and self._lage.state(self._z.handbetrieb) is not None:
-            self._handbetrieb(self._lage.state(self._z.handbetrieb) == "on")
+        if self._z.handbetrieb:
+            an = self._als_bool(self._lage.state(self._z.handbetrieb))
+            if an is not None:
+                self._handbetrieb(an)
         for feld_id, z in self._z.felder.items():
-            if z.praesenz and self._lage.state(z.praesenz) is not None:
-                self._praesenz(feld_id, self._lage.state(z.praesenz) == "on")
+            if z.praesenz:
+                an = self._als_bool(self._lage.state(z.praesenz))
+                if an is not None:
+                    self._praesenz(feld_id, an)
         self._status_wecker.set()
         self._steuerung_wecker.set()
 
@@ -111,6 +152,13 @@ class HaZuhoerer:
             self._ausfall_gemeldet = True
             self._ereignisse.melde("ha_nicht_erreichbar", seit=self._ausfall_seit.isoformat())
 
+    @staticmethod
+    def _als_bool(zustand: str | None) -> bool | None:
+        """None, wenn `zustand` kein echter Zustandswechsel ist (z. B. "unavailable",
+        "unknown", fehlend) – der Aufrufer lässt den zuletzt bekannten Zustand dann
+        unangetastet, statt ihn als "aus" zu werten."""
+        return zustand == "on" if zustand in _ECHTE_ZUSTAENDE else None
+
     async def verarbeite(self, event: dict[str, Any]) -> None:
         typ = event.get("event_type")
         daten = event.get("data") or {}
@@ -121,7 +169,7 @@ class HaZuhoerer:
             if code is not None:
                 aufgabe = asyncio.create_task(self._pruefer.eingabe(str(code)))
                 self._eingaben.add(aufgabe)
-                aufgabe.add_done_callback(self._eingaben.discard)
+                aufgabe.add_done_callback(self._eingabe_beendet)
             return
         if typ != "state_changed":
             return
@@ -133,16 +181,27 @@ class HaZuhoerer:
             self._lage.ist.pop(entity, None)
             return
         self._lage.ist[entity] = neu
-        an = neu.get("state") == "on"
+        an = self._als_bool(neu.get("state"))
         if entity == self._z.handbetrieb:
-            self._handbetrieb(an)
+            if an is not None:
+                self._handbetrieb(an)
         elif (feld_id := self._z.feld_fuer_praesenz(entity)) is not None:
-            self._praesenz(feld_id, an)
+            if an is not None:
+                self._praesenz(feld_id, an)
         elif entity == self._z.tuer.kontakt:
-            if an:
+            # Nur ein echter Übergang auf "on" ist ein Öffnen – ein Attribut-Update, bei dem
+            # der Zustand schon vorher "on" war, darf nicht erneut alarmieren.
+            alt = daten.get("old_state")
+            alt_zustand = alt.get("state") if isinstance(alt, dict) else None
+            if an and alt_zustand != "on":
                 self._tuer_geoeffnet()
         elif entity in self._z.gesteuerte():
             self._steuerung_wecker.set()
+
+    def _eingabe_beendet(self, aufgabe: asyncio.Task[bool]) -> None:
+        self._eingaben.discard(aufgabe)
+        if not aufgabe.cancelled() and (fehler := aufgabe.exception()) is not None:
+            logger.error("Tastenfeld-Eingabe fehlgeschlagen", exc_info=fehler)
 
     async def warte_auf_eingaben(self) -> None:
         """Wartet, bis alle gerade laufenden Tastenfeld-Eingaben natürlich beendet sind –
@@ -158,8 +217,16 @@ class HaZuhoerer:
         aufgaben = list(self._eingaben)
         for aufgabe in aufgaben:
             aufgabe.cancel()
-        if aufgaben:
-            await asyncio.gather(*aufgaben, return_exceptions=True)
+        if not aufgaben:
+            return
+        ergebnisse = await asyncio.gather(*aufgaben, return_exceptions=True)
+        for ergebnis in ergebnisse:
+            if isinstance(ergebnis, BaseException) and not isinstance(
+                ergebnis, asyncio.CancelledError
+            ):
+                logger.error(
+                    "Tastenfeld-Eingabe beim Herunterfahren fehlgeschlagen", exc_info=ergebnis
+                )
 
     def _handbetrieb(self, an: bool) -> None:
         with self._sitzungen() as db:
@@ -176,10 +243,12 @@ class HaZuhoerer:
         jetzt = self._uhr.jetzt()
         with self._sitzungen() as db:
             gespeichert = plan.lade(db)
-            praesenz: dict[str, dict[str, Any]] = lies(db, "praesenz", {})
+            roh = lies(db, "praesenz", {})
+            praesenz: dict[str, dict[str, Any]] = roh if isinstance(roh, dict) else {}
             if an == (feld_id in praesenz):
                 return
             laufend = laufende_buchung(gespeichert.inhalt if gespeichert else None, feld_id, jetzt)
+            eintrag: Any = None
             if an:
                 praesenz[feld_id] = {
                     "seit": jetzt.isoformat(),
@@ -187,7 +256,7 @@ class HaZuhoerer:
                     "alarm": False,
                 }
             else:
-                eintrag = praesenz.pop(feld_id)
+                eintrag = praesenz.pop(feld_id, None)
             schreibe(db, "praesenz", praesenz)
             db.commit()
         if an:
@@ -196,11 +265,20 @@ class HaZuhoerer:
                 feld_id=feld_id,
                 buchung_id=laufend.buchung_id if laufend else None,
             )
-        else:
-            dauer = jetzt - datetime.fromisoformat(eintrag["seit"])
-            self._ereignisse.melde(
-                "praesenz_ende", feld_id=feld_id, dauer_minuten=int(dauer.total_seconds() // 60)
+            return
+        try:
+            if not isinstance(eintrag, dict):
+                raise TypeError("Präsenz-Eintrag ist kein Objekt")
+            seit = datetime.fromisoformat(eintrag["seit"])
+        except (KeyError, ValueError, TypeError) as e:
+            logger.warning(
+                "Ungültiger Präsenz-Eintrag für %s beim Verlassen verworfen: %s", feld_id, e
             )
+            return
+        dauer = jetzt - seit
+        self._ereignisse.melde(
+            "praesenz_ende", feld_id=feld_id, dauer_minuten=int(dauer.total_seconds() // 60)
+        )
 
     def _tuer_geoeffnet(self) -> None:
         jetzt = self._uhr.jetzt()

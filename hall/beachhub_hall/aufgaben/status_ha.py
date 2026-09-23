@@ -32,10 +32,14 @@ class StatusHa:
         with self._sitzungen() as db:
             gespeichert = plan.lade(db)
             kontakt = lies(db, "letzter_kontakt")
-        verbunden = (
-            bool(kontakt)
-            and self._uhr.jetzt() - datetime.fromisoformat(kontakt) <= VERBUNDEN_FENSTER
-        )
+        verbunden = False
+        if kontakt:
+            try:
+                verbunden = self._uhr.jetzt() - datetime.fromisoformat(kontakt) <= VERBUNDEN_FENSTER
+            except (TypeError, ValueError) as e:
+                # Ein kaputter oder naiver Zeitstempel darf die übrigen Sensoren nicht
+                # blockieren – als „kein Kontakt“ behandeln, statt abzustürzen.
+                logger.warning("Ungültiger Zeitpunkt in letzter_kontakt verworfen: %s", e)
         try:
             await self._ha.setze_zustand(
                 "sensor.beachhub_planversion",

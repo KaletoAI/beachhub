@@ -43,7 +43,10 @@ class HaWebSocket:
             raise HaNichtErreichbar(f"WebSocket: {e}") from e
         if msg.type != aiohttp.WSMsgType.TEXT:
             raise HaFehler(f"WebSocket beendet ({msg.type.name})")
-        daten = json.loads(msg.data)
+        try:
+            daten = json.loads(msg.data)
+        except json.JSONDecodeError as e:
+            raise HaFehler(f"WebSocket: ungültiges JSON ({e})") from e
         if not isinstance(daten, dict):
             raise HaFehler("WebSocket: unerwartete Nachricht")
         return daten
