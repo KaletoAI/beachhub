@@ -55,6 +55,14 @@ class Settings(BaseSettings):
             fehler.append("ZAHLUNG_PROVIDER=fake ist nur für die Entwicklung")
         if self.portal_url and not self.portal_oeffentliche_url:
             fehler.append("PORTAL_OEFFENTLICHE_URL fehlt, obwohl PORTAL_URL gesetzt ist")
+        # mTLS ist zum Portal Pflicht (A-2): Der Kanal darf im Produktivbetrieb nie ohne
+        # Client-Zertifikat laufen.
+        if self.portal_url and not self.portal_client_cert:
+            fehler.append("PORTAL_CLIENT_CERT fehlt, obwohl PORTAL_URL gesetzt ist")
+        if self.portal_url and not self.portal_client_key:
+            fehler.append("PORTAL_CLIENT_KEY fehlt, obwohl PORTAL_URL gesetzt ist")
+        if self.portal_url and not self.portal_ca:
+            fehler.append("PORTAL_CA fehlt, obwohl PORTAL_URL gesetzt ist")
         return fehler
 
 

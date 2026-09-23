@@ -3,7 +3,11 @@
 Tabellen für den Kanal zum Portal: verarbeitete Anfragen (Idempotenz) und Zahlungen des
 Online-Zahlungsdienstes. lesestand_version.version wird zu BIGINT: Die Version ist
 max(bisherige Version + 1, Unixzeit in Millisekunden) (Ruling Lesestand-Versionen) und
-übersteigt damit einen 32-Bit-INTEGER.
+übersteigt damit einen 32-Bit-INTEGER. Das downgrade() dieser Migration funktioniert nur, so
+lange noch keine Version mit einer Millisekunden-Unixzeit vergeben wurde (< 2^31 ≈ 2038 in
+Sekunden, in der Praxis also nur direkt nach einem frischen upgrade()); danach überschreitet
+die Spalte den 32-Bit-Bereich, und das Zurückcasten auf INTEGER schlägt mit einem Datenfehler
+fehl.
 
 Revision ID: 0008
 Revises: 0007

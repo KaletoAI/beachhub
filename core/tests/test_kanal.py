@@ -1,4 +1,5 @@
 import json
+import threading
 import time
 import uuid
 from datetime import UTC, datetime
@@ -8,7 +9,7 @@ import httpx
 import pytest
 from beachhub_core import kanal
 from beachhub_core.config import settings
-from beachhub_core.models import Kunde, Kundengruppe
+from beachhub_core.models import Kunde, Kundengruppe, LesestandVersion
 from beachhub_core.services import anfragen, kunden, lesestand
 from beachhub_shared import kanal as vertrag
 from sqlalchemy import select
@@ -136,18 +137,75 @@ def test_fehler_wird_beantwortet_und_alarmiert(
     assert any(m["betreff"] == "[Beachhub] Portal-Anfrage fehlgeschlagen" for m in mail_ausgang)
 
 
-def test_verteilen_nur_portal_dokumente(
+def test_nachlauf_der_ersten_laeuft_wenn_zweite_anfrage_wirft(
+    welt, portal: FakePortal, k, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Zwei Anfragen in einer Runde; anfragen.bearbeite wirft bei der zweiten (unerwarteter
+    # Fehler, nicht der interne Fehlerpfad von bearbeite selbst). Der Nachlauf der ersten,
+    # bereits committeten Anfrage darf dabei nicht verloren gehen.
+    ausgefuehrt: list[str] = []
+    aufrufe = {"n": 0}
+
+    def stub(db: Session, anfrage: vertrag.Anfrage) -> tuple[vertrag.Antwort, list]:
+        aufrufe["n"] += 1
+        if aufrufe["n"] == 1:
+            return vertrag.Antwort(status="ok"), [lambda db: ausgefuehrt.append("eins")]
+        raise RuntimeError("kaputt")
+
+    monkeypatch.setattr(anfragen, "bearbeite", stub)
+    portal.anfragen = [konto_angelegt("a@x.de"), konto_angelegt("b@x.de")]
+    with pytest.raises(RuntimeError):
+        k.abholen()
+    assert ausgefuehrt == ["eins"]
+
+
+def test_verteilen_gleichzeitig_kein_wettlauf(
     db: Session, welt, portal: FakePortal, k, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # Verzahnt zwei verteilen()-Aufrufe: Ohne eine Sperre um den ganzen Zyklus "fällige lesen ->
+    # senden -> merken" könnten beide Threads für dasselbe neue Dokument die app_setting-
+    # Merkzeile anlegen wollen (IntegrityError auf dem Primärschlüssel).
+    lesestand.markiere_geaendert(db, "belegung")
+    db.commit()
+    echt_lade = lesestand.lade
+
+    def verzoegert_lade(name: str):
+        time.sleep(0.1)
+        return echt_lade(name)
+
+    monkeypatch.setattr(lesestand, "lade", verzoegert_lade)
+    barriere = threading.Barrier(2, timeout=5)
+    fehler: list[BaseException] = []
+
+    def lauf() -> None:
+        barriere.wait()
+        try:
+            k.verteilen()
+        except BaseException as e:  # noqa: BLE001
+            fehler.append(e)
+
+    threads = [threading.Thread(target=lauf) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=5)
+    assert not fehler
+    assert len(portal.dokumente) == 1
+
+
+def test_verteilen_nur_portal_dokumente(db: Session, welt, portal: FakePortal, k) -> None:
+    # "hallenplan" ist ein echtes, fälliges Dokument (eigene LesestandVersion-Zeile + Datei),
+    # aber nicht in vertrag.PORTAL_DOKUMENTE – verteilen() muss es trotzdem draußen lassen.
     lesestand.markiere_geaendert(db, "belegung")
     db.commit()
     lesestand.verarbeite_geaenderte(db)
     beleg = lesestand.lade("belegung")
     hallenplan = beleg.model_copy(update={"dokument": "hallenplan"})
-    monkeypatch.setattr(lesestand, "verarbeite_geaenderte", lambda db: ["belegung", "hallenplan"])
-    monkeypatch.setattr(
-        lesestand, "lade", lambda name: {"belegung": beleg, "hallenplan": hallenplan}[name]
+    (settings.data_dir / "lesestand" / "hallenplan.json").write_text(
+        hallenplan.model_dump_json(), encoding="utf-8"
     )
+    db.add(LesestandVersion(dokument="hallenplan", version=hallenplan.version, geaendert=False))
+    db.commit()
     assert k.verteilen() == 1
     assert [d["dokument"] for d in portal.dokumente] == ["belegung"]
 

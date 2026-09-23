@@ -78,6 +78,9 @@ def test_produktionsfehler() -> None:
         portal_oeffentliche_url="https://p.example",
         kanal_token="",
         zahlung_provider="fake",
+        portal_client_cert="/data/zertifikate/portal-kanal.crt",
+        portal_client_key="/data/zertifikate/portal-kanal.key",
+        portal_ca="/data/zertifikate/ca.crt",
     )
     assert len(mit_portal.produktionsfehler) == 2
 
@@ -90,5 +93,28 @@ def test_produktionsfehler_ohne_oeffentliche_url() -> None:
         portal_oeffentliche_url="",
         kanal_token="tok",
         zahlung_provider="stripe",
+        portal_client_cert="/data/zertifikate/portal-kanal.crt",
+        portal_client_key="/data/zertifikate/portal-kanal.key",
+        portal_ca="/data/zertifikate/ca.crt",
     )
     assert s.produktionsfehler == ["PORTAL_OEFFENTLICHE_URL fehlt, obwohl PORTAL_URL gesetzt ist"]
+
+
+def test_produktionsfehler_ohne_mtls_zertifikate() -> None:
+    # mTLS zum Portal ist Pflicht (A-2): ohne Client-Zertifikat/-Schlüssel/CA kein Start in
+    # production.
+    s = Settings(
+        app_env="production",
+        portal_url="https://p:8443",
+        portal_oeffentliche_url="https://p.example",
+        kanal_token="tok",
+        zahlung_provider="stripe",
+        portal_client_cert="",
+        portal_client_key="",
+        portal_ca="",
+    )
+    assert s.produktionsfehler == [
+        "PORTAL_CLIENT_CERT fehlt, obwohl PORTAL_URL gesetzt ist",
+        "PORTAL_CLIENT_KEY fehlt, obwohl PORTAL_URL gesetzt ist",
+        "PORTAL_CA fehlt, obwohl PORTAL_URL gesetzt ist",
+    ]

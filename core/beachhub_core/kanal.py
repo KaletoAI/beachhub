@@ -82,7 +82,12 @@ class Kanal:
         self._letzter_abgleich = float("-inf")
         self._422_gemeldet: set[tuple[str, int]] = set()
         self._letzter_422_alarm = float("-inf")
-        self._sende_sperre = threading.Lock()
+        # Schützt den gesamten Zyklus "fällige Dokumente lesen -> senden -> Sendestand merken"
+        # in verteilen()/abgleichen(): Ohne die Sperre könnten der Abholer- und der
+        # Verteiler-Thread für dasselbe neue Dokument gleichzeitig die app_setting-Merkzeile
+        # anlegen wollen (IntegrityError auf dem Primärschlüssel), wodurch abholen() die
+        # Antworten des laufenden Long-Polls nie sendet.
+        self._verteil_sperre = threading.Lock()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
 
@@ -101,12 +106,19 @@ class Kanal:
             return 0
         eintraege: list[vertrag.AntwortEintrag] = []
         nachlauf: list[Nachlauf] = []
-        with self.sitzung() as db:
-            for a in liste.anfragen:
-                antwort, nach = anfragen.bearbeite(db, a)
-                eintraege.append(vertrag.AntwortEintrag(anfrage_id=a.anfrage_id, antwort=antwort))
-                nachlauf.extend(nach)
         try:
+            # Die Verarbeitungsschleife steht mit im try: Wirft bearbeite() bei Anfrage k+1 (der
+            # schmale, nicht abgefangene Fehlerpfad in anfragen.bearbeite), liefen die Nachläufe
+            # der bereits committeten Anfragen 1..k sonst nie – bei erneuter Zustellung liefert
+            # _bereits_verarbeitet für sie [] zurück, der Verlust (Mails, PDFs, Alarme) wäre
+            # endgültig.
+            with self.sitzung() as db:
+                for a in liste.anfragen:
+                    antwort, nach = anfragen.bearbeite(db, a)
+                    eintraege.append(
+                        vertrag.AntwortEintrag(anfrage_id=a.anfrage_id, antwort=antwort)
+                    )
+                    nachlauf.extend(nach)
             # Erst die Lesestände, dann die Antworten: Sobald das Portal eine Antwort sieht,
             # soll es die Buchung auch schon anzeigen können.
             self.verteilen()
@@ -127,18 +139,23 @@ class Kanal:
         except FileNotFoundError:
             logger.error("Signaturschlüssel fehlt – Lesestand kann nicht verteilt werden")
             return 0
-        with self.sitzung() as db:
-            namen = self._faellige_dokumente(db)
-        dokumente = [dok for name in namen if (dok := lesestand.lade(name)) is not None]
-        try:
-            angenommen = self._sende(dokumente)
-        except httpx.HTTPError:
-            # Die Dokumente sind veröffentlicht, aber nicht angekommen: nachholen per Abgleich.
-            self._abgleich_noetig = True
-            raise
-        if dokumente and angenommen:
+        # Der ganze Zyklus "fällige lesen -> senden -> merken" liegt hinter einer Sperre: sonst
+        # könnten der Abholer- (via abholen -> verteilen) und der Verteiler-Thread gleichzeitig
+        # dasselbe neue Dokument für fällig halten und beide die Merkzeile anlegen wollen.
+        with self._verteil_sperre:
             with self.sitzung() as db:
-                self._merke_gesendete_versionen(db, dokumente)
+                namen = self._faellige_dokumente(db)
+            dokumente = [dok for name in namen if (dok := lesestand.lade(name)) is not None]
+            try:
+                angenommen = self._sende(dokumente)
+            except httpx.HTTPError:
+                # Die Dokumente sind veröffentlicht, aber nicht angekommen: nachholen per
+                # Abgleich.
+                self._abgleich_noetig = True
+                raise
+            if dokumente and angenommen:
+                with self.sitzung() as db:
+                    self._merke_gesendete_versionen(db, dokumente)
         return len(dokumente)
 
     def abgleichen(self) -> int:
@@ -151,12 +168,18 @@ class Kanal:
             dok = Dokument.model_validate_json(pfad.read_text(encoding="utf-8"))
             if vertrag.fuer_portal(dok.dokument) and im_portal.get(dok.dokument, 0) < dok.version:
                 kandidaten.append(dok)
-        with self.sitzung() as db:
-            fehlend = [d for d in kandidaten if self._kunde_hat_portal_konto(db, d.dokument)]
-        angenommen = self._sende(fehlend)
-        if fehlend and angenommen:
+        with self._verteil_sperre:
             with self.sitzung() as db:
-                self._merke_gesendete_versionen(db, fehlend)
+                kunden_mit_portal_konto = self._kunden_mit_portal_konto(db)
+            fehlend = [
+                d
+                for d in kandidaten
+                if self._kunde_hat_portal_konto(d.dokument, kunden_mit_portal_konto)
+            ]
+            angenommen = self._sende(fehlend)
+            if fehlend and angenommen:
+                with self.sitzung() as db:
+                    self._merke_gesendete_versionen(db, fehlend)
         self._abgleich_noetig = False
         self._letzter_abgleich = self.uhr()
         return len(fehlend)
@@ -202,7 +225,10 @@ class Kanal:
         self._stop.set()
         for t in self._threads:
             t.join(timeout=5)
+            if t.is_alive():
+                logger.warning("Kanal-Thread %s reagiert nicht auf stoppe()", t.name)
         self._threads.clear()
+        self.client.close()
 
     def _abholer(self) -> None:
         while not self._stop.is_set():
@@ -222,16 +248,24 @@ class Kanal:
         """Alle für das Portal erlaubten Dokumente, deren aktuelle Version über der zuletzt
         gesendeten liegt – unabhängig davon, wer sie veröffentlicht hat (K1)."""
         gesendet = self._gesendete_versionen(db)
+        kunden_mit_portal_konto = self._kunden_mit_portal_konto(db)
         zeilen = db.scalars(select(LesestandVersion)).all()
         return [
             z.dokument
             for z in zeilen
             if vertrag.fuer_portal(z.dokument)
             and z.version > gesendet.get(z.dokument, 0)
-            and self._kunde_hat_portal_konto(db, z.dokument)
+            and self._kunde_hat_portal_konto(z.dokument, kunden_mit_portal_konto)
         ]
 
-    def _kunde_hat_portal_konto(self, db: Session, dokument: str) -> bool:
+    def _kunden_mit_portal_konto(self, db: Session) -> set[uuid.UUID]:
+        """Ein Join in einer einzigen Abfrage statt eines db.get je konto:-Dokument (sonst ein
+        Roundtrip pro Kunde bei jeder Runde)."""
+        return set(db.scalars(select(Kunde.id).where(Kunde.portal_konto_id.is_not(None))))
+
+    def _kunde_hat_portal_konto(
+        self, dokument: str, kunden_mit_portal_konto: set[uuid.UUID]
+    ) -> bool:
         """K2: konto:<id> geht nur ans Portal, wenn der Kunde per portal_konto_id verknüpft ist
         (Datensparsamkeit N-2) – sonst blieben Konto-Dokumente von Vereins-/Abo-/Admin-Kunden
         oder gerade gelöschten Konten dauerhaft im Portal liegen."""
@@ -242,8 +276,7 @@ class Kanal:
             kunde_id = uuid.UUID(rest)
         except ValueError:
             return False
-        kunde = db.get(Kunde, kunde_id)
-        return kunde is not None and kunde.portal_konto_id is not None
+        return kunde_id in kunden_mit_portal_konto
 
     def _gesendete_versionen(self, db: Session) -> dict[str, int]:
         zeilen = db.scalars(
@@ -267,12 +300,13 @@ class Kanal:
 
     def _sende(self, dokumente: list[Dokument]) -> bool:
         """Sendet die Dokumente ans Portal. Liefert, ob das Portal sie angenommen hat (False bei
-        abgelehnter Signatur/Version); wirft httpx.HTTPError bei sonstigen Netz-/Serverfehlern."""
+        abgelehnter Signatur/Version); wirft httpx.HTTPError bei sonstigen Netz-/Serverfehlern.
+        Wird ausschließlich innerhalb von self._verteil_sperre aufgerufen (verteilen/abgleichen),
+        braucht also keine eigene Sperre um den POST."""
         if not dokumente:
             return True
         body = vertrag.DokumentListe(dokumente=dokumente).model_dump(mode="json")
-        with self._sende_sperre:
-            r = self.client.post("/core/lesestand", json=body)
+        r = self.client.post("/core/lesestand", json=body)
         if r.status_code == 422:
             logger.error("Portal hat Lesestand abgelehnt: %s", r.text[:500])
             self._alarm_bei_ablehnung(dokumente, r.text)
