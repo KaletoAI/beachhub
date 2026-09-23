@@ -12,7 +12,7 @@ from starlette.requests import Request
 
 from beachhub_portal import auth
 from beachhub_portal.config import INSECURE_SECRET, pruefe_produktionsstart, settings
-from beachhub_portal.routes import belegung, buchen, kanal, konto, oeffentlich, zahlung
+from beachhub_portal.routes import belegung, buchen, buchungen, kanal, konto, oeffentlich, zahlung
 from beachhub_portal.templating import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -94,6 +94,7 @@ app.include_router(oeffentlich.router, dependencies=csrf)
 app.include_router(konto.router, dependencies=csrf)
 app.include_router(belegung.router, dependencies=csrf)
 app.include_router(buchen.router, dependencies=csrf)
+app.include_router(buchungen.router, dependencies=csrf)
 app.include_router(zahlung.briefkasten_router)
 app.include_router(zahlung.router, dependencies=csrf)
 app.include_router(zahlung.test_router)

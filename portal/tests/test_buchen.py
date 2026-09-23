@@ -324,7 +324,7 @@ def test_checkout_url_offene_weiterleitung_wird_abgelehnt(
     ],
 )
 def test_gueltige_checkout_url(url: str, erwartet: bool) -> None:
-    assert anfragen._gueltige_checkout_url(url) is erwartet
+    assert anfragen.gueltige_checkout_url(url) is erwartet
 
 
 def test_nach_zahlung_bestaetigt(angemeldet: TestClient, welt, db: Session) -> None:

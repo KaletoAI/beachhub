@@ -20,6 +20,36 @@ from beachhub_portal.services import lesestand, wecker
 
 ERNEUT_NACH = timedelta(seconds=60)
 HOECHSTENS = 50
+# Ruling Task 12: Ein Doppelklick (beim Buchen wie beim Stornieren, Task 14) darf keine zweite
+# Anfrage erzeugen – der Kunde sähe beim zweiten POST sonst ggf. eine überholte Ablehnung, obwohl
+# die erste Anfrage längst bearbeitet wurde. Als Duplikat gilt: dieselbe noch offene/abgeholte
+# Anfrage, oder eine erst vor Kurzem beantwortete (innerhalb dieses Fensters) – danach ist ein
+# neuer Versuch ein neuer Wunsch, kein Doppelklick mehr.
+DOPPELKLICK_FENSTER = timedelta(minutes=2)
+
+
+def bestehende(
+    db: Session, konto_id: uuid.UUID, typ: str, nutzlast: dict[str, Any], jetzt: datetime
+) -> Anfrage | None:
+    """Findet eine wiederverwendbare Anfrage desselben Kontos/Typs mit identischer (validierter)
+    Nutzlast für den Doppelklick-Schutz (Ruling Task 12). Gemeinsam genutzt von
+    `routes/buchen.py` (Buchen) und `routes/buchungen.py` (Storno, Task 14, Review-Minor aus
+    Task 12: die Duplikatlogik gehört als Service-Funktion hierher statt in eine einzelne Route)."""
+    kandidaten = db.scalars(
+        select(Anfrage)
+        .where(
+            Anfrage.konto_id == konto_id,
+            Anfrage.typ == typ,
+            Anfrage.nutzlast_json == nutzlast,
+        )
+        .order_by(Anfrage.erstellt_am.desc())
+    ).all()
+    for a in kandidaten:
+        if a.status != Anfrage.BEANTWORTET:
+            return a
+        if a.beantwortet_am is not None and jetzt - a.beantwortet_am <= DOPPELKLICK_FENSTER:
+            return a
+    return None
 
 
 def stelle(
@@ -171,7 +201,7 @@ class Stand:
 _STEUERZEICHEN_ODER_LEERRAUM = re.compile(r"[\x00-\x20\x7f]")
 
 
-def _gueltige_checkout_url(url: str | None) -> bool:
+def gueltige_checkout_url(url: str | None) -> bool:
     """Verteidigung gegen eine offene Weiterleitung (N-1: Das Hauptsystem ist zwar
     vertrauenswürdig, das Portal erzeugt aber selbst kein Ziel aus dieser fremden Angabe, ohne
     es zu prüfen). Fix-Runde 2: Browser behandeln bei http(s)-URLs einen Backslash wie einen
@@ -183,7 +213,10 @@ def _gueltige_checkout_url(url: str | None) -> bool:
     - einen Pfad, der mit genau einem `/` beginnt (zweites Zeichen weder `/` noch `\\`),
     - eine absolute `https://…`-URL mit nicht leerem Host (per `urlparse`; das Schema wird dabei
       klein geschrieben – case-insensitiv wie im Web üblich, `HTTPS://…` ist also gültig).
-    Abgelehnt wird jede URL mit Backslash, ASCII-Steuerzeichen oder Leerraum (auch am Rand)."""
+    Abgelehnt wird jede URL mit Backslash, ASCII-Steuerzeichen oder Leerraum (auch am Rand).
+
+    Öffentlich (Controller-Hinweis Task 14): `routes/buchungen.py` zeigt den Zahlungslink auf
+    „Meine Buchungen“ nur, wenn dieselbe Prüfung ihn akzeptiert – keine zweite Prüflogik."""
     if url is None or "\\" in url or _STEUERZEICHEN_ODER_LEERRAUM.search(url):
         return False
     if url.startswith("/"):
@@ -205,7 +238,7 @@ def _nach_zahlung(
             "abgelehnt", "Die Zahlungsfrist ist abgelaufen; der Termin wurde wieder freigegeben."
         )
     url = antwort.get("checkout_url")
-    if not _gueltige_checkout_url(url):
+    if not gueltige_checkout_url(url):
         return Stand("fehler", FEHLER_TEXT)
     return Stand(
         "zahlung",
