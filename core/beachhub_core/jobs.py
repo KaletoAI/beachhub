@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 from beachhub_core import clock
 from beachhub_core.database import SessionLocal
 from beachhub_core.models import AppSetting, Rechnung
-from beachhub_core.services import benachrichtigung, konfiguration, rechnung_pdf, rechnungen
+from beachhub_core.services import (
+    benachrichtigung,
+    konfiguration,
+    online_buchung,
+    rechnung_pdf,
+    rechnungen,
+)
 from beachhub_core.services.rechnungen import RechnungsFehler
 
 logger = logging.getLogger(__name__)
@@ -66,6 +72,15 @@ def monatslauf_ausfuehren(db: Session) -> int:
     return anzahl
 
 
+def verfall_ausfuehren(db: Session) -> int:
+    """Reservierungen mit abgelaufener Zahlungsfrist verfallen lassen (A-ZAHL-3)."""
+    verfallen = online_buchung.verfalle_abgelaufene(db)
+    db.commit()
+    for b in verfallen:
+        benachrichtigung.zahlungsfrist_abgelaufen(db, b)
+    return len(verfallen)
+
+
 def _job_monatslauf() -> None:
     with SessionLocal() as db:
         try:
@@ -87,6 +102,14 @@ def _job_lesestand() -> None:
             logger.exception("Lesestand-Aktualisierung fehlgeschlagen")
 
 
+def _job_verfall() -> None:
+    with SessionLocal() as db:
+        try:
+            verfall_ausfuehren(db)
+        except Exception:
+            logger.exception("Verfall der Reservierungen fehlgeschlagen")
+
+
 def starte_scheduler() -> BackgroundScheduler:
     global _scheduler
     s = BackgroundScheduler(timezone="Europe/Berlin")
@@ -94,6 +117,7 @@ def starte_scheduler() -> BackgroundScheduler:
         _job_monatslauf, CronTrigger(hour=6, minute=0), id="monatslauf", replace_existing=True
     )
     s.add_job(_job_lesestand, IntervalTrigger(minutes=5), id="lesestand", replace_existing=True)
+    s.add_job(_job_verfall, IntervalTrigger(minutes=1), id="verfall", replace_existing=True)
     s.start()
     _scheduler = s
     return s
