@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title %}Testzahlung{% endblock %}
+{% block content %}
+<h1>Testzahlung</h1>
+<div class="karte">
+  <div class="flash warn">Nur für die Entwicklung: Hier wird kein Geld bewegt.</div>
+  <p>Zu zahlen: <strong>{{ betrag or "–" }} €</strong></p>
+  <form method="post" action="/test-zahlung/{{ ref }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="betrag" value="{{ betrag }}">
+    <input type="hidden" name="zurueck" value="{{ zurueck }}">
+    <button name="ergebnis" value="bezahlt">Bezahlen</button>
+    <button name="ergebnis" value="abgebrochen" class="gefahr">Abbrechen</button>
+  </form>
+</div>
+{% endblock %}

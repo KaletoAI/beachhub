@@ -108,13 +108,13 @@ mit dem pydantic-Schema aus `shared` validiert. Ist sie ungültig, lautet die An
 
 | Typ | Nutzlast | Verarbeitung | Antwort |
 |---|---|---|---|
-| `konto_angelegt` | `email`, `anzeigename` | Gibt es einen Kunden mit derselben E-Mail (lower), der nicht anonymisiert ist und keine andere `portal_konto_id` trägt, wird `portal_konto_id` gesetzt. Sonst entsteht ein neuer Kunde mit der Gruppe aus dem Konfigurationswert `portal_kundengruppe` (Name, Vorgabe: die erste Gruppe nach Name). Mit 1a wird daraus fest „Nicht-Mitglied“. Danach wird `konto:<kunde_id>` markiert. | `ok`, `kunde_id` |
+| `konto_angelegt` | `email`, `anzeigename` | Trägt schon ein Kunde diese `konto_id`, bleibt es dabei. Sonst: Gibt es einen Kunden mit derselben E-Mail (lower), der nicht anonymisiert ist, wird `portal_konto_id` gesetzt – auch wenn er schon eine andere `portal_konto_id` trägt (A-8): Das Portal hat die Adresse per Login-Code bestätigt, und eine alte Verknüpfung stammt aus einem gelöschten oder wiederhergestellten Portal; ohne Neuverknüpfung bliebe der Kunde für immer ausgesperrt. Sonst entsteht ein neuer Kunde mit der Gruppe aus dem Konfigurationswert `portal_kundengruppe` (Name, Vorgabe: die erste Gruppe nach Name). Mit 1a wird daraus fest „Nicht-Mitglied“. Danach wird `konto:<kunde_id>` markiert. | `ok`, `kunde_id` |
 | `konto_geaendert` | `anzeigename`, `bisher` | Den Namen nur übernehmen, wenn `kunde.name == bisher`. Hat der Betreiber den Namen inzwischen gepflegt (etwa den vollen Namen für die Rechnung), bleibt er stehen. Adressdaten ändert das Portal nie. | `ok` |
-| `konto_loeschen` | – | `kunden.anonymisiere`. `portal_konto_id` wird geleert. | `ok` |
+| `konto_loeschen` | – | `kunden.anonymisiere`. `portal_konto_id` wird geleert; die Ersatz-E-Mail `geloescht-<kunde.id>` hängt an der Kunden-ID, nicht an der alten Adresse, damit wiederholtes Anlegen und Löschen mit derselben Adresse nicht am Unique-Constraint scheitert. | `ok` |
 | `buchung_anfragen` | `feld_id`, `beginn`, `ende` | Siehe unten. | `reserviert` / `bestaetigt` / `abgelehnt` |
-| `buchung_stornieren` | `buchung_id` | Die Buchung muss zum Kunden gehören und den Status `reserviert` oder `bestaetigt` haben, und `jetzt < beginn` muss gelten (A-STORNO-5). Eine `reserviert`e Buchung wird zu `storniert` und immer kostenfrei; verrechnetes Guthaben wird zurückgebucht (`rueckbuchung`), eine offene Bezahlsitzung verfällt beim Anbieter von selbst. Eine `bestaetigt`e Buchung läuft über `storno.storniere(..., durch="kunde")`. | `ok`, `kostenfrei` / `abgelehnt` (`nicht_gefunden`, `zu_spaet`) |
+| `buchung_stornieren` | `buchung_id` | Die Buchung muss zum Kunden gehören und den Status `reserviert` oder `bestaetigt` haben, und `jetzt < beginn` muss gelten (A-STORNO-5). Im Portal stornierbar sind nur Portal-Buchungen (`quelle = "portal"`, keine Dauerbuchungstermine): Nur bei ihnen ist sicher, dass sie vor der Bestätigung vollständig bezahlt wurden (Zahlung und/oder verrechnetes Guthaben); alle anderen storniert der Betreiber, sonst entstünde Guthaben für nie online Bezahltes. Das Konto-Dokument führt dazu je Buchung `stornierbar`. Eine `reserviert`e Buchung wird zu `storniert` und immer kostenfrei; verrechnetes Guthaben wird zurückgebucht (`rueckbuchung`), eine offene Bezahlsitzung verfällt beim Anbieter von selbst. Eine `bestaetigt`e Buchung läuft über `storno.storniere(..., durch="kunde")`. | `ok`, `kostenfrei` / `abgelehnt` (`nicht_gefunden`, `zu_spaet`, `nicht_stornierbar`) |
 | `zahlung_eingegangen` | `provider`, `rohdaten`, `signatur_header` | Siehe unten. | `ok` / `ignoriert` |
-| `rechnung_anfordern` | `rechnung_nr` | Die Rechnung muss zum Kunden gehören und ein archiviertes PDF haben. Das PDF wird gelesen und gegen `pdf_sha256` geprüft. | `ok`, `pdf_base64`, `dateiname` / `abgelehnt` (`nicht_gefunden`) |
+| `rechnung_anfordern` | `rechnung_nr` | Die Rechnung muss zum Kunden gehören und ein archiviertes PDF haben. Das PDF wird gelesen und gegen `pdf_sha256` geprüft. Fehlt es oder stimmt die Prüfsumme nicht, bekommt der Betreiber einen Alarm. | `ok`, `pdf_base64`, `dateiname` / `abgelehnt` (`nicht_gefunden`) |
 
 Existiert zu `konto_id` kein Kunde, beantwortet das Hauptsystem jede Anfrage außer `konto_angelegt`
 mit `abgelehnt/konto_unbekannt`. Die Reihenfolge ist sicher: Das Portal liefert Anfragen nach
@@ -258,7 +258,9 @@ Mail enthält Link und Code. Die Antwortseite ist immer dieselbe. Rate-Limit: 5 
 in 15 min und 3 je E-Mail in 15 min. Der Code wird mit der E-Mail eingegeben. Nach 5 Fehlversuchen
 ist das Token verbraucht. Beim ersten Login ohne Konto leitet das Portal auf `/willkommen` weiter.
 Dort gibt der Kunde seinen Anzeigenamen an; das Konto entsteht, und die Anfrage `konto_angelegt`
-wird angelegt. Mit `APP_ENV=dev` und ohne SMTP zeigt die Antwortseite Link und Code direkt an.
+wird angelegt. Hat das Konto danach noch keinen Kunden, keine `konto_angelegt` ist mehr offen und die
+letzte ist älter als 10 Minuten (das Hauptsystem hat mit `fehler`/`abgelehnt` geantwortet), stellt
+das Portal sie beim nächsten Seitenaufruf neu. Mit `APP_ENV=dev` und ohne SMTP zeigt die Antwortseite Link und Code direkt an.
 
 **Session.** 30 Tage, gleitend verlängert, Cookie `HttpOnly; Secure (per Einstellung); SameSite=Lax`.
 Der CSRF-Token steht in der Session und wird als Router-Abhängigkeit für alle POST-Anfragen außer
@@ -286,7 +288,9 @@ Buchungssystem ist gerade nicht erreichbar; du bekommst die Bestätigung per E-M
 **Zahlung.** `POST /zahlung/rueckmeldung/<provider>` ist ohne Anmeldung und ohne CSRF erreichbar
 und nimmt höchstens 64 KB an. Das Portal speichert Rohdaten und den Signatur-Header (bei Stripe
 `Stripe-Signature`; weitere Header per Liste in der Konfiguration) in `webhook_eingang`, legt
-`zahlung_eingegangen` an und antwortet mit 200. Es prüft nichts. `/zahlung/zurueck?anfrage=<id>`
+`zahlung_eingegangen` an und antwortet mit 200. Es prüft nichts. Sobald die Anfrage beantwortet
+ist, leert das Portal die Rohdaten und den Signatur-Header in `webhook_eingang` und in der Nutzlast
+der Anfrage (Datenminimierung); die Zeilen selbst entfernt der Aufräumjob nach 30 Tagen. `/zahlung/zurueck?anfrage=<id>`
 leitet auf die Warteseite, die nach dem Zahlungseingang `bestaetigt` zeigt.
 
 **Fake-Zahlung** (nur bei `FAKE_ZAHLUNG=true`; mit `APP_ENV=production` verweigert das Portal den
@@ -298,6 +302,9 @@ schicken per POST `{"ref", "ergebnis": "bezahlt" | "abgebrochen"}` an den eigene
 Zeit, Preis, Status) und darunter vergangene und stornierte. „Stornieren“ öffnet eine
 Bestätigungsseite. Sie zeigt, ob das Storno kostenfrei ist (`jetzt < beginn - storno_frist`) oder
 der Betrag fällig bleibt (A-STORNO-2). Ein POST legt `buchung_stornieren` an und leitet auf die
+Warteseite. Der Link erscheint nur bei `stornierbar`; eine nicht stornierbare Buchung lehnt das
+Portal auch per POST ab. Eine Reservierung ohne offene Zahlung (Unterzahlung, A-9) zeigt statt
+eines Zahlungslinks „Zahlung unvollständig – der Betreiber meldet sich bei dir.“; ebenso die
 Warteseite. Solange `kunde_id` noch fehlt, erscheint „Dein Konto wird gerade eingerichtet“.
 
 **Rechnungen** (`/rechnungen`): Liste aus dem Lesestand. „Herunterladen“ legt `rechnung_anfordern`

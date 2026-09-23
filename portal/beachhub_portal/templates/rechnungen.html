@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Rechnungen{% endblock %}
+{% block content %}
+<h1>Rechnungen</h1>
+{% if rechnungen is none %}
+<div class="karte"><p>Dein Konto wird gerade eingerichtet.</p></div>
+{% elif not rechnungen %}
+<div class="karte"><p class="hinweis">Noch keine Rechnungen.</p></div>
+{% else %}
+<div class="karte">
+  <ul class="liste">
+    {% for r in rechnungen %}
+    <li>
+      <strong>{{ r.nummer }}</strong> vom {{ r.datum|datum }} · {{ r.brutto|euro }}
+      <span class="badge{% if r.status == 'bezahlt' %} ok{% endif %}">{{ r.status }}</span>
+      <form method="post" action="/rechnungen/{{ r.nummer|urlencode }}/anfordern" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button class="leise">PDF herunterladen</button>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+{% endblock %}

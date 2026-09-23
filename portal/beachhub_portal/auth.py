@@ -17,6 +17,7 @@ from beachhub_portal import uhr
 from beachhub_portal.config import settings
 from beachhub_portal.database import get_db
 from beachhub_portal.models import CodeFehlversuch, Konto, LoginToken, Sitzung
+from beachhub_portal.services import anfragen
 from beachhub_portal.sicherheit import hash_code, hash_token
 
 COOKIE = "bp_session"
@@ -204,6 +205,9 @@ def konto_pflicht(request: Request, db: Session = Depends(get_db)) -> Konto:
         raise HTTPException(status_code=303, headers={"Location": "/anmelden"})
     if not konto.anzeigename and request.url.path != "/willkommen":
         raise HTTPException(status_code=303, headers={"Location": "/willkommen"})
+    # Ist `konto_angelegt` im Hauptsystem gescheitert, hier erneut stellen (höchstens alle
+    # zehn Minuten), statt den Kunden dauerhaft ohne Kundenkonto zu lassen.
+    anfragen.konto_nachholen(db, konto, uhr.jetzt())
     return konto
 
 

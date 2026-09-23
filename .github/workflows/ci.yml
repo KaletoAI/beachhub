@@ -14,7 +14,8 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
-      - run: pip install -e shared[dev] -e core[dev] -e hall[dev]
+      - run: pip install -e shared[dev] -e core[dev] -e hall[dev] -e portal[dev]
+      - run: PGPASSWORD=beachhub psql -h localhost -U beachhub -d beachhub_test -c "CREATE DATABASE beachhub_portal_test OWNER beachhub TEMPLATE template0 ENCODING 'UTF8'"
       - run: ruff check . && ruff format --check .
       - run: mypy
       - run: cd shared && pytest -q
@@ -22,3 +23,10 @@ jobs:
       - run: cd core && pytest -q
         env:
           TEST_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_test
+      - run: cd portal && pytest -q
+        env:
+          TEST_PORTAL_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_portal_test
+      - run: pytest -q e2e
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_test
+          TEST_PORTAL_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_portal_test

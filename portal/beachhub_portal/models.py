@@ -125,7 +125,10 @@ class WebhookEingang(Base):
     empfangen_am: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: uhr.jetzt(), nullable=False
     )
-    anfrage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    # Ohne zugehörige Anfrage (None), wenn die Nutzlast das Kanal-Schema verletzt (Ruling
+    # Fix-Runde 1, Task 13): der Rohdatensatz wird trotzdem aufbewahrt, nur ohne Weiterleitung
+    # ans Hauptsystem.
+    anfrage_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
 
 
 class KanalKontakt(Base):

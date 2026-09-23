@@ -3,10 +3,8 @@
 Buchung, Abrechnung und Steuerung einer Beachvolleyballhalle im Winterbetrieb.
 Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`core/`), Hallendienst (`hall/`).
 
-Status: Stufe 1 (Hauptsystem) fertig implementiert. Buchung, Tarife, Sperren, Stornos, Monatslauf
-mit Sammelrechnungen und signiertem Lesestand laufen im Admin-UI (`core/`); Betrieb hinter
-WireGuard mit Caddy ist dokumentiert (`docs/betrieb/hauptsystem.md`). Stufe 2 (Portal) und Stufe 3
-(Halle) folgen.
+Status: Stufe 1 (Hauptsystem) fertig; Portal-Kern (Stufe 2 ohne Mitgliedschaft, Gutscheine und
+echten Zahlungsanbieter) implementiert; Hallendienst (Stufe 3) in Arbeit.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.3: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
@@ -18,6 +16,7 @@ WireGuard mit Caddy ist dokumentiert (`docs/betrieb/hauptsystem.md`). Stufe 2 (P
   (frühere Rückfragen: `docs/betreiber/Beachhub-Rueckfragen-Runde-2.pdf`)
 - Betriebshandbuch (Inbetriebnahme, Backup, WireGuard): `docs/betrieb/hauptsystem.md`
 - Entwickler-Kurzstart: `core/README.md`
+- Portal: Design docs/superpowers/specs/2026-09-23-portal-kern-design.md, Betrieb docs/betrieb/portal.md, Kurzstart portal/README.md
 
 ## Entwicklung
 
@@ -28,6 +27,12 @@ cd core && pytest
 ```
 
 Details (venv, `.env`, Migrationen, CLI) siehe `core/README.md`.
+
+```bash
+pip install -e portal[dev]
+cd portal && pytest          # TEST_PORTAL_DATABASE_URL setzen
+pytest e2e                   # aus der Repo-Wurzel, beide Test-Datenbanken
+```
 
 ## Lizenz
 

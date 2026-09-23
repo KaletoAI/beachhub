@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: beachhub
+      POSTGRES_PASSWORD: beachhub
+      POSTGRES_DB: beachhub_portal
+    ports: ["127.0.0.1:5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data", "./deploy/init-test-db.sql:/docker-entrypoint-initdb.d/10-test-db.sql:ro"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U beachhub"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  app:
+    build: { context: .., dockerfile: portal/Dockerfile }
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      PORTAL_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@db:5432/beachhub_portal
+      PORTAL_DATA_DIR: /app/data
+    depends_on:
+      db:
+        condition: service_healthy
+    ports: ["127.0.0.1:8001:8001"]
+    volumes: ["./data:/app/data"]
+    # HEALTHCHECK steckt im Image (portal/Dockerfile); depends_on: condition: service_healthy
+    # unten wartet darauf, bevor Caddy Anfragen dorthin weiterleitet.
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    network_mode: host
+    # Nur PORTAL_DOMAIN (für die Domain-Platzhalter im Caddyfile) statt env_file: .env – Caddy
+    # braucht keines der Portal-Geheimnisse (PORTAL_SECRET_KEY, PORTAL_KANAL_TOKEN, …) zu sehen.
+    environment:
+      PORTAL_DOMAIN: ${PORTAL_DOMAIN}
+    volumes:
+      - "./deploy/Caddyfile:/etc/caddy/Caddyfile:ro"
+      - "./data/zertifikate/ca.crt:/etc/caddy/beachhub-ca.crt:ro"
+      - "caddy_data:/data"
+    depends_on:
+      app:
+        condition: service_healthy
+volumes:
+  pgdata: {}
+  caddy_data: {}

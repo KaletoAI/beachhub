@@ -1,0 +1,48 @@
+{% extends "base.html" %}{% block title %}Meine Buchungen{% endblock %}
+{% block content %}
+<h1>Meine Buchungen</h1>
+{% if meldung %}<div class="flash ok">{{ meldung }}</div>{% endif %}
+{% if einrichtung %}
+<div class="karte"><p>Dein Konto wird gerade eingerichtet. Deine Buchungen erscheinen hier in wenigen Augenblicken.</p></div>
+{% else %}
+<section class="karte">
+  <h2>Kommende</h2>
+  {% if kommende %}
+  <ul class="liste">
+    {% for b in kommende %}
+    <li>
+      <strong>{{ b.feld_name }}</strong> · {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr · {{ b.preis|euro }}<br>
+      {% if b.status == "bestaetigt" %}
+      Zahlencode für die Tür: <span class="pin">{{ b.pin or "–" }}</span>
+      {% elif b.id in unvollstaendig %}
+      <span class="badge warn">{{ unvollstaendig_text }}</span>
+      {% elif zahlung_urls.get(b.id) %}
+      <a class="knopf" href="{{ zahlung_urls[b.id] }}">Jetzt bezahlen (bis {{ b.reserviert_bis|uhrzeit }})</a>
+      {% else %}
+      <span class="badge warn">Zahlung ausstehend</span>
+      {% endif %}
+      {% if b.stornierbar and b.beginn > jetzt %}<br><a href="/buchungen/{{ b.id }}/stornieren">Stornieren</a>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="hinweis">Keine kommenden Buchungen. <a href="/">Jetzt buchen</a></p>
+  {% endif %}
+</section>
+{% if fruehere %}
+<section class="karte">
+  <h2>Frühere und stornierte</h2>
+  <ul class="liste">
+    {% for b in fruehere %}
+    <li>{{ b.feld_name }} · {{ b.beginn|lokal }} ·
+      {% if b.status == "storniert" %}storniert{% if b.storno and b.storno.kostenfrei %} (kostenfrei){% elif b.storno %} (Betrag bleibt fällig){% endif %}
+      {% elif b.status == "verfallen" %}verfallen (nicht bezahlt)
+      {% elif b.status == "abgelehnt" %}abgelehnt
+      {% else %}{{ b.preis|euro }}{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

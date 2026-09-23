@@ -17,6 +17,8 @@ from beachhub_portal.models import (
     RechnungLink,
     Sitzung,
 )
+from beachhub_portal.services import anfragen
+from beachhub_shared import kanal
 from fastapi.testclient import TestClient
 from hilfen import KUNDE_ID, csrf, konto, speichere
 from sqlalchemy import select
@@ -371,6 +373,49 @@ def test_willkommen_legt_konto_angelegt_an(client: TestClient, db: Session, mail
     assert a.typ == "konto_angelegt"
     assert a.nutzlast_json == {"email": "anna@example.org", "anzeigename": "Anna"}
     assert client.get("/willkommen", follow_redirects=False).headers["location"] == "/"
+
+
+def test_konto_angelegt_nach_fehlschlag_erneut(
+    angemeldet: TestClient, db: Session, uhr_steht
+) -> None:
+    """Beantwortet das Hauptsystem `konto_angelegt` mit fehler/abgelehnt, bliebe kunde_id sonst
+    für immer leer. Das Portal stellt die Anfrage beim nächsten Seitenaufruf neu – höchstens
+    alle zehn Minuten und nie, solange noch eine offen ist."""
+    k = db.get(Konto, angemeldet.konto_id)
+    k.kunde_id = None
+    db.commit()
+    erste = anfragen.stelle(
+        db,
+        typ="konto_angelegt",
+        konto_id=k.id,
+        nutzlast={"email": "anna@example.org", "anzeigename": "Anna"},
+    )
+
+    def konto_anfragen() -> list[Anfrage]:
+        db.expire_all()
+        return list(
+            db.scalars(
+                select(Anfrage)
+                .where(Anfrage.typ == "konto_angelegt")
+                .order_by(Anfrage.erstellt_am, Anfrage.id)
+            )
+        )
+
+    angemeldet.get("/buchungen")
+    assert len(konto_anfragen()) == 1  # noch offen: nichts nachlegen
+    anfragen.beantworte(db, erste.id, kanal.Antwort(status="fehler"), uhr_steht.jetzt)
+    db.commit()
+    angemeldet.get("/buchungen")
+    assert len(konto_anfragen()) == 1  # gerade erst versucht
+    uhr_steht.weiter(minutes=11)
+    angemeldet.get("/buchungen")
+    alle = konto_anfragen()
+    assert len(alle) == 2
+    assert alle[1].status == Anfrage.OFFEN and alle[1].konto_id == k.id
+    assert alle[1].nutzlast_json == {"email": "anna@example.org", "anzeigename": "Anna"}
+    uhr_steht.weiter(minutes=11)
+    angemeldet.get("/konto")
+    assert len(konto_anfragen()) == 2  # die neue ist noch offen
 
 
 def test_geschuetzte_seiten(client: TestClient, mail_ausgang) -> None:
