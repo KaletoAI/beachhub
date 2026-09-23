@@ -112,13 +112,36 @@ def test_link_token_wird_nach_download_aus_anfrage_entfernt(
 ) -> None:
     """Controller-Ruling Fix-Runde 1: Nach dem Einlösen darf `antwort_json["link_token"]` nicht
     mehr auf den (jetzt gelöschten) Link zeigen – `anfragen.stand()` läse sonst weiter einen
-    toten Link."""
+    toten Link. Fix-Runde 2: stattdessen steht dort `rechnung_abgerufen`, damit `stand()` den
+    Fall von einem echten Fehlschlag unterscheiden kann."""
     a = _bereitstellen(db, angemeldet.konto_id)
     ziel = angemeldet.get(f"/anfrage/{a.id}", follow_redirects=False).headers["location"]
     angemeldet.get(ziel)
     db.refresh(a)
     assert "link_token" not in a.antwort_json
     assert a.antwort_json["status"] == "ok"
+    assert a.antwort_json["rechnung_abgerufen"] is True
+
+
+def test_stand_nach_download_zeigt_abgerufen_statt_abgelehnt(
+    angemeldet: TestClient, db: Session
+) -> None:
+    """Controller-Ruling Fix-Runde 2: `warten.js` pollt nach `location.assign` auf den
+    Download-Link weiter (ein Attachment entlädt die Seite nicht) – ohne einen eigenen Zustand
+    zeigte `/anfrage/<id>` (bzw. dessen `/stand`) zwei Sekunden nach einem erfolgreichen
+    Download fälschlich „Das hat nicht geklappt“. Der neue Zustand leitet nicht weiter."""
+    a = _bereitstellen(db, angemeldet.konto_id)
+    ziel = angemeldet.get(f"/anfrage/{a.id}", follow_redirects=False).headers["location"]
+    angemeldet.get(ziel)  # Download verbraucht den Link.
+
+    seite = angemeldet.get(f"/anfrage/{a.id}", follow_redirects=False)
+    assert seite.status_code == 200
+    assert "heruntergeladen" in seite.text.lower()
+    assert "/rechnungen" in seite.text
+
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand").json()
+    assert stand["zustand"] == "abgerufen"
+    assert stand["ziel"] is None
 
 
 def test_erneut_anfordern_nach_download_erzeugt_neue_anfrage(
@@ -212,6 +235,38 @@ def test_pdf_zu_gross_wird_fehler_statt_absturz(
     db.refresh(a)
     assert a.antwort_json["status"] == "fehler"
     assert "link_token" not in a.antwort_json
+    assert _tmp_pdfs() == []
+
+
+def test_pdf_base64_zu_lang_wird_ohne_dekodieren_abgelehnt(
+    angemeldet: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Controller-Ruling Fix-Runde 2: Die Vorprüfung vor dem Dekodieren wirklich mit einer
+    Zeichenkette über `MAX_PDF_BASE64_LEN` auslösen (der bisherige Größentest landete rechnerisch
+    im Post-Decode-Zweig) und belegen, dass `base64.b64decode` dabei gar nicht erst aufgerufen
+    wird."""
+    speichere(db, f"konto:{KUNDE_ID}", konto(rechnungen=[RECHNUNG]))
+    a = anfragen.stelle(
+        db,
+        typ="rechnung_anfordern",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"rechnung_nr": "2027-00001"},
+    )
+    aufrufe: list[int] = []
+    original = base64.b64decode
+
+    def _mitzaehlen(*args: object, **kwargs: object) -> bytes:
+        aufrufe.append(1)
+        return original(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(anfragen.base64, "b64decode", _mitzaehlen)
+    zu_lang = "A" * (rechnung_link.MAX_PDF_BASE64_LEN + 1)
+    antwort = kanal.Antwort(status="ok", pdf_base64=zu_lang, dateiname="x.pdf")
+    anfragen.beantworte(db, a.id, antwort, uhr.jetzt())
+    db.commit()
+    db.refresh(a)
+    assert a.antwort_json["status"] == "fehler"
+    assert aufrufe == []
     assert _tmp_pdfs() == []
 
 
@@ -422,9 +477,18 @@ def test_aufraeumen_ein_schritt_scheitert_andere_trotzdem(
 
 def test_aufraeumen_zweiter_gleichzeitiger_lauf_wird_uebersprungen(db: Session, uhr_steht) -> None:
     """Controller-Ruling Fix-Runde 1: `pg_try_advisory_lock` schützt vor einem gleichzeitigen
-    zweiten Lauf – hält eine andere Verbindung die Sperre, überspringt sich dieser Aufruf."""
+    zweiten Lauf – hält eine andere Verbindung die Sperre, überspringt sich dieser Aufruf.
+
+    Fix-Runde 2: Die hier gehaltene Sperre wird per try/finally freigegeben – schlägt eine
+    Assertion fehl oder wirft `jobs.aufraeumen` unerwartet, bliebe sie sonst über das Testende
+    hinaus bestehen und ließe spätere Tests fälschlich überspringen (genau der Fehler, der beim
+    ursprünglichen Lock-Leak in `jobs.aufraeumen` selbst auftrat)."""
     with engine.connect() as andere_verbindung:
         andere_verbindung.execute(text("SELECT pg_try_advisory_lock(:id)"), {"id": jobs._LOCK_ID})
-        n = jobs.aufraeumen(db, uhr_steht.jetzt)
-        andere_verbindung.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": jobs._LOCK_ID})
+        andere_verbindung.commit()
+        try:
+            n = jobs.aufraeumen(db, uhr_steht.jetzt)
+        finally:
+            andere_verbindung.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": jobs._LOCK_ID})
+            andere_verbindung.commit()
     assert n == {}

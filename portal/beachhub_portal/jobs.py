@@ -91,7 +91,11 @@ def _rechnung_links(db: Session, jetzt: datetime) -> int:
 def _waisen(db: Session, jetzt: datetime) -> int:
     """Dateien ohne (mehr gültigen) Link, etwa nach einem Absturz zwischen Schreiben und Commit.
     Läuft nach `_rechnung_links`, sodass in `RechnungLink` nur noch gültige Zeilen stehen."""
-    ordner = settings.data_dir / "rechnungen_tmp"
+    # Derselbe aufgelöste Ordner wie in `rechnung_link.lege_an` (Ruling Fix-Runde 2) – sonst
+    # stimmen die Pfad-Strings aus `ordner.glob(...)` nicht mit den in `RechnungLink.pdf_pfad`
+    # gespeicherten (bereits `.resolve()`ten) Pfaden überein, und ein noch gültiger Link würde
+    # fälschlich als Waise erkannt und gelöscht.
+    ordner = (settings.data_dir / "rechnungen_tmp").resolve()
     if not ordner.exists():
         return 0
     bekannt = set(db.scalars(select(RechnungLink.pdf_pfad)))
@@ -189,8 +193,17 @@ def aufraeumen(db: Session, jetzt: datetime) -> dict[str, int]:
                 "lesestand": _versuchen(db, "lesestand", lambda: _lesestand_verwaist(db, jetzt)),
             }
         finally:
-            sperr_verbindung.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": _LOCK_ID})
-            sperr_verbindung.commit()
+            try:
+                sperr_verbindung.execute(text("SELECT pg_advisory_unlock(:id)"), {"id": _LOCK_ID})
+                sperr_verbindung.commit()
+            except Exception:
+                # Ruling Fix-Runde 2: Kann die Sperre nicht sauber freigegeben werden (z. B. die
+                # Verbindung ist zwischenzeitlich weg), darf diese Verbindung nicht gesund an den
+                # Pool zurückgehen und dort die Sperre für immer mitnehmen – `invalidate()` wirft
+                # die physische Verbindung weg; Postgres löst den Advisory-Lock spätestens beim
+                # Schließen der zugehörigen Backend-Sitzung.
+                logger.exception("Aufräumen: Advisory-Lock konnte nicht freigegeben werden")
+                sperr_verbindung.invalidate()
 
 
 def _job_aufraeumen() -> None:

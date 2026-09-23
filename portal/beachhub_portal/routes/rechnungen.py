@@ -12,6 +12,11 @@ from beachhub_portal.services import anfragen, lesestand, rechnung_link
 from beachhub_portal.templating import mit_flash, render
 
 router = APIRouter()
+# Aus dem Kanal-Schema abgeleitet statt hart kodiert (Ruling Fix-Runde 2) – bleibt automatisch
+# im Gleichlauf, falls sich `kanal.RechnungAnfordern.rechnung_nr` je ändert.
+_RECHNUNG_NR_MAX_LAENGE: int = kanal.RechnungAnfordern.model_json_schema()["properties"][
+    "rechnung_nr"
+]["maxLength"]
 
 
 @router.get("/rechnungen", response_class=HTMLResponse)
@@ -29,12 +34,14 @@ def anfordern(
     nummer: str, konto: Konto = Depends(auth.konto_pflicht), db: Session = Depends(get_db)
 ) -> RedirectResponse:
     inhalt = lesestand.konto(db, konto.kunde_id)
-    # Ruling Fix-Runde 1: die Länge hier mitprüfen (Grenze aus kanal.RechnungAnfordern,
-    # max_length=20) – die echten Rechnungsnummern sind immer kürzer, aber ohne diese Prüfung
-    # würde ein Lesestand mit einer zu langen Nummer weiter unten eine rohe ValidationError aus
+    # Ruling Fix-Runde 1/2: die Länge hier mitprüfen (Grenze aus kanal.RechnungAnfordern
+    # abgeleitet) – die echten Rechnungsnummern sind immer kürzer, aber ohne diese Prüfung würde
+    # ein Lesestand mit einer zu langen Nummer weiter unten eine rohe ValidationError aus
     # `model_validate` auslösen (500) statt der üblichen Fehlermeldung.
     gueltig = (
-        inhalt is not None and len(nummer) <= 20 and nummer in {r.nummer for r in inhalt.rechnungen}
+        inhalt is not None
+        and len(nummer) <= _RECHNUNG_NR_MAX_LAENGE
+        and nummer in {r.nummer for r in inhalt.rechnungen}
     )
     if not gueltig:
         return mit_flash(

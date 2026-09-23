@@ -241,6 +241,10 @@ GRUENDE: dict[str, str] = {
     # unspezifisch für einen tatsächlich vom Hauptsystem gesendeten Ablehnungsgrund.
     "ungueltig": "Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut.",
 }
+RECHNUNG_ABGERUFEN_TEXT = (
+    "Die Rechnung wurde heruntergeladen. Bei Bedarf kannst du sie unter „Rechnungen“ erneut "
+    "anfordern."
+)
 MELDUNGEN: dict[str, str] = {
     "bestaetigt": "Deine Buchung ist bestätigt.",
     "storniert_kostenfrei": "Deine Buchung ist storniert. Die Stornierung ist kostenfrei.",
@@ -252,7 +256,11 @@ MELDUNGEN: dict[str, str] = {
 
 @dataclass(frozen=True)
 class Stand:
-    zustand: Literal["wartet", "zahlung", "fertig", "abgelehnt", "fehler"]
+    # "abgerufen" (Ruling Fix-Runde 2): eine `rechnung_anfordern`-Anfrage, deren Einmal-Link
+    # schon heruntergeladen wurde – kein Fehler, nur nichts mehr zum Abholen. Eigener Zustand
+    # statt "fertig" (der hätte hier keinen Weiterleitungslink mehr) oder "abgelehnt" (das
+    # klingt nach einem Fehlschlag, obwohl der Download erfolgreich war).
+    zustand: Literal["wartet", "zahlung", "fertig", "abgelehnt", "fehler", "abgerufen"]
     text: str
     ziel: str | None = None
     zahlung_url: str | None = None
@@ -346,5 +354,10 @@ def stand(
         token = antwort.get("link_token")
         if token:
             return Stand("fertig", "Deine Rechnung steht bereit.", ziel=f"/rechnung/{token}")
+        if antwort.get("rechnung_abgerufen"):
+            # Ruling Fix-Runde 2: `rechnung_link.einloesen` entfernt `link_token` nach dem
+            # Download und setzt diese Markierung – ohne sie sähe ein Poll kurz nach dem
+            # (erfolgreichen) Download fälschlich wie ein Fehlschlag aus.
+            return Stand("abgerufen", RECHNUNG_ABGERUFEN_TEXT)
         return Stand("abgelehnt", "Die Rechnung konnte nicht bereitgestellt werden.")
     return Stand("fertig", "Erledigt.", ziel="/konto")

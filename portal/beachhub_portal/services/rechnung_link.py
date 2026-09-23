@@ -80,10 +80,21 @@ def einloesen(
     # entfernen – sonst zeigt `anfragen.stand()` (über `antwort_json["link_token"]`) weiter auf
     # einen Link, den es nicht mehr gibt, und der Kunde liefe beim erneuten Öffnen der
     # Anfrageseite ins Leere (404) statt eine neue Rechnung anfordern zu können.
-    a = db.scalar(select(Anfrage).where(Anfrage.antwort_json["link_token"].astext == token))
+    # `Anfrage.konto_id == konto_id` zusätzlich zur Token-Suche (Ruling Fix-Runde 2, optional
+    # aber billig): dieselbe Zugehörigkeitsprüfung wie oben für den Link, statt sich allein auf
+    # die Eindeutigkeit des Tokens zu verlassen.
+    a = db.scalar(
+        select(Anfrage).where(
+            Anfrage.antwort_json["link_token"].astext == token, Anfrage.konto_id == konto_id
+        )
+    )
     if a is not None and a.antwort_json is not None and "link_token" in a.antwort_json:
+        # Ruling Fix-Runde 2: statt den Schlüssel nur zu entfernen, wird vermerkt, dass die
+        # Rechnung bereits abgerufen wurde – `anfragen.stand()` unterscheidet das von einem
+        # Fehlschlag (Zustand „abgerufen“ statt „abgelehnt“).
         bereinigt = dict(a.antwort_json)
         bereinigt.pop("link_token", None)
+        bereinigt["rechnung_abgerufen"] = True
         a.antwort_json = bereinigt
     db.commit()
     return (nummer, daten) if daten is not None else None
