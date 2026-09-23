@@ -90,3 +90,17 @@ def zutritt_offen(plan: HallenplanInhalt | None, jetzt: datetime) -> list[PlanBu
         return []
     vorlauf = timedelta(minutes=gueltig.konfig.zutritt_vorlauf_minuten)
     return [b for b in gueltig.buchungen if b.beginn - vorlauf <= jetzt < b.ende]
+
+
+def tuer_erwartet(plan: HallenplanInhalt | None, jetzt: datetime) -> bool:
+    """Ob ein Öffnen der Tür gerade zu einer Buchung passt – für den Alarm
+    `tuer_offen_ausserhalb`, nicht für die PIN-Prüfung. Das Fenster ist weiter als das
+    Zutrittsfenster (`zutritt_offen`): `[beginn − zutritt_vorlauf, ende + licht_nachlauf)`, weil
+    die Spieler die Halle erst nach dem Ende ihrer Buchung verlassen und dabei die Tür öffnen.
+    Eine PIN öffnet nach `ende` trotzdem nicht mehr."""
+    gueltig = _gueltig(plan, jetzt)
+    if gueltig is None:
+        return False
+    vorlauf = timedelta(minutes=gueltig.konfig.zutritt_vorlauf_minuten)
+    nachlauf = timedelta(minutes=gueltig.konfig.licht_nachlauf_minuten)
+    return any(b.beginn - vorlauf <= jetzt < b.ende + nachlauf for b in gueltig.buchungen)

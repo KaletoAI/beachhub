@@ -24,7 +24,17 @@ from beachhub_shared.hallenplan import PlanBuchung
 from sqlalchemy.orm import Session, sessionmaker
 
 from tests.ha_simulator import HaSimulator
-from tests.hilfen import F1, F2, MASTER_HASH, MASTER_PIN, FakeSchlaf, buchung, speichere_plan, t
+from tests.hilfen import (
+    F1,
+    F2,
+    KONFIG,
+    MASTER_HASH,
+    MASTER_PIN,
+    FakeSchlaf,
+    buchung,
+    speichere_plan,
+    t,
+)
 
 PIN = "482913"
 ZUORDNUNG = Zuordnung(
@@ -243,6 +253,39 @@ async def test_tuer_offen_ausserhalb(a: Aufbau) -> None:
     a.uhr.vor(minutes=3)
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1  # Master-PIN vor 3 min: kein Alarm
+
+
+async def test_tuer_beim_verlassen_nach_dem_ende_kein_alarm(a: Aufbau) -> None:
+    """Spieler verlassen die Halle nach dem Ende ihrer Buchung: Innerhalb von ende +
+    licht_nachlauf ist die Tür erwartet (hier Nachlauf 15 min, Verlassen 10 min nach Ende)."""
+    speichere_plan(
+        a.sitzungen,
+        buchung(F1, t(19), t(21)),
+        konfig=KONFIG.model_copy(update={"licht_nachlauf_minuten": 15}),
+    )
+    a.uhr.stelle(t(21, 10))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert a.ereignis("tuer_offen_ausserhalb") == []
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))
+    a.uhr.stelle(t(21, 15))  # ende + nachlauf erreicht, niemand mehr da
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
+async def test_tuer_bei_praesenz_kein_alarm(a: Aufbau) -> None:
+    """Meldet ein Feld gerade Präsenz, ist jemand in der Halle – dann ist ein Öffnen der Tür
+    (z. B. beim späten Verlassen) kein Alarm."""
+    a.plan(buchung(F1, t(19), t(21)))
+    a.uhr.stelle(t(20))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "on"))
+    a.uhr.stelle(t(21, 30))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert a.ereignis("tuer_offen_ausserhalb") == []
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "off"))
+    a.uhr.vor(minutes=1)
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
 
 
 async def test_tuer_offen_ausserhalb_nach_kulanzgrenze_erneut(a: Aufbau) -> None:

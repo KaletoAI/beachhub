@@ -29,7 +29,7 @@ from beachhub_hall.ereignisse import Ereignisse
 from beachhub_hall.ha import HaClient, HaFehler, HaKeineRechte, HaWebSocket
 from beachhub_hall.lage import Lage
 from beachhub_hall.pin import PinPruefer
-from beachhub_hall.soll import laufende_buchung, zutritt_offen
+from beachhub_hall.soll import laufende_buchung, tuer_erwartet
 
 logger = logging.getLogger(__name__)
 AUSFALL_MELDEN_NACH = timedelta(minutes=2)
@@ -302,11 +302,18 @@ class HaZuhoerer:
         )
 
     def _tuer_geoeffnet(self) -> None:
+        """`tuer_offen_ausserhalb` nur, wenn kein Buchungsfenster die Tür erwartet
+        (`soll.tuer_erwartet`, bis ende + licht_nachlauf – Verlassen nach dem Spiel), kein
+        Master-PIN in den letzten 5 min akzeptiert wurde und kein Feld gerade Präsenz meldet
+        (dann ist jemand in der Halle, etwa beim späten Verlassen)."""
         jetzt = self._uhr.jetzt()
         with self._sitzungen() as db:
             gespeichert = plan.lade(db)
             letzter_master = lies(db, "letzter_master")
-        if zutritt_offen(gespeichert.inhalt if gespeichert else None, jetzt):
+            praesenz = lies(db, "praesenz", {})
+        if tuer_erwartet(gespeichert.inhalt if gespeichert else None, jetzt):
+            return
+        if praesenz:
             return
         if letzter_master and jetzt - datetime.fromisoformat(letzter_master) < MASTER_TUER_KULANZ:
             return

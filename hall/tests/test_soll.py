@@ -1,7 +1,13 @@
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from beachhub_hall.soll import laufende_buchung, sollzustand, zusammenlegen, zutritt_offen
+from beachhub_hall.soll import (
+    laufende_buchung,
+    sollzustand,
+    tuer_erwartet,
+    zusammenlegen,
+    zutritt_offen,
+)
 from beachhub_shared.hallenplan import PlanSperre
 
 from tests.hilfen import F1, F2, baue_plan, buchung, t
@@ -138,3 +144,17 @@ def test_zeitumstellung_winterzeit_direkt_an_der_ruecksetzung() -> None:
         sollzustand(plan, FELDER, datetime(2027, 10, 31, 1, 55, tzinfo=UTC), False).licht[F1]
         is True
     )
+
+
+def test_tuer_erwartet_reicht_bis_ende_plus_licht_nachlauf() -> None:
+    """Fürs Türkontakt-Alarmfenster gilt [beginn − zutritt_vorlauf, ende + licht_nachlauf) –
+    wer nach dem Spiel die Halle verlässt, öffnet die Tür nach dem Ende. Das PIN-Zutrittsfenster
+    (zutritt_offen) bleibt davon unberührt und endet mit `ende`."""
+    b = buchung(F1, t(19), t(21))
+    plan = baue_plan([b])  # zutritt_vorlauf 15 min, licht_nachlauf 5 min
+    assert tuer_erwartet(plan, t(18, 44)) is False
+    assert tuer_erwartet(plan, t(18, 45)) is True
+    assert tuer_erwartet(plan, t(21, 4)) is True
+    assert zutritt_offen(plan, t(21, 4)) == []
+    assert tuer_erwartet(plan, t(21, 5)) is False
+    assert tuer_erwartet(None, t(19)) is False

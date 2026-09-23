@@ -255,8 +255,11 @@ Aufgaben weiterlaufen.
 
 **Tür öffnen.** Bei `lock.*` ruft der Dienst `lock.unlock` auf (die Wiederverriegelung übernimmt das
 Schloss bzw. eine HA-Automation). Bei `switch.*` schaltet er ein und nach `impuls_sekunden` wieder
-aus. Meldet der Türkontakt „offen“, während keine Buchung ein Zutrittsfenster hat und kein
-Master-PIN in den letzten 5 min akzeptiert wurde, entsteht `tuer_offen_ausserhalb`.
+aus. Meldet der Türkontakt „offen“, entsteht `tuer_offen_ausserhalb` nur, wenn zugleich
+(1) keine Buchung ein Fenster `[beginn − zutritt_vorlauf, ende + licht_nachlauf)` hat – weiter als
+das Zutrittsfenster der PIN, weil die Spieler die Halle nach dem Ende verlassen –, (2) kein
+Master-PIN in den letzten 5 min akzeptiert wurde und (3) kein Feld gerade Präsenz meldet. Das
+Zutrittsfenster für die PIN-Prüfung bleibt `[beginn − zutritt_vorlauf, ende)`.
 
 **Präsenz.** Wechselt ein Präsenzsensor auf `on`, entsteht `praesenz_start` (mit `buchung_id`, wenn
 eine Buchung dieses Felds gerade im Intervall `[beginn, ende)` liegt). Beim Wechsel auf `off`
