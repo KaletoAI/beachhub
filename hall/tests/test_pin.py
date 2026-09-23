@@ -284,6 +284,58 @@ async def test_schliesse_beendet_laufenden_impuls_sofort(
     await aufbau.client.schliesse()
 
 
+async def test_schliesse_schaltet_switch_auch_ohne_laufenden_impuls_aus(
+    sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator
+) -> None:
+    # Der Schalter hängt (z. B. nach einem früheren Fehler oder von außen geschaltet) auf "on",
+    # ohne dass gerade ein Impuls läuft – schliesse() muss ihn trotzdem ausschalten (Ruling
+    # Task 8/11).
+    ha.entitaet("switch.tueroeffner", "on")
+    aufbau = Aufbau(sitzungen, uhr, ha, TuerKonfig("switch.tueroeffner", impuls_sekunden=5))
+    await aufbau.tuer.schliesse()
+    assert [x[:2] for x in ha.aufrufe] == [("switch", "turn_off")]
+    assert ha.zustaende["switch.tueroeffner"]["state"] == "off"
+    await aufbau.client.schliesse()
+
+
+async def test_schliesse_tut_bei_lock_ohne_laufenden_impuls_nichts(
+    sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator
+) -> None:
+    aufbau = Aufbau(sitzungen, uhr, ha, TuerKonfig("lock.eingang"))
+    await aufbau.tuer.schliesse()
+    assert ha.aufrufe == []
+    await aufbau.client.schliesse()
+
+
+async def test_abbruch_waehrend_turn_on_hinterlaesst_impuls_zum_ausschalten(
+    sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator
+) -> None:
+    # Wird oeffne() genau während des turn_on-Aufrufs abgebrochen, muss trotzdem ein Impuls
+    # angelegt werden (Task 11 legt ihn in finally an) – sonst plant niemand mehr ein turn_off
+    # und der Schalter bliebe im Zweifel dauerhaft eingeschaltet (Ruling Task 8/11).
+    ha.entitaet("switch.tueroeffner", "off")
+    aufbau = Aufbau(sitzungen, uhr, ha, TuerKonfig("switch.tueroeffner", impuls_sekunden=5))
+    haengt = asyncio.Event()
+    echt = aufbau.tuer._ha.dienst
+
+    async def hemmend(domain: str, service: str, daten: dict[str, object]) -> None:
+        if (domain, service) == ("switch", "turn_on"):
+            await haengt.wait()
+            return
+        await echt(domain, service, daten)
+
+    aufbau.tuer._ha.dienst = hemmend  # type: ignore[method-assign]
+    aufgabe = asyncio.create_task(aufbau.tuer.oeffne())
+    await asyncio.sleep(0)
+    aufgabe.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await aufgabe
+    assert aufbau.tuer._impuls is not None
+    await aufbau.tuer.schliesse()
+    assert [x[:2] for x in ha.aufrufe] == [("switch", "turn_off")]
+    await aufbau.client.schliesse()
+
+
 async def test_ueberlappende_oeffnung_verlaengert_impuls(
     sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator
 ) -> None:

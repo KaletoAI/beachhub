@@ -65,7 +65,11 @@ class Tuer:
                 "aktor_fehler", entity=entity, grund="tuer_oeffnen_fehlgeschlagen"
             )
             erfolg = False
-        self._impuls = asyncio.create_task(self._impuls_ende(entity))
+        finally:
+            # Auch anlegen, wenn genau hier von außen abgebrochen wird (z. B. während des
+            # turn_on-Aufrufs): sonst plant niemand mehr ein turn_off, und der Schalter bliebe
+            # im Zweifel dauerhaft eingeschaltet.
+            self._impuls = asyncio.create_task(self._impuls_ende(entity))
         return erfolg
 
     def _breche_impuls_ab(self) -> None:
@@ -91,15 +95,17 @@ class Tuer:
         self._ereignisse.melde("aktor_fehler", entity=entity, grund="tuer_impuls_nicht_beendet")
 
     async def schliesse(self) -> None:
-        """Beendet einen laufenden Impuls sofort, ohne `impuls_sekunden` abzuwarten – für das
-        Herunterfahren des Dienstes, während die Tür (per switch) noch offen ist."""
-        if self._impuls is None or self._impuls.done():
-            return
+        """Beendet einen laufenden Impuls sofort, ohne `impuls_sekunden` abzuwarten, und
+        schaltet einen `switch.*`-Türöffner danach in jedem Fall aus – auch ohne laufenden
+        Impuls (z. B. wenn der Schalter von außen oder durch einen früheren Fehler eingeschaltet
+        blieb). Für das Herunterfahren des Dienstes. Ein `lock.*`-Türöffner braucht das nicht:
+        er verriegelt sich selbst wieder (Schloss bzw. eine HA-Automation)."""
         entity = self._k.entity
-        self._impuls.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._impuls
-        if entity:
+        if self._impuls is not None and not self._impuls.done():
+            self._impuls.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._impuls
+        if entity and entity.startswith("switch."):
             await self._turn_off_mit_wiederholung(entity)
 
     async def warte(self) -> None:
