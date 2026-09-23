@@ -53,12 +53,20 @@ class SessionCookieMiddleware(BaseHTTPMiddleware):
     Datenbank; das Cookie im Browser behält seinen ursprünglichen `max_age` und verfiele sonst
     trotzdem fest 30 Tage nach dem ersten Login. `lade_sitzung` vermerkt eine Verlängerung in
     `request.state.sitzung_verlaengert` (Token); hier wird das Cookie dann mit frischem
-    `max_age` erneut gesetzt."""
+    `max_age` erneut gesetzt.
+
+    Ruling Fix-Runde 2 (Item 4): Setzt die Route selbst schon ein `bp_session`-Cookie in dieser
+    Antwort (Login: neue Sitzung; Abmelden/Konto löschen: Löschung), darf das hier nicht mehr
+    überschrieben werden – sonst bekäme der Browser nach einem verlängernden Request z. B. beim
+    Abmelden das alte, serverseitig bereits gelöschte Token zurückgesetzt."""
 
     async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
         response = await call_next(request)
         token = getattr(request.state, "sitzung_verlaengert", None)
-        if token:
+        bereits_gesetzt = any(
+            c.startswith(f"{auth.COOKIE}=") for c in response.headers.getlist("set-cookie")
+        )
+        if token and not bereits_gesetzt:
             auth.setze_cookie(response, token)
         return response
 

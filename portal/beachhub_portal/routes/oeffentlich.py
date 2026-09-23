@@ -84,6 +84,9 @@ def _angemeldet(db: Session, request: Request, adresse: str) -> RedirectResponse
     konto, token = auth.melde_an(db, adresse, uhr.jetzt())
     resp = RedirectResponse("/" if konto.anzeigename else "/willkommen", status_code=303)
     auth.setze_cookie(resp, token)
+    # Ruling Fix-Runde 2 (Item 4): nach dem Login wird das Vor-Session-Cookie nicht mehr
+    # gebraucht (es gilt nur für Formulare ohne Sitzung).
+    auth.loesche_vor_csrf_cookie(resp)
     return resp
 
 

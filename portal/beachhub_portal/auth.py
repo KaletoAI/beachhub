@@ -8,7 +8,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 
-from fastapi import Depends, HTTPException, Request, Response
+from fastapi import Depends, Form, HTTPException, Request, Response
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -234,6 +234,12 @@ def setze_vor_csrf_cookie(response: Response, wert: str) -> None:
     )
 
 
+def loesche_vor_csrf_cookie(response: Response) -> None:
+    """Ruling Fix-Runde 2 (Item 4): nach erfolgreichem Login wird das Vor-Session-Cookie nicht
+    mehr gebraucht (es gilt nur für Formulare ohne Sitzung) und wird entfernt."""
+    response.delete_cookie(VOR_CSRF_COOKIE, path="/")
+
+
 def pruefe_vor_csrf(request: Request, eingereicht: str) -> bool:
     roh = request.cookies.get(VOR_CSRF_COOKIE)
     if not roh:
@@ -247,7 +253,9 @@ def pruefe_vor_csrf(request: Request, eingereicht: str) -> bool:
     return secrets.compare_digest(erwartet.encode(), eingereicht.encode())
 
 
-async def verify_csrf(request: Request, db: Session = Depends(get_db)) -> None:
+def verify_csrf(
+    request: Request, csrf_token: str | None = Form(default=None), db: Session = Depends(get_db)
+) -> None:
     """Läuft für jede Route der geschützten Router (main.py), auch für GET: setzt
     `request.state.csrf` aus einer bestehenden Sitzung, egal welche Methode – so tragen auch
     reine Lese-Seiten (z. B. der Anmeldelink) immer das echte Token, statt es über einen
@@ -256,14 +264,20 @@ async def verify_csrf(request: Request, db: Session = Depends(get_db)) -> None:
     Bei änderenden Methoden ohne Sitzung wird nicht mehr stillschweigend durchgelassen: Das
     ermöglichte bisher Login-CSRF (eine fremde Seite loggt ein abgemeldetes Opfer unbemerkt in
     das Konto des Angreifers ein). Ohne Sitzung gilt stattdessen das Double-Submit-Vor-Session-
-    Cookie, das dieselbe render()-Funktion für jedes anonyme Formular ausstellt."""
+    Cookie, das dieselbe render()-Funktion für jedes anonyme Formular ausstellt.
+
+    Bewusst `def` statt `async def` (Ruling Fix-Runde 2, Item 1): Die Funktion macht blockierende
+    DB-Arbeit (SQLAlchemy, synchroner psycopg-Treiber) für jede Anfrage beider Router, auch GET –
+    als async-Funktion liefe das auf dem Event-Loop und blockierte ihn, den auch der Long-Poll
+    `/core/anfragen` nutzt. FastAPI führt eine synchrone Abhängigkeit stattdessen im Threadpool
+    aus; `csrf_token` kommt über `Form(...)`, damit kein eigenes `await request.form()` nötig
+    ist (für GET ohne Formular-Body liefert das schlicht `None`)."""
     s = lade_sitzung(db, request.cookies.get(COOKIE), uhr.jetzt(), request)
     if s is not None:
         request.state.csrf = s.csrf_token
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    form = await request.form()
-    eingereicht = str(form.get("csrf_token", ""))
+    eingereicht = csrf_token or ""
     if s is not None:
         gueltig = secrets.compare_digest(eingereicht.encode(), s.csrf_token.encode())
     else:

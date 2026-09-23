@@ -1,4 +1,5 @@
 import hashlib
+import inspect
 import re
 import threading
 from datetime import UTC, datetime, timedelta
@@ -7,7 +8,15 @@ import pytest
 from beachhub_portal import auth, sicherheit, uhr
 from beachhub_portal.config import settings
 from beachhub_portal.database import SessionLocal
-from beachhub_portal.models import Anfrage, Konto, Lesestand, LoginToken, RechnungLink, Sitzung
+from beachhub_portal.models import (
+    Anfrage,
+    CodeFehlversuch,
+    Konto,
+    Lesestand,
+    LoginToken,
+    RechnungLink,
+    Sitzung,
+)
 from fastapi.testclient import TestClient
 from hilfen import KUNDE_ID, csrf, konto, speichere
 from sqlalchemy import select
@@ -298,6 +307,26 @@ def test_angemeldet_abgelaufener_link_zeigt_gueltiges_token(
     assert r.status_code == 200
 
 
+def test_angemeldet_ungueltiger_link_post_zeigt_gueltiges_token(
+    client: TestClient, mail_ausgang, db: Session
+) -> None:
+    """Ruling Fix-Runde 2 (Item 2): der Fehlerfall POST /anmelden/link/{token} (ungültiger,
+    abgelaufener oder schon eingelöster Link) muss bei bestehender Sitzung ebenfalls ein
+    gültiges CSRF-Token rendern, nicht nur der GET-Fehlerfall – sonst 403 beim nächsten POST."""
+    _einloggen(client, mail_ausgang, "anna@example.org")
+    sitzung_csrf = db.scalar(select(Sitzung.csrf_token))
+    r = client.post(
+        "/anmelden/link/nicht-vorhanden",
+        data={"csrf_token": sitzung_csrf},
+        follow_redirects=False,
+    )
+    assert r.status_code == 400
+    token = csrf(r.text)
+    assert token == sitzung_csrf
+    r2 = client.post("/anmelden", data={"email": "berta@example.org", "csrf_token": token})
+    assert r2.status_code == 200
+
+
 def test_rate_limit_je_adresse_und_ip(client: TestClient) -> None:
     token = _vor_csrf(client)
     for _ in range(3):
@@ -388,6 +417,14 @@ def test_csrf_vergleich_ohne_500_bei_nicht_ascii(client: TestClient) -> None:
     assert r.status_code == 403
 
 
+def test_verify_csrf_ist_synchron() -> None:
+    """Ruling Fix-Runde 2 (Item 1): verify_csrf lief zuvor als `async def` mit
+    `await request.form()` und blockierender DB-Arbeit auf dem Event-Loop – bei jeder Anfrage
+    beider Router, auch GET, den auch der Long-Poll /core/anfragen nutzt. Als sync-Abhängigkeit
+    führt FastAPI sie stattdessen im Threadpool aus."""
+    assert inspect.iscoroutinefunction(auth.verify_csrf) is False
+
+
 def test_core_antworten_ohne_csrf(client: TestClient) -> None:
     """CSRF ist je Router eingehängt, nicht app-weit – /core/* darf davon nicht betroffen sein,
     sonst könnte das Hauptsystem nie antworten (kein Browser, kein Formular)."""
@@ -404,6 +441,20 @@ def test_sitzung_verlaengerung_erneuert_cookie(angemeldet: TestClient, uhr_steht
     r = angemeldet.get("/konto")
     gesetzt = r.headers.get("set-cookie", "").lower()
     assert auth.COOKIE.lower() in gesetzt and "max-age=" in gesetzt
+
+
+def test_abmelden_nach_verlaengernder_anfrage_setzt_kein_altes_cookie(
+    angemeldet: TestClient, uhr_steht
+) -> None:
+    """Ruling Fix-Runde 2 (Item 4): Abmelden verlängert und löscht die Sitzung in derselben
+    Anfrage (verify_csrf verlängert zuerst, der Handler löscht danach) – die Middleware darf das
+    schon im Response gesetzte Lösch-Cookie nicht mit dem alten (jetzt ungültigen) Token
+    überschreiben, sonst bekäme der Browser nach dem Abmelden eine tote Sitzung zurück."""
+    uhr_steht.weiter(days=2)  # nächste Anfrage verlängert die Sitzung gleitend
+    r = angemeldet.post("/abmelden", data={"csrf_token": angemeldet.csrf}, follow_redirects=False)
+    gesetzt = [c for c in r.headers.get_list("set-cookie") if c.startswith(f"{auth.COOKIE}=")]
+    assert len(gesetzt) == 1
+    assert "max-age=0" in gesetzt[0].lower()
 
 
 def test_name_aendern_legt_anfrage_an(angemeldet: TestClient, db: Session) -> None:
@@ -444,8 +495,13 @@ def test_konto_loeschen(angemeldet: TestClient, db: Session) -> None:
         )
     )
     auth.fordere_an(db, "anna@example.org", uhr.jetzt())
+    # Ruling Fix-Runde 2 (Item 3): code_fehlversuch hat keinen Fremdschlüssel auf konto (die
+    # Sperre muss auch für unbekannte Adressen gelten) und braucht deshalb einen eigenen
+    # Löschpfad in konten.loesche.
+    db.add(CodeFehlversuch(email="anna@example.org", versucht_am=uhr.jetzt()))
     db.commit()
     assert db.scalar(select(LoginToken)) is not None
+    assert db.scalar(select(CodeFehlversuch)) is not None
     assert "endgültig" in angemeldet.get("/konto/loeschen").text
     r = angemeldet.post(
         "/konto/loeschen", data={"csrf_token": angemeldet.csrf}, follow_redirects=False
@@ -457,6 +513,7 @@ def test_konto_loeschen(angemeldet: TestClient, db: Session) -> None:
     assert db.scalar(select(RechnungLink)) is None
     assert not pdf_pfad.exists()
     assert db.scalar(select(LoginToken)) is None
+    assert db.scalar(select(CodeFehlversuch)) is None
     a = db.scalar(select(Anfrage))
     assert a.typ == "konto_loeschen" and a.konto_id == angemeldet.konto_id
     assert angemeldet.get("/konto", follow_redirects=False).headers["location"] == "/anmelden"
