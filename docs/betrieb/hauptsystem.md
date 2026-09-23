@@ -165,6 +165,35 @@ die interne `ca.crt` setzen.
 - Bis zur Entscheidung über den Zahlungsanbieter (Ⓞ-13) gibt es nur die Testzahlung. Mit gesetzter
   `PORTAL_URL` und `APP_ENV=production` startet das Hauptsystem deshalb bewusst nicht.
 
+## 5b. Hallendienst anbinden
+
+Der Hallendienst in der Halle ruft das Hauptsystem über WireGuard auf Port **8444** auf; Caddy
+lässt dort nur `/hall/*` durch und nur mit einem Client-Zertifikat der internen CA. Zusätzlich
+prüft das Hauptsystem den Token `HALL_TOKEN`.
+
+1. `HALL_TOKEN` in `core/.env` auf einen langen Zufallswert setzen und denselben Wert in
+   `hall/.env` eintragen. Leer bedeutet: Schnittstelle aus (404).
+2. `beachhub-core zertifikate --ziel /app/data/zertifikate` erzeugt die interne CA (`ca.crt`/
+   `ca.key`) sowie die Client-Zertifikate `portal-kanal.*` und `halle.*`; `ca.crt` wird Caddy als
+   `trust_pool` für die Hallenschnittstelle gegeben (siehe `core/docker-compose.yml`) und muss
+   deshalb **vor** dem ersten `docker compose up` existieren. `halle.crt`/`halle.key` kommen auf
+   den Hallenrechner. Für die Prüfung des Server-Zertifikats von Caddy braucht der Hallendienst
+   zusätzlich Caddys **eigene** interne Root-CA (`CORE_CA`, Export aus dem Volume `caddy_data`),
+   nicht die `ca.crt` aus diesem Schritt – Details: `docs/betrieb/hallendienst.md`, Abschnitt 2.
+3. `docker compose up -d` – danach zeigt **System → Halle** den ersten Kontakt.
+
+Ein Wechsel der CA (neue `beachhub-core zertifikate`-Ausführung oder Rotation, siehe
+`docs/betrieb/portal.md`) erfordert einen Neustart bzw. mindestens ein Reload der Caddy-Site
+`:8444` (`docker compose restart caddy`), damit der neue `trust_pool` geladen wird.
+
+Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung, Sperre, ein Feld oder ein
+Hallenwert der Konfiguration ändert, und zusätzlich jede Nacht um 00:05. Meldet sich die Halle
+60 Minuten nicht, kommt eine Mail „Halle ohne Kontakt“, bei Rückkehr „Halle wieder verbunden“.
+Alarme der Halle (Fehlversuche am Tastenfeld, Geräte, Anwesenheit ohne Buchung, Tür) kommen als
+Mail an `EMAIL_FROM`; nachgelieferte Alarme nach einem Ausfall gesammelt in einer Mail.
+
+Einrichtung des Hallenrechners und von Home Assistant: `docs/betrieb/hallendienst.md`.
+
 ## 6. Backup und Wiederherstellung
 
 Das Skript `core/deploy/backup.sh` erstellt ein verschlüsseltes Backup aus Datenbank-Dump und dem
