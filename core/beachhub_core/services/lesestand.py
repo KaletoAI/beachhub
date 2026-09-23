@@ -1,5 +1,6 @@
 import logging
 import os
+import time
 import uuid
 from datetime import timedelta
 from typing import Any
@@ -227,7 +228,11 @@ def publiziere(db: Session, name: str) -> schema.Dokument:
         zeile = LesestandVersion(dokument=name, version=0)
         db.add(zeile)
         db.flush()
-    zeile.version += 1
+    # max(bisherige Version + 1, Unixzeit in Millisekunden): Nach einer Wiederherstellung des
+    # Hauptsystems aus einem Backup wäre der Zähler sonst niedriger als der Stand, den Portal/
+    # Halle schon kennen, und beide verwürfen jede neue Version als version_alt (Ruling
+    # Lesestand-Versionen).
+    zeile.version = max(zeile.version + 1, int(time.time() * 1000))
     zeile.signiert_am = utcnow()
     zeile.geaendert = False
     # Signiert wird immer über die JSON-Darstellung (Decimal → String, datetime → ISO), genau wie

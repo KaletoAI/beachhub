@@ -65,7 +65,9 @@ def test_belegung_ohne_kundenbezug_und_signiert(db: Session, welt) -> None:
     )
     db.commit()
     dok = lesestand.publiziere(db, "belegung")
-    assert dok.version == 1 and pruefe(
+    # Version steigt monoton (max(bisherige Version + 1, Unixzeit in Millisekunden)), keine feste
+    # Zahl (Ruling Lesestand-Versionen).
+    assert dok.version > 0 and pruefe(
         dok.model_dump(mode="json", exclude={"signatur"}),
         dok.signatur,
         lesestand.oeffentlicher_schluessel(),
@@ -84,7 +86,7 @@ def test_belegung_ohne_kundenbezug_und_signiert(db: Session, welt) -> None:
         dok.inhalt["fenster_tage"] == 14
         and dok.inhalt["felder"][0]["raster"][0]["slot_minuten"] == 60
     )
-    assert lesestand.publiziere(db, "belegung").version == 2
+    assert lesestand.publiziere(db, "belegung").version > dok.version
     assert Path(settings.data_dir, "lesestand", "belegung.json").exists()
 
 

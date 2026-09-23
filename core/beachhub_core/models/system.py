@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -54,7 +54,9 @@ class Audit(UUIDMixin, Base):
 class LesestandVersion(Base):
     __tablename__ = "lesestand_version"
     dokument: Mapped[str] = mapped_column(String(80), primary_key=True)
-    version: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # BigInteger: die Version ist max(bisherige Version + 1, Unixzeit in Millisekunden)
+    # (Ruling Lesestand-Versionen) und übersteigt damit schnell den 32-Bit-Bereich.
+    version: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     signiert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     geaendert: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
 
