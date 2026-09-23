@@ -23,6 +23,7 @@ from beachhub_core.models import (
     Sperre,
     Storno,
     Tarif,
+    Zahlung,
     utcnow,
 )
 from beachhub_core.services import konfiguration, pin
@@ -116,15 +117,17 @@ def baue_belegung(db: Session) -> schema.BelegungInhalt:
         fenster_tage=fenster,
         mindestvorlauf_minuten=konfiguration.hole(db, "mindestvorlauf_minuten"),
         belegt=belegt,
+        storno_frist_stunden=konfiguration.hole(db, "storno_frist_stunden"),
+        antwort_hinweis_sekunden=konfiguration.hole(db, "antwort_hinweis_sekunden"),
     )
 
 
 def baue_tarife(db: Session) -> schema.TarifeInhalt:
     heute = clock.today(db)
     regeln = db.scalars(
-        select(Tarif).where(
-            Tarif.aktiv.is_(True), or_(Tarif.gueltig_bis.is_(None), Tarif.gueltig_bis >= heute)
-        )
+        select(Tarif)
+        .where(Tarif.aktiv.is_(True), or_(Tarif.gueltig_bis.is_(None), Tarif.gueltig_bis >= heute))
+        .order_by(Tarif.created_at)
     ).all()
     return schema.TarifeInhalt(
         regeln=[
@@ -158,7 +161,19 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
     out = []
     for b in buchungen:
         s = db.scalar(select(Storno).where(Storno.buchung_id == b.id))
-        zeige_pin = b.aktiv and b.ende > jetzt and b.pin_verschluesselt
+        # Nur bestätigte Buchungen haben eine gültige PIN; eine Reservierung ist noch nicht bezahlt.
+        zeige_pin = b.status == Buchung.BESTAETIGT and b.ende > jetzt and b.pin_verschluesselt
+        # Offene Reservierung: Link zur Bezahlseite, solange nicht bezahlt (Hauptspec § 8.1).
+        offene_zahlung = (
+            db.scalar(
+                select(Zahlung)
+                .where(Zahlung.buchung_id == b.id, Zahlung.status != Zahlung.BEZAHLT)
+                .order_by(Zahlung.created_at.desc())
+                .limit(1)
+            )
+            if b.status == Buchung.RESERVIERT
+            else None
+        )
         out.append(
             schema.KontoBuchung(
                 id=str(b.id),
@@ -170,6 +185,8 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
                 preis=b.preis,
                 pin=pin.entschluessele(b.pin_verschluesselt) if zeige_pin else None,  # type: ignore[arg-type]
                 storno=schema.StornoInfo(kostenfrei=s.kostenfrei) if s else None,
+                checkout_url=offene_zahlung.checkout_url if offene_zahlung else None,
+                reserviert_bis=b.reserviert_bis if offene_zahlung else None,
             )
         )
     rechnungen = db.scalars(

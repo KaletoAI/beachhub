@@ -7,7 +7,16 @@ from sqlalchemy.orm import Session
 from beachhub_core.models import GuthabenBuchung, Kunde
 from beachhub_core.services import audit
 
-ARTEN = {"storno_gutschrift", "verrechnung", "auszahlung", "manuell", "ueberzahlung"}
+ARTEN = {
+    "storno_gutschrift",
+    "verrechnung",
+    "auszahlung",
+    "manuell",
+    "ueberzahlung",
+    # Verrechnetes Guthaben einer Reservierung, die ohne Zahlung endet (Storno, Verfall).
+    # Keine storno_gutschrift: Es gab keine Rechnung, also braucht es keinen Korrekturbeleg.
+    "rueckbuchung",
+}
 ABGEHEND = {"verrechnung", "auszahlung"}
 
 
