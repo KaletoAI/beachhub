@@ -64,6 +64,9 @@ class Steuerung:
         self._gestoert: set[str] = set()
         # Wann eine gestörte Entität frühestens wieder versucht wird (siehe _bereit).
         self._naechster_versuch: dict[str, datetime] = {}
+        # Entitäten, für die das Lesen des Ist-Zustands (GET) gerade fehlschlägt – für die
+        # „einmal je Störung“-Logregel in _verarbeite.
+        self._get_gewarnt: set[str] = set()
         self.wecker = asyncio.Event()
 
     async def einmal(self) -> None:
@@ -82,6 +85,7 @@ class Steuerung:
             self._versuche.clear()
             self._gestoert.clear()
             self._naechster_versuch.clear()
+            self._get_gewarnt.clear()
             return
         try:
             for feld_id, an in soll.licht.items():
@@ -106,7 +110,13 @@ class Steuerung:
         except HaNichtErreichbar:
             raise
         except HaFehler as e:
-            logger.warning("Steuerung für %s übersprungen: %s", entity, e)
+            # Wie bei _stoerung: bei einem dauerhaften Fehler nur einmal loggen, nicht jeden
+            # Lauf (30 s) erneut – zurückgesetzt, sobald das Lesen wieder klappt.
+            if entity not in self._get_gewarnt:
+                self._get_gewarnt.add(entity)
+                logger.warning("Steuerung für %s übersprungen: %s", entity, e)
+        else:
+            self._get_gewarnt.discard(entity)
 
     async def _ist(self, entity: str) -> dict[str, Any] | None:
         zustand = await self._ha.zustand(entity)  # HaFehler/HaNichtErreichbar: siehe _verarbeite
@@ -177,6 +187,9 @@ class Steuerung:
         zustand = await self._ist(entity)
         attribute = (zustand or {}).get("attributes") or {}
         soll = _begrenzt(soll, attribute)
+        # lage.soll_heizung zeigt denselben (begrenzten) Wert, der auch an HA geschickt wird
+        # bzw. mit dem Ist verglichen wurde – sonst widersprechen sich Status und Ereignis.
+        self._lage.soll_heizung = soll
         eingestellt = dezimal(attribute.get("temperature"))
         if eingestellt is not None and eingestellt == soll:
             self._in_ordnung(entity)
@@ -214,10 +227,19 @@ class Steuerung:
         zu_melden: list[str] = []
         with self._sitzungen() as db:
             praesenz: dict[str, dict[str, Any]] = lies(db, "praesenz", {})
+            if not isinstance(praesenz, dict):
+                # Kaputter Zustand insgesamt (z. B. ein älteres/anderes Format) – verwerfen
+                # statt mit .items() abzustürzen, und selbst heilen (leeres Objekt speichern).
+                logger.warning("Ungültiger Präsenz-Zustand verworfen (kein Objekt): %r", praesenz)
+                schreibe(db, "praesenz", {})
+                db.commit()
+                return
             if not praesenz:
                 return
             for feld_id, p in list(praesenz.items()):
                 try:
+                    if not isinstance(p, dict):
+                        raise TypeError("Präsenz-Eintrag ist kein Objekt")
                     if feld_id in offene_felder:
                         p["ohne_buchung_seit"] = None
                         continue

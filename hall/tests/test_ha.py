@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncIterator
 
 import pytest
-from beachhub_hall.ha import HaClient, HaFehler
+from beachhub_hall.ha import HaClient, HaFehler, HaNichtErreichbar
 
 from tests.ha_simulator import HaSimulator
 
@@ -41,9 +41,12 @@ async def test_fehler_werden_zu_hafehler(ha: HaSimulator) -> None:
         await c.dienst("light", "turn_on", {"entity_id": "light.feld_1"})
     await c.schliesse()
     weg = HaClient("http://127.0.0.1:9", HaSimulator.TOKEN)
-    with pytest.raises(HaFehler):
+    # Echte Verbindungsfehler (kein Host erreichbar) werden zu HaNichtErreichbar – nicht nur
+    # zur allgemeinen HaFehler-Basisklasse –, damit Aufrufer wie die Steuerung oder der
+    # HA-Zuhörer sie von einer Fehlerantwort für eine einzelne Anfrage unterscheiden können.
+    with pytest.raises(HaNichtErreichbar):
         await weg.zustand("light.feld_1")
-    with pytest.raises(HaFehler):
+    with pytest.raises(HaNichtErreichbar):
         await weg.websocket()
     await weg.schliesse()
 

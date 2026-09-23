@@ -205,6 +205,31 @@ async def test_praesenz_im_zutrittsvorlauf_ist_kein_alarm(a: Aufbau) -> None:
     assert a.ereignis("praesenz_ohne_buchung") == []
 
 
+async def test_praesenz_auf_anderem_feld_waehrend_zutrittsvorlauf_alarmiert(a: Aufbau) -> None:
+    # Geschärfte Gegenprobe zu test_praesenz_im_zutrittsvorlauf_ist_kein_alarm: nur F1s
+    # Zutrittsfenster ist offen (Buchung F1 19:00-21:00, ab 18:45), F2 hat gar keine Buchung.
+    # Die Fensterprüfung ist je Feld – Präsenz auf F2 muss trotzdem normal alarmieren, sonst
+    # würde ein offenes Zutrittsfenster irgendwo jeden Alarm im ganzen Haus unterdrücken.
+    a.plan(buchung(F1, t(19), t(21)))
+    with a.sitzungen() as db:
+        schreibe(
+            db,
+            "praesenz",
+            {
+                F2: {
+                    "seit": t(18, 45).isoformat(),
+                    "ohne_buchung_seit": t(18, 45).isoformat(),
+                    "alarm": False,
+                }
+            },
+        )
+        db.commit()
+    await a.um(18, 54)
+    assert a.ereignis("praesenz_ohne_buchung") == []
+    await a.um(18, 55)
+    assert a.ereignis("praesenz_ohne_buchung") == [{"feld_id": F2, "minuten": 10}]
+
+
 async def test_heizung_wird_auf_min_temp_begrenzt(a: Aufbau) -> None:
     # grund_temperatur (0.0) liegt unter min_temp der climate-Entität (7.0). Ohne Begrenzung
     # würde HA den Aufruf ablehnen (siehe HaSimulator._dienst) und die Heizung wiche dauerhaft
@@ -216,6 +241,9 @@ async def test_heizung_wird_auf_min_temp_begrenzt(a: Aufbau) -> None:
     assert a.ereignis("heizung_gesetzt") == [
         {"feld_id": None, "soll": "7.0", "ist_temperatur": "5.0"}
     ]
+    # lage.soll_heizung zeigt den begrenzten Wert (7.0), nicht die unbegrenzte
+    # grund_temperatur (0.0) – Status und Ereignis stimmen überein.
+    assert a.lage.soll_heizung == Decimal("7.0")
     anzahl = len(a.sim.aufrufe)
     await a.um(6, 1)
     assert len(a.sim.aufrufe) == anzahl  # keine Abweichung mehr
@@ -308,4 +336,73 @@ async def test_handbetrieb_setzt_stoerung_zurueck(a: Aufbau) -> None:
     for minute in (4, 5, 6):
         await a.um(19, minute)
     assert len(a.ereignis("aktor_fehler")) == 4  # nach dem Reset entsteht die Störung neu
-    a.sim.fehler_bei_diensten = False
+
+
+async def test_neue_stoerung_nach_erholung_meldet_erneut(
+    sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator
+) -> None:
+    # Nur das Licht, keine Heizung konfiguriert, damit „genau ein aktor_fehler“ sich
+    # eindeutig auf eine einzelne Entität bezieht.
+    z = Zuordnung(master_pin_hash=MASTER_HASH, felder={F1: FeldZuordnung("light.feld_1")})
+    aufbau = Aufbau(sitzungen, uhr, ha, z)
+    aufbau.plan(buchung(F1, t(19), t(21)))
+    ha.fehler_bei_diensten = True
+    for minute in (0, 1, 2):
+        await aufbau.um(19, minute)
+    assert len(aufbau.ereignis("aktor_fehler")) == 1  # erste Störung: genau eine Meldung
+    # Erholung: Dienstaufrufe klappen wieder, nach RETRY_INTERVALL (5 min seit 19:02) wird
+    # erneut versucht und diesmal übernommen.
+    ha.fehler_bei_diensten = False
+    await aufbau.um(19, 7)
+    assert ha.zustaende["light.feld_1"]["state"] == "on"
+    # Ein weiterer Lauf, in dem Soll und Ist übereinstimmen, räumt die Störung endgültig auf.
+    await aufbau.um(19, 8)
+    assert len(aufbau.ereignis("aktor_fehler")) == 1  # weiterhin nur die erste Meldung
+    # Neue, eigenständige Störung derselben Entität: die Buchung endet (Soll wechselt auf
+    # aus), HA lehnt den Dienstaufruf wieder ab.
+    ha.fehler_bei_diensten = True
+    for minute in (5, 6, 7):
+        await aufbau.um(21, minute)
+    fehler = aufbau.ereignis("aktor_fehler")
+    assert len(fehler) == 2  # die neue Störung wird erneut gemeldet, nicht unterdrückt
+    assert fehler[-1] == {
+        "feld_id": F1,
+        "entity": "light.feld_1",
+        "grund": "dienst_fehlgeschlagen",
+    }
+    await aufbau.client.schliesse()
+
+
+async def test_kaputter_praesenz_zustand_insgesamt_bricht_nicht_ab(
+    a: Aufbau, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    a.plan(buchung(F1, t(19), t(21)))
+    with a.sitzungen() as db:
+        # praesenz selbst ist kein Objekt (z. B. ein älteres/anderes Format) – .items() würde
+        # sonst mit AttributeError abstürzen und die ganze Steuerungsrunde mitreißen.
+        schreibe(db, "praesenz", ["kaputt"])
+        db.commit()
+    await a.um(19)  # kein Absturz
+    assert a.dienste() == [("light", "turn_on"), ("climate", "set_temperature")]
+    assert "Präsenz" in caplog.text
+    with a.sitzungen() as db:
+        assert lies(db, "praesenz") == {}
+
+
+async def test_dauerhafter_get_fehler_wird_nur_einmal_geloggt(
+    a: Aufbau, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.WARNING)
+    a.plan(buchung(F1, t(19), t(21)))
+    a.sim.fehler_bei_zustand = {"light.feld_1"}
+    for minute in (0, 1, 2):
+        await a.um(19, minute)
+    # "übersprungen" kommt genau einmal je geloggter Meldung vor (die Fehlermeldung selbst
+    # enthält den Entitätsnamen zusätzlich im Pfad, zählt also für sich allein nicht).
+    assert caplog.text.count("übersprungen") == 1  # nur einmal geloggt, nicht jeden Lauf
+    a.sim.fehler_bei_zustand = set()
+    await a.um(19, 3)  # Lesen klappt wieder
+    a.sim.fehler_bei_zustand = {"light.feld_1"}
+    await a.um(19, 4)  # neue Störung: wieder genau eine zusätzliche Meldung
+    assert caplog.text.count("übersprungen") == 2

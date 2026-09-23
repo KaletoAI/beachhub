@@ -1,8 +1,12 @@
 """Home Assistant über REST und WebSocket mit Long-Lived Access Token – keine Custom
 Component (Hauptspec § 8.2).
 
-Jeder Fehler wird zu `HaFehler`. Die Aufrufer unterscheiden nur „HA hat geantwortet“ und
-„HA hat nicht geantwortet“; was daraus folgt (warten, melden), entscheiden sie selbst.
+Jeder Fehler wird zu `HaFehler`. Eine echte Nichterreichbarkeit (Verbindung, Timeout – bei REST
+wie beim WebSocket) wird zur Unterklasse `HaNichtErreichbar`; eine Fehlerantwort für eine
+einzelne Anfrage (z. B. HTTP 500, eine abgelehnte Anmeldung, ein abgelehntes Abonnement) bleibt
+die Basisklasse. Aufrufer, die zwischen „diese eine Anfrage ist gescheitert“ und „HA ist gerade
+gar nicht da“ unterscheiden müssen (z. B. die Steuerung, der HA-Zuhörer), fangen dafür gezielt
+`HaNichtErreichbar`.
 """
 
 import json
@@ -36,7 +40,7 @@ class HaWebSocket:
         try:
             msg = await self._ws.receive()
         except (aiohttp.ClientError, TimeoutError) as e:
-            raise HaFehler(f"WebSocket: {e}") from e
+            raise HaNichtErreichbar(f"WebSocket: {e}") from e
         if msg.type != aiohttp.WSMsgType.TEXT:
             raise HaFehler(f"WebSocket beendet ({msg.type.name})")
         daten = json.loads(msg.data)
@@ -48,7 +52,7 @@ class HaWebSocket:
         try:
             await self._ws.send_json(nachricht)
         except (aiohttp.ClientError, ConnectionError) as e:
-            raise HaFehler(f"WebSocket: {e}") from e
+            raise HaNichtErreichbar(f"WebSocket: {e}") from e
 
     async def anmelden(self, token: str) -> None:
         if (await self._lies()).get("type") != "auth_required":
@@ -127,7 +131,7 @@ class HaClient:
         try:
             ws = await self._s().ws_connect(self._basis + "/api/websocket", heartbeat=30)
         except (aiohttp.ClientError, TimeoutError) as e:
-            raise HaFehler(f"HA-WebSocket: {e}") from e
+            raise HaNichtErreichbar(f"HA-WebSocket: {e}") from e
         verbindung = HaWebSocket(ws)
         try:
             await verbindung.anmelden(self._token)
