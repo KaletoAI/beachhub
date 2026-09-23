@@ -3,6 +3,8 @@
 Das Portal entscheidet nichts. Es legt Anfragen ab, liefert sie aus und merkt sich die Antwort.
 """
 
+import base64
+import binascii
 import re
 import uuid
 from dataclasses import dataclass
@@ -16,7 +18,7 @@ from sqlalchemy.orm import Session
 
 from beachhub_portal import uhr
 from beachhub_portal.models import Anfrage, KanalKontakt, Konto
-from beachhub_portal.services import lesestand, wecker
+from beachhub_portal.services import lesestand, rechnung_link, wecker
 
 ERNEUT_NACH = timedelta(seconds=60)
 HOECHSTENS = 50
@@ -150,6 +152,32 @@ def beantworte(db: Session, anfrage_id: uuid.UUID, antwort: kanal.Antwort, jetzt
         konto = db.get(Konto, a.konto_id)
         if konto is not None:
             konto.kunde_id = antwort.kunde_id
+    if a.typ == "rechnung_anfordern" and antwort.status == "ok":
+        # Das PDF kommt nicht in die Anfragetabelle, sondern als Datei hinter einen Einmal-Link
+        # (A-RECH-5); der vom Hauptsystem mitgeschickte Dateiname wird nicht übernommen – die
+        # Download-Route baut den Content-Disposition-Dateinamen selbst aus der (validierten)
+        # Rechnungsnummer.
+        daten.pop("pdf_base64", None)
+        daten.pop("dateiname", None)
+        rechnung_konto = db.get(Konto, a.konto_id) if a.konto_id is not None else None
+        if antwort.pdf_base64 and rechnung_konto is not None:
+            try:
+                pdf = base64.b64decode(antwort.pdf_base64, validate=True)
+            except (binascii.Error, ValueError):
+                daten = {"status": "fehler"}
+            else:
+                if len(pdf) > rechnung_link.MAX_PDF_BYTES:
+                    # Ruling: Größenlimit statt 500 – ein zu großes/defektes PDF wird als Fehler
+                    # beantwortet, ohne die Datei überhaupt erst zu schreiben.
+                    daten = {"status": "fehler"}
+                else:
+                    daten["link_token"] = rechnung_link.lege_an(
+                        db,
+                        konto_id=rechnung_konto.id,
+                        rechnung_nr=str(a.nutzlast_json.get("rechnung_nr", "")),
+                        pdf=pdf,
+                        jetzt=jetzt,
+                    )
     a.status = Anfrage.BEANTWORTET
     a.antwort_json = daten
     a.beantwortet_am = jetzt
