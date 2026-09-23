@@ -1,0 +1,22 @@
+# Öffentliche Seite des Portals. Der Kanal des Hauptsystems (/core/*) ist hier gesperrt.
+{$PORTAL_DOMAIN} {
+	encode zstd gzip
+	@kanal path /core/*
+	respond @kanal 404
+	reverse_proxy 127.0.0.1:8001
+}
+
+# Kanal des Hauptsystems: nur mit Client-Zertifikat der internen CA (beachhub-core zertifikate).
+# Ein Client-Zertifikat wird im TLS-Handshake verlangt, bevor der Pfad bekannt ist – deshalb ein
+# eigener Port statt einer Pfadregel. Firewall: 8443 nur für die Adresse des Hauptsystems öffnen.
+{$PORTAL_DOMAIN}:8443 {
+	tls {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/caddy/beachhub-ca.crt
+		}
+	}
+	@nicht_kanal not path /core/*
+	respond @nicht_kanal 404
+	reverse_proxy 127.0.0.1:8001
+}
