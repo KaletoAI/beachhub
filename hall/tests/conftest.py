@@ -3,15 +3,14 @@ from pathlib import Path
 
 import pytest
 from beachhub_hall.clock import SimulierteUhr
-from beachhub_hall.config import lade_zuordnung
 from beachhub_hall.db import oeffne
 from beachhub_hall.dienst import Dienst
-from beachhub_hall.ha import HaClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from tests.core_simulator import CoreSimulator
+from tests.dienst_hilfen import baue_dienst
 from tests.ha_simulator import HaSimulator, standard_entitaeten
-from tests.hilfen import TOML_BEISPIEL, FakeSchlaf, t
+from tests.hilfen import t
 
 
 @pytest.fixture
@@ -31,33 +30,6 @@ async def ha() -> AsyncIterator[HaSimulator]:
     await sim.start()
     yield sim
     await sim.stop()
-
-
-async def baue_dienst(
-    sitzungen: sessionmaker[Session],
-    uhr: SimulierteUhr,
-    ha: HaSimulator,
-    tmp_path: Path,
-    *,
-    zuhoerer_backoff: float = 1.0,
-) -> tuple[Dienst, CoreSimulator]:
-    """Verdrahtet einen kompletten Dienst gegen simulierte Uhr, HA- und Core-Simulator –
-    gemeinsame Grundlage der Fixtures `dienst` (test_dienst.py) und `aufbau`
-    (test_integration.py), damit der Aufbau nicht doppelt gepflegt wird (Ruling Task 11)."""
-    toml = tmp_path / "hall.toml"
-    toml.write_text(TOML_BEISPIEL, encoding="utf-8")
-    core = CoreSimulator()
-    d = Dienst(
-        oeffentlich_hex=core.oeffentlich,
-        zuordnung=lade_zuordnung(toml),
-        sitzungen=sitzungen,
-        uhr=uhr,
-        ha=HaClient(ha.url, HaSimulator.TOKEN),
-        core=core.client(),
-        schlafen=FakeSchlaf(),
-        zuhoerer_backoff=zuhoerer_backoff,
-    )
-    return d, core
 
 
 @pytest.fixture

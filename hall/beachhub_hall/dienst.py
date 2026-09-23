@@ -6,6 +6,7 @@ bevor Hauptsystem oder HA erreichbar sind (Hallendienst-Spec § 5 „Start“).
 
 import asyncio
 import logging
+import time
 from collections.abc import Awaitable, Callable
 
 from beachhub_shared.hallenplan import HallenStatus
@@ -30,23 +31,43 @@ from beachhub_hall.tuer import Tuer
 
 logger = logging.getLogger(__name__)
 
+_BACKOFF_START = 1.0
+_BACKOFF_MAX = 60.0
 
-async def _dauerhaft(name: str, arbeit: Callable[[], Awaitable[None]]) -> None:
+
+async def _dauerhaft(
+    name: str,
+    arbeit: Callable[[], Awaitable[None]],
+    *,
+    schlafen: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    jetzt: Callable[[], float] = time.monotonic,
+) -> None:
     """Startet `arbeit()` neu, wenn sie mit einer unerwarteten Ausnahme endet, statt den Dienst
     mitzureißen. Für Aufgaben, die – anders als die `takt()`-Aufgaben mit ihrem `einmal()` –
     selbst schon eine Dauerschleife sind, wie `HaZuhoerer.laufen()`. `laufen()` fängt bereits
     jede Ausnahme in seiner eigenen Schleife (je Ereignis und in der äußeren Schleife); dieser
     Wächter ist die zweite Sicherung, falls trotzdem einmal eine unerwartete Ausnahme bis
     hierher durchreicht – ohne ihn würde `asyncio.gather` in `laufen()` sonst alle anderen
-    Aufgaben mit abbrechen."""
+    Aufgaben mit abbrechen.
+
+    Ein sofortiger Neustart ohne Pause wäre bei einer dauerhaften Ursache eine heiße Schleife
+    (Log-Flut, blockierte Ereignisschleife) – deshalb wächst die Pause nach jedem Fehlschlag
+    von 1 s auf bis zu 60 s. Lief `arbeit()` vor dem Fehler mindestens so lange wie die
+    maximale Pause, gilt die Aufgabe als erholt: die Pause beginnt wieder bei 1 s."""
+    backoff = _BACKOFF_START
     while True:
+        start = jetzt()
         try:
             await arbeit()
             return
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Aufgabe %s unerwartet beendet, wird neu gestartet", name)
+            if jetzt() - start >= _BACKOFF_MAX:
+                backoff = _BACKOFF_START
+            logger.exception("Aufgabe %s unerwartet beendet, Neustart in %.0f s", name, backoff)
+            await schlafen(backoff)
+            backoff = min(_BACKOFF_MAX, backoff * 2)
 
 
 class Dienst:

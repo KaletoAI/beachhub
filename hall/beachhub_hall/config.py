@@ -27,6 +27,7 @@ class Umgebung(BaseSettings):
     ha_token: str = ""
     data_dir: Path = Path("./data")
     hall_toml: Path = Path("./hall.toml")
+    health_host: str = "127.0.0.1"
     health_port: int = 8099
 
 

@@ -330,8 +330,9 @@ async def test_abbruch_waehrend_turn_on_hinterlaesst_impuls_zum_ausschalten(
     aufgabe.cancel()
     with pytest.raises(asyncio.CancelledError):
         await aufgabe
-    assert aufbau.tuer._impuls is not None
-    await aufbau.tuer.schliesse()
+    # warte() statt eines Zugriffs auf das private _impuls: wäre in finally kein Impuls-Task
+    # angelegt worden, bliebe ha.aufrufe leer und die folgende Assertion schlüge fehl.
+    await aufbau.tuer.warte()
     assert [x[:2] for x in ha.aufrufe] == [("switch", "turn_off")]
     await aufbau.client.schliesse()
 

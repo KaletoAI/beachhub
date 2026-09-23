@@ -28,8 +28,9 @@ from beachhub_hall.tuer import Tuer
 SERIE_SCHWELLE = 5
 SERIE_ENDE = timedelta(minutes=15)
 # Nur ASCII-Ziffern: \d ohne re.ASCII träfe auch auf andere Unicode-Ziffern (z. B. Fullwidth-
-# oder Devanagari-Ziffern) zu, die argon2 anders hasht als das Hauptsystem erwartet.
-_ZIFFERN = re.compile(r"[0-9]{4,12}")
+# oder Devanagari-Ziffern) zu, die argon2 anders hasht als das Hauptsystem erwartet. Öffentlich,
+# weil auch die Master-PIN-CLI (__main__.py) exakt dasselbe Format verlangen muss.
+ZIFFERN = re.compile(r"[0-9]{4,12}")
 _ph = PasswordHasher()
 MASTER = "master"
 
@@ -104,7 +105,7 @@ class PinPruefer:
         return True
 
     async def _pruefe(self, code: str, jetzt: datetime) -> PlanBuchung | str | None:
-        if not _ZIFFERN.fullmatch(code):
+        if not ZIFFERN.fullmatch(code):
             return None
         if await asyncio.to_thread(ist_master, code, self._z.master_pin_hash):
             return MASTER

@@ -102,4 +102,8 @@ async def test_72_stunden_ohne_hauptsystem(
     await d.melder.leeren()
     seqs = [e.seq for e in core.empfangen]
     assert seqs == list(range(1, offen + 1))
+    # Je Abend abwechselnd Heizung/Licht (an, dann aus – 18:30 Heizvorlauf, 19:00 Buchungsbeginn,
+    # 20:00 Buchungsende, 20:30 nach Lichtnachlauf), dreimal identisch, in seq-Reihenfolge
+    # nachgeliefert (Ruling Task 11 Fix-Runde 1).
+    assert core.typen() == ["heizung_gesetzt", "licht_geschaltet"] * 6
     assert d.ereignisse.offen() == 0
