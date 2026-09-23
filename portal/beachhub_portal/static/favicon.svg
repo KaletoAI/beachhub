@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Beachhub">
+  <rect width="32" height="32" rx="7" fill="#0b4f6c"/>
+  <circle cx="16" cy="16.5" r="8.5" fill="#fff"/>
+  <g fill="none" stroke="#0b4f6c" stroke-width="1.9" stroke-linecap="round">
+    <path d="M16 8q5.2 8.5 0 17"/>
+    <path d="M8.2 13.2q7.8 3.4 15.6 0"/>
+    <path d="M9.6 21.8q5-4.6 12.8-3.1"/>
+  </g>
+</svg>
