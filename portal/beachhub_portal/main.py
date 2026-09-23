@@ -11,6 +11,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from beachhub_portal.config import INSECURE_SECRET, pruefe_produktionsstart, settings
+from beachhub_portal.routes import kanal
 from beachhub_portal.templating import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -60,6 +61,9 @@ def favicon() -> FileResponse:
 @app.get("/health")
 def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
+
+
+app.include_router(kanal.router, prefix="/core")
 
 
 @app.exception_handler(StarletteHTTPException)
