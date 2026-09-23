@@ -110,6 +110,18 @@ def speichere_ereignisse(db: Session, lieferung: EreignisLieferung) -> tuple[int
         select(HalleDienst).where(HalleDienst.dienst_id == lieferung.dienst_id).with_for_update()
     ).scalar_one()
 
+    # Die Halle liefert immer ab ihrer niedrigsten unbestätigten seq (Melder: unbestaetigt() in
+    # seq-Reihenfolge); alles davor hat das Hauptsystem ihr also schon einmal bestätigt. Liegt die
+    # gespeicherte Marke darunter – etwa nach einer Wiederherstellung aus einem Backup, das älter
+    # ist als der Stand der Halle –, fehlen die Ereignisse dazwischen hier für immer: Die
+    # Lückenprüfung unten bliebe dann dauerhaft bei der alten Marke stehen, die Halle bekäme nie
+    # eine Bestätigung und lieferte endlos. Deshalb die Marke auf „kleinste gelieferte seq − 1“
+    # nachziehen (nur anheben, nie senken) und fortschreiben.
+    if lieferung.ereignisse:
+        untergrenze = min(e.seq for e in lieferung.ereignisse) - 1
+        if untergrenze > dienst.bestaetigt_bis:
+            dienst.bestaetigt_bis = untergrenze
+
     # created_at/updated_at mit der echten Uhr, nicht mit `jetzt` (clock.now, vom Admin
     # überschreibbar für Tests/Abnahme): Ein Datums-Override darf nicht verfälschen, wann ein
     # Ereignis tatsächlich empfangen wurde.

@@ -78,7 +78,11 @@ ab.
 **Ereignis** (`HallenEreignis`): `{seq: int, typ: str, zeitpunkt: datetime, feld_id?: UUID,
 buchung_id?: UUID, daten: dict}`. Das Hauptsystem speichert jedes Ereignis in `ereignis`
 (`quelle = "halle"`, unique über `(halle_dienst_id, halle_seq)`). Ein Duplikat überspringt es stillschweigend. `halle_dienst_id` ist eine UUID, die der Hallendienst beim Anlegen seiner Datenbank einmal erzeugt und in jeder Ereignislieferung mitschickt; wird die SQLite-Datei neu angelegt (Hardwaretausch, Neuinstallation), beginnt `seq` wieder bei 1, ohne dass neue Ereignisse als Duplikate verworfen werden.
-`bestaetigt_bis` ist die höchste `seq`, bis zu der alle Ereignisse gespeichert sind. Bei diesen
+`bestaetigt_bis` ist die höchste `seq`, bis zu der alle Ereignisse gespeichert sind. Weil die
+Halle immer ab ihrer niedrigsten unbestätigten `seq` liefert, zieht das Hauptsystem seine Marke
+vorher auf „kleinste gelieferte `seq` − 1“ nach (nur anheben) – sonst bliebe sie nach einer
+Wiederherstellung aus einem älteren Backup für immer stehen. Bestätigt das Hauptsystem von einer
+Lieferung nichts, wartet der Melder mit Backoff, statt sofort erneut zu liefern. Bei diesen
 Typen bekommt der Betreiber eine Alarm-Mail (A-MAIL-2): `tastenfeld_fehlversuche`,
 `praesenz_ohne_buchung`, `aktor_fehler`, `ha_nicht_erreichbar`, `plan_verworfen`,
 `tuer_offen_ausserhalb`. Stammt ein alarmierendes Ereignis aus der Nachlieferung nach einem

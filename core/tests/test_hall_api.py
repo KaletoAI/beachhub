@@ -144,6 +144,24 @@ def test_ereignisse_luecke_haelt_bestaetigt_bis_zurueck(
     assert db.query(Ereignis).count() == 4
 
 
+def test_marke_hinter_lieferung_nach_backup_wird_nachgezogen(
+    client: TestClient, db: Session, welt
+) -> None:
+    """Hauptsystem aus einem Backup wiederhergestellt: Die Marke in halle_dienst (2) ist älter
+    als der Stand der Halle, die seq 3–5 schon als bestätigt kennt und ab seq 6 liefert. Die
+    Halle liefert immer ab ihrer niedrigsten unbestätigten seq – alles davor hat das
+    Hauptsystem also früher schon bestätigt. Ohne Nachziehen der Marke fände die Lückenprüfung
+    seq 3 nie und bestätigte für immer nur bis 2."""
+    jetzt = clock.now(db)
+    client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 1, 2))
+    r = client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 6, 7))
+    assert r.json()["bestaetigt_bis"] == 7
+    assert db.query(Ereignis).filter(Ereignis.halle_seq.in_([6, 7])).count() == 2
+    dienst = db.get(HalleDienst, DIENST)
+    db.refresh(dienst)
+    assert dienst.bestaetigt_bis == 7
+
+
 def test_bestaetigt_bis_bleibt_nach_loeschen_alter_ereignisse(
     client: TestClient, db: Session, welt
 ) -> None:
