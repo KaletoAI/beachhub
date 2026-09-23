@@ -157,8 +157,18 @@ def _rechnung_anfordern(
     r = db.scalar(
         select(Rechnung).where(Rechnung.nummer == n.rechnung_nr, Rechnung.kunde_id == kunde.id)
     )
-    if r is None or not r.pdf_pfad:
+    if r is None:
         return abgelehnt("nicht_gefunden")
+    if not r.pdf_pfad:
+        # Die Rechnung gibt es, ihr PDF wurde aber nie erzeugt (etwa nach einem Fehler im
+        # Nachlauf der Bestätigung): Der Betreiber muss es nachholen.
+        erg = abgelehnt("nicht_gefunden")
+        text = (
+            f"Zur Rechnung {r.nummer} gibt es kein archiviertes PDF. Der Kunde konnte sie im "
+            "Portal nicht abrufen."
+        )
+        erg.nach_commit.append(alarm("Rechnungs-PDF fehlt", text))
+        return erg
     # Einmal lesen und gegen pdf_sha256 prüfen; dieselben Bytes gehen (falls intakt) auch raus –
     # kein zweiter, ungeprüfter Lesevorgang derselben Datei.
     daten = rechnung_pdf.lese_geprueft(r)

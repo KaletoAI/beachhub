@@ -345,6 +345,45 @@ def test_verfallene_reservierung(angemeldet: TestClient, welt, db: Session) -> N
     assert "Zahlungsfrist ist abgelaufen" in angemeldet.get(f"/anfrage/{a.id}").text
 
 
+def test_stornierte_reservierung_eigener_text(angemeldet: TestClient, welt, db: Session) -> None:
+    a = _anfrage(db, angemeldet.konto_id)
+    bid = uuid.uuid4()
+    _antworte(db, a, status="reserviert", buchung_id=bid, checkout_url="/x")
+    storniert = buchung(B17, B18, status="storniert", id=str(bid), storno={"kostenfrei": True})
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[storniert]), version=2)
+    seite = angemeldet.get(f"/anfrage/{a.id}").text
+    assert "Die Reservierung wurde storniert" in seite
+    assert "Zahlungsfrist ist abgelaufen" not in seite
+
+
+def test_nach_unterzahlung_kein_zahlungslink(angemeldet: TestClient, welt, db: Session) -> None:
+    # Zahlung eingegangen, aber unter dem offenen Betrag: Die Buchung bleibt reserviert, das
+    # Konto-Dokument führt keinen Zahlungslink mehr – die Warteseite darf nicht zur Zahlung
+    # schicken und nicht weiter warten.
+    a = _anfrage(db, angemeldet.konto_id)
+    bid = uuid.uuid4()
+    _antworte(db, a, status="reserviert", buchung_id=bid, checkout_url="/test-zahlung/fake_x")
+    unterzahlt = buchung(B17, B18, status="reserviert", id=str(bid))
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[unterzahlt]), version=2)
+    r = angemeldet.get(f"/anfrage/{a.id}?weiter=1", follow_redirects=False)
+    assert r.status_code == 200
+    assert "Zahlung unvollständig – der Betreiber meldet sich" in r.text
+    assert "Zur Zahlung" not in r.text and "fake_x" not in r.text
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand?weiter=1").json()
+    assert stand["zustand"] == "abgelehnt" and stand["ziel"] is None
+
+
+def test_ablehnungsgrund_nicht_stornierbar_text(angemeldet: TestClient, welt, db: Session) -> None:
+    a = anfragen.stelle(
+        db,
+        typ="buchung_stornieren",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"buchung_id": str(uuid.uuid4())},
+    )
+    _antworte(db, a, status="abgelehnt", grund="nicht_stornierbar")
+    assert "nicht im Portal storniert werden" in angemeldet.get(f"/anfrage/{a.id}").text
+
+
 def test_bestaetigt_abgelehnt_fehler(angemeldet: TestClient, welt, db: Session) -> None:
     a = _anfrage(db, angemeldet.konto_id)
     _antworte(db, a, status="bestaetigt", buchung_id=uuid.uuid4())

@@ -65,6 +65,14 @@ class Buchung(UUIDMixin, ZeitstempelMixin, Base):
     def aktiv(self) -> bool:
         return self.status in self.AKTIVE_STATUS
 
+    @property
+    def im_portal_stornierbar(self) -> bool:
+        """Nur Portal-Buchungen: Nur bei ihnen weiß das System, dass sie vollständig bezahlt
+        sind (Zahlung beim Anbieter und/oder verrechnetes Guthaben), bevor sie bestätigt werden.
+        Betreiber-Buchungen werden außerhalb bezahlt, Dauerbuchungstermine nie einzeln – deren
+        Storno samt Gutschrift entscheidet der Betreiber."""
+        return self.quelle == "portal" and self.dauerbuchung_id is None
+
 
 class Dauerbuchung(UUIDMixin, ZeitstempelMixin, Base):
     __tablename__ = "dauerbuchung"

@@ -55,6 +55,8 @@ def buchungen_seite(
         reverse=True,
     )
     zahlung_urls = {b.id: _zahlungslink(b, jetzt) for b in kommende}
+    # Reserviert, aber ohne offene Zahlung: Es ist Geld eingegangen, nur zu wenig (Unterzahlung).
+    unvollstaendig = {b.id for b in kommende if b.status == "reserviert" and not b.checkout_url}
     return render(
         request,
         "buchungen.html",
@@ -63,6 +65,8 @@ def buchungen_seite(
         fruehere=fruehere,
         jetzt=jetzt,
         zahlung_urls=zahlung_urls,
+        unvollstaendig=unvollstaendig,
+        unvollstaendig_text=anfragen.UNVOLLSTAENDIG_TEXT,
         meldung=text,
     )
 
@@ -72,7 +76,7 @@ def _stornierbar(db: Session, konto: Konto, buchung_id: str) -> KontoBuchung | N
     if inhalt is None:
         return None
     b = next((x for x in inhalt.buchungen if x.id == buchung_id), None)
-    if b is None or b.status not in AKTIV or b.beginn <= uhr.jetzt():
+    if b is None or not b.stornierbar or b.status not in AKTIV or b.beginn <= uhr.jetzt():
         return None
     return b
 

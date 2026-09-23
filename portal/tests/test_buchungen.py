@@ -30,7 +30,13 @@ def test_liste_mit_pin_und_frueheren(angemeldet: TestClient, db: Session) -> Non
         konto(
             buchungen=[
                 _b(MORGEN, 19, pin="654321"),
-                _b(MORGEN, 21, status="reserviert"),
+                _b(
+                    MORGEN,
+                    21,
+                    status="reserviert",
+                    checkout_url="/test-zahlung/fake_z",
+                    reserviert_bis=kombiniere(date(2027, 11, 25), time(9, 45)),  # abgelaufen
+                ),
                 _b(FRUEHER, 19),
                 _b(MORGEN, 17, status="storniert", storno={"kostenfrei": True}),
             ]
@@ -60,6 +66,16 @@ def test_reservierung_mit_zahlungslink(angemeldet: TestClient, db: Session) -> N
     assert '<a class="knopf" href="/test-zahlung/fake_x">Jetzt bezahlen (bis 10:15)</a>' in seite
     assert "fake_y" not in seite
     assert "Zahlung ausstehend" in seite
+
+
+def test_zahlung_unvollstaendig_ohne_zahlungslink(angemeldet: TestClient, db: Session) -> None:
+    # Unterzahlung: Die Zahlung ist bezahlt, die Buchung bleibt reserviert, das Hauptsystem
+    # schickt keinen Zahlungslink mehr (keine offene Zahlung).
+    unterzahlt = _b(MORGEN, 19, status="reserviert")
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[unterzahlt]))
+    seite = angemeldet.get("/buchungen").text
+    assert "Zahlung unvollständig – der Betreiber meldet sich" in seite
+    assert "Jetzt bezahlen" not in seite and "Zahlung ausstehend" not in seite
 
 
 def test_meldung(angemeldet: TestClient, db: Session) -> None:
@@ -106,3 +122,22 @@ def test_stornieren_unbekannt_oder_vergangen(angemeldet: TestClient, db: Session
     )
     assert r.headers["location"] == "/buchungen"
     assert db.scalar(select(Anfrage)) is None
+
+
+def test_nicht_stornierbar_ohne_link_und_abgewiesen(angemeldet: TestClient, db: Session) -> None:
+    # Dauerbuchungstermine und Betreiber-Buchungen storniert nur der Betreiber.
+    dauer = _b(UEBERMORGEN, 19, stornierbar=False)
+    eigen = _b(UEBERMORGEN, 21)
+    speichere(db, "belegung", belegung())
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[dauer, eigen]))
+    seite = angemeldet.get("/buchungen").text
+    assert f"/buchungen/{eigen['id']}/stornieren" in seite
+    assert f"/buchungen/{dauer['id']}/stornieren" not in seite
+    assert angemeldet.get(f"/buchungen/{dauer['id']}/stornieren").status_code == 404
+    r = angemeldet.post(
+        f"/buchungen/{dauer['id']}/stornieren",
+        data={"csrf_token": angemeldet.csrf},
+        follow_redirects=False,
+    )
+    assert r.headers["location"] == "/buchungen"
+    assert db.scalar(select(Anfrage).where(Anfrage.typ == "buchung_stornieren")) is None

@@ -14,12 +14,14 @@
       <strong>{{ b.feld_name }}</strong> · {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr · {{ b.preis|euro }}<br>
       {% if b.status == "bestaetigt" %}
       Zahlencode für die Tür: <span class="pin">{{ b.pin or "–" }}</span>
+      {% elif b.id in unvollstaendig %}
+      <span class="badge warn">{{ unvollstaendig_text }}</span>
       {% elif zahlung_urls.get(b.id) %}
       <a class="knopf" href="{{ zahlung_urls[b.id] }}">Jetzt bezahlen (bis {{ b.reserviert_bis|uhrzeit }})</a>
       {% else %}
       <span class="badge warn">Zahlung ausstehend</span>
       {% endif %}
-      {% if b.beginn > jetzt %}<br><a href="/buchungen/{{ b.id }}/stornieren">Stornieren</a>{% endif %}
+      {% if b.stornierbar and b.beginn > jetzt %}<br><a href="/buchungen/{{ b.id }}/stornieren">Stornieren</a>{% endif %}
     </li>
     {% endfor %}
   </ul>

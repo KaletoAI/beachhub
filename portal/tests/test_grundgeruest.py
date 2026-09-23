@@ -39,8 +39,10 @@ def test_produktionsfehler() -> None:
         core_public_key="",
         cookie_secure=False,
     )
-    # base_url bleibt beim unsicheren Vorgabewert (http://127.0.0.1:8001) -> ein Fehler mehr.
-    assert len(schlecht.produktionsfehler) == 6
+    # base_url bleibt beim unsicheren Vorgabewert (http://127.0.0.1:8001) -> ein Fehler mehr,
+    # smtp_host bleibt leer (conftest) -> noch einer.
+    assert len(schlecht.produktionsfehler) == 7
+    assert "PORTAL_SMTP_HOST fehlt" in schlecht.produktionsfehler
     gut = Settings(
         app_env="production",
         secret_key="x" * 32,
@@ -49,6 +51,7 @@ def test_produktionsfehler() -> None:
         core_public_key="ab",
         cookie_secure=True,
         base_url="https://buchung.example.org",
+        smtp_host="mail.example.org",
     )
     assert gut.produktionsfehler == []
 
@@ -63,6 +66,7 @@ def test_produktionsfehler_base_url() -> None:
         kanal_token="t",
         core_public_key="ab",
         cookie_secure=True,
+        smtp_host="mail.example.org",
     )
     kein_https = Settings(**basis, base_url="http://buchung.example.org")
     assert any("https" in f for f in kein_https.produktionsfehler)
@@ -97,6 +101,7 @@ def test_pruefe_produktionsstart_verweigert_bei_produktionsfehlern() -> None:
         core_public_key="ab",
         cookie_secure=True,
         base_url="https://buchung.example.org",
+        smtp_host="mail.example.org",
     )
     pruefe_produktionsstart(gut)  # kein Fehler
 

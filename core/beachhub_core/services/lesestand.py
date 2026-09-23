@@ -188,6 +188,7 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
                 storno=schema.StornoInfo(kostenfrei=s.kostenfrei) if s else None,
                 checkout_url=offene_zahlung.checkout_url if offene_zahlung else None,
                 reserviert_bis=b.reserviert_bis if offene_zahlung else None,
+                stornierbar=b.im_portal_stornierbar,
             )
         )
     rechnungen = db.scalars(
@@ -220,7 +221,9 @@ def _inhalt(db: Session, name: str) -> dict[str, Any]:
 
 
 def publiziere(db: Session, name: str) -> schema.Dokument:
-    inhalt = _inhalt(db, name)
+    # Erst sperren, dann den Inhalt bauen: Ein paralleler Lauf wartet hier und liest danach den
+    # Stand nach dem Commit des ersten. Andersherum bekäme ein vor der Sperre gebauter, älterer
+    # Inhalt nach dem Warten die höhere Version.
     zeile = db.scalar(
         select(LesestandVersion).where(LesestandVersion.dokument == name).with_for_update()
     )
@@ -228,6 +231,7 @@ def publiziere(db: Session, name: str) -> schema.Dokument:
         zeile = LesestandVersion(dokument=name, version=0)
         db.add(zeile)
         db.flush()
+    inhalt = _inhalt(db, name)
     # max(bisherige Version + 1, Unixzeit in Millisekunden): Nach einer Wiederherstellung des
     # Hauptsystems aus einem Backup wäre der Zähler sonst niedriger als der Stand, den Portal/
     # Halle schon kennen, und beide verwürfen jede neue Version als version_alt (Ruling

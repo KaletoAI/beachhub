@@ -28,6 +28,35 @@ def test_briefkasten_speichert_ohne_pruefung(client: TestClient, db: Session) ->
     }
 
 
+def test_rohdaten_nach_beantwortung_geleert(client: TestClient, db: Session) -> None:
+    # Datenminimierung: Sobald das Hauptsystem geantwortet hat, braucht das Portal die Rohdaten
+    # des Anbieters nicht mehr – nicht erst nach der 30-Tage-Aufräumfrist löschen.
+    client.post(
+        "/zahlung/rueckmeldung/stripe",
+        content=b'{"id": "evt_1", "karte": "4242"}',
+        headers={"Stripe-Signature": "t=1,v1=abc"},
+    )
+    client.post("/zahlung/rueckmeldung/stripe", content=b'{"id": "evt_2"}')
+    erste, zweite = sorted(
+        db.scalars(select(WebhookEingang)).all(), key=lambda e: "evt_2" in e.rohdaten
+    )
+    antworten = [{"anfrage_id": str(erste.anfrage_id), "antwort": {"status": "ok"}}]
+    r = client.post(
+        "/core/antworten",
+        json={"antworten": antworten},
+        headers={"Authorization": "Bearer test-kanal-token"},
+    )
+    assert r.json() == {"ok": 1}
+    db.expire_all()
+    e1, e2 = db.get(WebhookEingang, erste.id), db.get(WebhookEingang, zweite.id)
+    assert e1.rohdaten == "" and e1.signatur_header is None
+    a1 = db.get(Anfrage, e1.anfrage_id)
+    assert a1.status == Anfrage.BEANTWORTET and a1.nutzlast_json == {"provider": "stripe"}
+    # Die noch unbeantwortete Rückmeldung bleibt unverändert.
+    assert e2.rohdaten == '{"id": "evt_2"}'
+    assert db.get(Anfrage, e2.anfrage_id).nutzlast_json["rohdaten"] == '{"id": "evt_2"}'
+
+
 def test_briefkasten_braucht_kein_csrf(angemeldet: TestClient) -> None:
     assert angemeldet.post("/zahlung/rueckmeldung/stripe", content=b"{}").status_code == 200
 

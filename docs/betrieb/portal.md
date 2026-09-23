@@ -98,7 +98,8 @@ Host-Verzeichnisses. Ohne den `chown`-Schritt oben kann die App weder Rechnungs-
 
 Mit `PORTAL_APP_ENV=production` verweigert das Portal den Start, solange Secret, Token,
 öffentlicher Schlüssel, `COOKIE_SECURE`, `BASE_URL` (muss `https://` sein und darf nicht auf
-`localhost`/`127.0.0.1` zeigen) oder die Testzahlung nicht stimmen. Das Hauptsystem verweigert den
+`localhost`/`127.0.0.1` zeigen), `SMTP_HOST` (ohne Mailserver kommt kein Anmeldecode an) oder die
+Testzahlung nicht stimmen. Das Hauptsystem verweigert den
 Start mit gesetzter `PORTAL_URL`, solange `ZAHLUNG_PROVIDER=fake` ist – der echte Anbieter (Stripe
 oder Mollie) folgt nach der Entscheidung Ⓞ-13.
 

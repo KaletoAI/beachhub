@@ -47,6 +47,10 @@ class Settings(BaseSettings):
             fehler.append("PORTAL_KANAL_TOKEN fehlt")
         if not self.core_public_key:
             fehler.append("PORTAL_CORE_PUBLIC_KEY fehlt")
+        # Ohne Mailserver kommt kein Anmeldecode an; im Produktivbetrieb gibt es keine
+        # Code-Anzeige auf der Seite als Ersatz.
+        if not self.smtp_host:
+            fehler.append("PORTAL_SMTP_HOST fehlt")
         if not self.cookie_secure:
             fehler.append("PORTAL_COOKIE_SECURE muss im Produktivbetrieb true sein")
         # base_url geht ohne mTLS in den Kunden-Browser (Rückkehr nach Zahlung, Links in Mails)

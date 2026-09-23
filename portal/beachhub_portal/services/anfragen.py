@@ -14,11 +14,11 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 from beachhub_shared import kanal
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.orm import Session
 
 from beachhub_portal import uhr
-from beachhub_portal.models import Anfrage, KanalKontakt, Konto
+from beachhub_portal.models import Anfrage, KanalKontakt, Konto, WebhookEingang
 from beachhub_portal.services import lesestand, rechnung_link, wecker
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,9 @@ HOECHSTENS = 50
 # Anfrage, oder eine erst vor Kurzem beantwortete (innerhalb dieses Fensters) – danach ist ein
 # neuer Versuch ein neuer Wunsch, kein Doppelklick mehr.
 DOPPELKLICK_FENSTER = timedelta(minutes=2)
+# Scheitert `konto_angelegt` im Hauptsystem (fehler/abgelehnt), bliebe konto.kunde_id sonst für
+# immer leer; `konto_nachholen` stellt die Anfrage höchstens so oft neu.
+KONTO_ERNEUT_NACH = timedelta(minutes=10)
 
 
 def bestehende(
@@ -108,6 +111,35 @@ def stelle(
         db.commit()
         wecker.wecke()
     return a
+
+
+def konto_nachholen(db: Session, konto: Konto, jetzt: datetime) -> None:
+    """Stellt `konto_angelegt` erneut, wenn das Konto nach /willkommen noch keinen Kunden hat,
+    keine solche Anfrage mehr offen/abgeholt ist und die letzte älter als KONTO_ERNEUT_NACH ist.
+    Die Konto-Zeile wird dabei gesperrt, damit parallele Seitenaufrufe nur eine Anfrage anlegen.
+    """
+    if konto.kunde_id is not None or not konto.anzeigename:
+        return
+    gesperrt = db.get(Konto, konto.id, with_for_update=True, populate_existing=True)
+    bisher = db.scalars(
+        select(Anfrage)
+        .where(Anfrage.konto_id == konto.id, Anfrage.typ == "konto_angelegt")
+        .order_by(Anfrage.erstellt_am.desc())
+    ).all()
+    if (
+        gesperrt is None
+        or gesperrt.kunde_id is not None
+        or any(a.status != Anfrage.BEANTWORTET for a in bisher)
+        or (bisher and jetzt - bisher[0].erstellt_am < KONTO_ERNEUT_NACH)
+    ):
+        db.commit()  # Sperre freigeben, auch wenn nichts geschrieben wurde.
+        return
+    stelle(
+        db,
+        typ="konto_angelegt",
+        konto_id=gesperrt.id,
+        nutzlast={"email": gesperrt.email, "anzeigename": gesperrt.anzeigename},
+    )
 
 
 def markiere_kontakt(db: Session, jetzt: datetime) -> None:
@@ -212,6 +244,15 @@ def beantworte(db: Session, anfrage_id: uuid.UUID, antwort: kanal.Antwort, jetzt
                                 "Rechnungs-PDF für Anfrage %s konnte nicht gespeichert werden", a.id
                             )
                             daten = {"status": "fehler"}
+    if a.typ == "zahlung_eingegangen":
+        # Datenminimierung: Nach der Antwort braucht das Portal die Rohdaten des Anbieters nicht
+        # mehr (sie können Zahlungsdaten enthalten) – weder in der Anfrage noch im Briefkasten.
+        a.nutzlast_json = {"provider": a.nutzlast_json.get("provider", "")}
+        db.execute(
+            update(WebhookEingang)
+            .where(WebhookEingang.anfrage_id == a.id)
+            .values(rohdaten="", signatur_header=None)
+        )
     a.status = Anfrage.BEANTWORTET
     a.antwort_json = daten
     a.beantwortet_am = jetzt
@@ -236,11 +277,17 @@ GRUENDE: dict[str, str] = {
     "konto_unbekannt": "Dein Konto wird noch eingerichtet. Bitte versuche es gleich noch einmal.",
     "nicht_gefunden": "Das haben wir nicht gefunden.",
     "zu_spaet": "Der Termin hat schon begonnen und kann nicht mehr storniert werden.",
+    "nicht_stornierbar": (
+        "Diese Buchung kann nicht im Portal storniert werden. Bitte wende dich an die Halle."
+    ),
     # Controller-Hinweis Task 12: core/services/anfragen.py meldet ungültige/unvollständige
     # Anfragen (z. B. fehlende konto_id) mit diesem Grund; der Fallbacktext wäre sonst zu
     # unspezifisch für einen tatsächlich vom Hauptsystem gesendeten Ablehnungsgrund.
     "ungueltig": "Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut.",
 }
+# Unterzahlung (A-9): Die Zahlung ist eingegangen, deckt aber den offenen Betrag nicht; der
+# Betrag wurde Guthaben, der Betreiber ist informiert. Es gibt keine offene Zahlung mehr.
+UNVOLLSTAENDIG_TEXT = "Zahlung unvollständig – der Betreiber meldet sich bei dir."
 RECHNUNG_ABGERUFEN_TEXT = (
     "Die Rechnung wurde heruntergeladen. Bei Bedarf kannst du sie unter „Rechnungen“ erneut "
     "anfordern."
@@ -303,10 +350,15 @@ def _nach_zahlung(
     kb = next((b for b in inhalt.buchungen if b.id == buchung_id), None) if inhalt else None
     if kb is not None and kb.status == "bestaetigt":
         return Stand("fertig", MELDUNGEN["bestaetigt"], ziel="/buchungen?meldung=bestaetigt")
-    if kb is not None and kb.status in ("verfallen", "storniert"):
+    if kb is not None and kb.status == "verfallen":
         return Stand(
             "abgelehnt", "Die Zahlungsfrist ist abgelaufen; der Termin wurde wieder freigegeben."
         )
+    if kb is not None and kb.status == "storniert":
+        return Stand("abgelehnt", "Die Reservierung wurde storniert; der Termin ist wieder frei.")
+    if kb is not None and kb.status == "reserviert" and kb.checkout_url is None:
+        # Das Konto-Dokument führt den Zahlungslink nur, solange eine Zahlung offen ist.
+        return Stand("abgelehnt", UNVOLLSTAENDIG_TEXT)
     url = antwort.get("checkout_url")
     if not gueltige_checkout_url(url):
         return Stand("fehler", FEHLER_TEXT)
