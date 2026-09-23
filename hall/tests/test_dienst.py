@@ -1,6 +1,7 @@
 import asyncio
 import os
 import signal
+import time
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,7 @@ from beachhub_hall.aufgaben import takt
 from beachhub_hall.clock import SimulierteUhr
 from beachhub_hall.config import KonfigFehler, Umgebung, lade_zuordnung
 from beachhub_hall.dienst import Dienst
+from beachhub_hall.ha import HaClient
 from beachhub_hall.health import health_app
 from beachhub_hall.pin import ist_master
 from sqlalchemy.orm import Session, sessionmaker
@@ -19,7 +21,16 @@ from sqlalchemy.orm import Session, sessionmaker
 from tests.core_simulator import CoreSimulator
 from tests.dienst_hilfen import baue_dienst
 from tests.ha_simulator import HaSimulator
-from tests.hilfen import F1, MASTER_HASH, TOML_BEISPIEL, baue_plan, buchung, speichere_plan, t
+from tests.hilfen import (
+    F1,
+    MASTER_HASH,
+    TOML_BEISPIEL,
+    FakeSchlaf,
+    baue_plan,
+    buchung,
+    speichere_plan,
+    t,
+)
 
 
 async def test_takt_laeuft_weiter_nach_fehler_und_wacht_auf() -> None:
@@ -302,3 +313,54 @@ async def test_schliesse_reihenfolge(
 
     await d.schliesse()
     assert reihenfolge == ["zuhoerer", "tuer", "ha", "core"]
+
+
+async def test_laufen_reicht_schlafen_an_zuhoerer_waechter_durch(
+    sitzungen: sessionmaker[Session], uhr: SimulierteUhr, ha: HaSimulator, tmp_path: Path
+) -> None:
+    """`laufen()` startet den Zuhörer-Wächter (`_dauerhaft`) mit demselben injizierbaren
+    `schlafen` wie Tür/PIN-Prüfung – sonst würde ein dauerhaft scheiternder Zuhörer über echtes
+    `asyncio.sleep` Sekunden real warten, statt (in Tests, mit `FakeSchlaf`) sofort weiterzulaufen
+    (Ruling Task 11 Fix-Runde 2)."""
+    toml = tmp_path / "hall.toml"
+    toml.write_text(TOML_BEISPIEL, encoding="utf-8")
+    core = CoreSimulator()
+    schlaf = FakeSchlaf()
+    d = Dienst(
+        oeffentlich_hex=core.oeffentlich,
+        zuordnung=lade_zuordnung(toml),
+        sitzungen=sitzungen,
+        uhr=uhr,
+        ha=HaClient(ha.url, HaSimulator.TOKEN),
+        core=core.client(),
+        schlafen=schlaf,
+    )
+    aufrufe = 0
+    haengt = asyncio.Event()
+
+    async def kaputter_zuhoerer() -> None:
+        nonlocal aufrufe
+        aufrufe += 1
+        if aufrufe == 1:
+            raise RuntimeError("Zuhörer dauerhaft kaputt")
+        await haengt.wait()  # zweiter Versuch "läuft" – Test kann jetzt canceln
+
+    d.zuhoerer.laufen = kaputter_zuhoerer  # type: ignore[method-assign]
+    start = time.monotonic()
+    aufgabe = asyncio.create_task(d.laufen())
+    try:
+
+        async def zweiter_versuch() -> None:
+            while aufrufe < 2:
+                await asyncio.sleep(0.01)
+
+        await asyncio.wait_for(zweiter_versuch(), timeout=5)
+    finally:
+        aufgabe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await aufgabe
+    dauer = time.monotonic() - start
+    await d.schliesse()
+    assert schlaf.aufrufe == [1.0]  # Backoff lief über die injizierte FakeSchlaf
+    # Mit echtem asyncio.sleep(1.0) (der Fehler, den dieser Test aufdeckt) läge dauer bei >= 1 s.
+    assert dauer < 0.5

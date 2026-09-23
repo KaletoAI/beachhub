@@ -88,6 +88,10 @@ class Dienst:
         self.uhr = uhr
         self.ha = ha
         self.core = core
+        # Für den Zuhörer-Wächter in laufen() (_dauerhaft): dieselbe injizierbare Schlaffunktion
+        # wie Tür/PIN-Prüfung, damit Tests (FakeSchlaf) auch dessen Backoff steuern, statt real
+        # zu warten.
+        self._schlafen = schlafen
         self.lage = Lage()
         self.ereignisse = Ereignisse(sitzungen, uhr)
         self.steuerung = Steuerung(sitzungen, uhr, zuordnung, ha, self.ereignisse, self.lage)
@@ -153,7 +157,13 @@ class Dienst:
                 takt("steuerung", self.steuerung.einmal, 30, self.steuerung.wecker)
             ),
             asyncio.create_task(takt("plan", self.plan_abruf.einmal, 300, self.plan_abruf.wecker)),
-            asyncio.create_task(_dauerhaft("zuhoerer", self.zuhoerer.laufen)),
+            # `jetzt` bleibt bei der Vorgabe time.monotonic: self.uhr ist die (in Tests
+            # simulierte) Plan-Uhr, die z. B. im Offline-Test in Sprüngen von 30 min bewegt
+            # wird – als Maß für die reale Laufzeit von zuhoerer.laufen() vor einem Fehlschlag
+            # (Backoff-Reset) wäre sie irreführend.
+            asyncio.create_task(
+                _dauerhaft("zuhoerer", self.zuhoerer.laufen, schlafen=self._schlafen)
+            ),
             asyncio.create_task(takt("melder", self.melder.einmal, 60, self.ereignisse.neu)),
             asyncio.create_task(
                 takt("status_ha", self.status_ha.einmal, 60, self.status_ha.wecker)
