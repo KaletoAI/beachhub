@@ -9,3 +9,5 @@ core/.env
 *.egg-info/
 .mypy_cache/
 .ruff_cache/
+.claude/worktrees/
+.claude/settings.local.json
