@@ -35,6 +35,11 @@ def uebernehme(db: Session, dok: Dokument, jetzt: datetime) -> Grund | None:
     zeile.signatur = dok.signatur
     zeile.inhalt_json = dok.inhalt
     zeile.empfangen_am = jetzt
+    # Flush statt nur committen am Ende der Route: Kommt derselbe Dokumentname zweimal in einer
+    # Sendung vor (oder träfe ein zweiter POST gleichzeitig auf dieselbe Zeile), sähe das
+    # folgende db.get() ohne Flush weder die neue Zeile noch den neuen Versionsstand und würde
+    # dieselbe Zeile ein zweites Mal einfügen (IntegrityError) bzw. eine veraltete Version lesen.
+    db.flush()
     return None
 
 

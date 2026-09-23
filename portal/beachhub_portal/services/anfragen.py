@@ -26,12 +26,15 @@ def stelle(
     schema = kanal.NUTZLAST.get(typ)
     if schema is None:
         raise ValueError(f"Unbekannter Anfragetyp: {typ}")
-    schema.model_validate(nutzlast)  # das Portal schickt nur Nutzlasten, die der Vertrag kennt
+    # Validiert UND das validierte, JSON-taugliche Ergebnis speichern (nicht die rohe Nutzlast):
+    # rohe Werte können UUID/Decimal/datetime enthalten, die die JSONB-Spalte nicht serialisieren
+    # kann; model_dump(mode="json") wandelt sie in Strings.
+    validiert = schema.model_validate(nutzlast).model_dump(mode="json")
     a = Anfrage(
         id=uuid.uuid4(),
         typ=typ,
         konto_id=konto_id,
-        nutzlast_json=nutzlast,
+        nutzlast_json=validiert,
         erstellt_am=uhr.jetzt(),
         status=Anfrage.OFFEN,
     )
@@ -39,6 +42,14 @@ def stelle(
     db.commit()
     wecker.wecke()
     return a
+
+
+def markiere_kontakt(db: Session, jetzt: datetime) -> None:
+    """Merkt sich, wann das Hauptsystem zuletzt einen Long-Poll gestartet hat. Wird genau einmal
+    je HTTP-Aufruf von `GET /core/anfragen` gerufen (nicht in jedem Sekunden-Durchlauf der
+    Warteschleife), sonst würde ein 25-Sekunden-Poll die Zeile bis zu 25-mal schreiben."""
+    db.merge(KanalKontakt(id=1, letzter_abruf=jetzt))
+    db.commit()
 
 
 def abholen(db: Session, jetzt: datetime) -> list[kanal.Anfrage]:
@@ -54,7 +65,9 @@ def abholen(db: Session, jetzt: datetime) -> list[kanal.Anfrage]:
                     ),
                 )
             )
-            .order_by(Anfrage.erstellt_am)
+            # Zweiter Schlüssel `id`, damit Anfragen mit identischem erstellt_am (eingefrorene
+            # Uhr, Tests) trotzdem deterministisch sortiert werden.
+            .order_by(Anfrage.erstellt_am, Anfrage.id)
             .limit(HOECHSTENS)
             .with_for_update(skip_locked=True)
         ).all()
@@ -80,7 +93,6 @@ def abholen(db: Session, jetzt: datetime) -> list[kanal.Anfrage]:
                 erstellt_am=z.erstellt_am,
             )
         )
-    db.merge(KanalKontakt(id=1, letzter_abruf=jetzt))
     db.commit()
     return liste
 

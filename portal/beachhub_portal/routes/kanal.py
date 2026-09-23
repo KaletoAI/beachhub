@@ -37,12 +37,25 @@ def _abholen() -> list[kanal.Anfrage]:
         return anfragen.abholen(db, uhr.jetzt())
 
 
+def _markiere_kontakt() -> None:
+    with SessionLocal() as db:
+        anfragen.markiere_kontakt(db, uhr.jetzt())
+
+
 @router.get("/anfragen")
-async def anfragen_abholen(warten: int = Query(25, ge=0, le=30)) -> dict[str, Any]:
+async def anfragen_abholen(
+    request: Request, warten: int = Query(25, ge=0, le=30)
+) -> dict[str, Any]:
     """Long-Poll: sofort antworten, wenn Anfragen da sind; sonst bis `warten` Sekunden warten.
-    Die Datenbank wird im Threadpool abgefragt, damit der Event-Loop frei bleibt."""
+    Die Datenbank wird im Threadpool abgefragt, damit der Event-Loop frei bleibt. Der Kanal-
+    Kontakt wird genau einmal je Aufruf geschrieben (nicht je Sekunden-Durchlauf), ein Abbruch
+    der Verbindung (z. B. Neustart des Hauptsystems) wird vor jedem erneuten Abholen erkannt,
+    damit keine Anfrage fälschlich als abgeholt markiert wird, obwohl niemand mehr zuhört."""
+    await run_in_threadpool(_markiere_kontakt)
     ende = time.monotonic() + warten
     while True:
+        if await request.is_disconnected():
+            return kanal.AnfrageListe(anfragen=[]).model_dump(mode="json")
         stand = wecker.stand()
         liste = await run_in_threadpool(_abholen)
         if liste or time.monotonic() >= ende:

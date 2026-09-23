@@ -1,14 +1,19 @@
+import asyncio
 import threading
 import time
 import uuid
+from datetime import datetime, timedelta
+from typing import Any
 
 import pytest
 from beachhub_portal.config import settings
 from beachhub_portal.database import SessionLocal
 from beachhub_portal.models import Anfrage, KanalKontakt, Konto, Lesestand
+from beachhub_portal.routes import kanal as kanal_routes
 from beachhub_portal.services import anfragen, lesestand
+from beachhub_shared.kanal import BuchungAnfragen
 from fastapi.testclient import TestClient
-from hilfen import KUNDE_ID, belegung, konto, signiert, tarife
+from hilfen import FELD_ID, JETZT, KUNDE_ID, belegung, konto, signiert, tarife
 from sqlalchemy.orm import Session
 
 KOPF = {"Authorization": "Bearer test-kanal-token"}
@@ -27,10 +32,21 @@ def _stelle(typ: str = "konto_geaendert", konto_id: uuid.UUID | None = None, **n
         )
 
 
-def test_ohne_oder_mit_falschem_token_401(client: TestClient) -> None:
-    assert client.get("/core/anfragen?warten=0").status_code == 401
+@pytest.mark.parametrize(
+    ("methode", "pfad", "body"),
+    [
+        ("GET", "/core/anfragen?warten=0", None),
+        ("POST", "/core/antworten", {"antworten": []}),
+        ("POST", "/core/lesestand", {"dokumente": []}),
+        ("GET", "/core/lesestand/versionen", None),
+    ],
+)
+def test_ohne_oder_mit_falschem_token_401(
+    client: TestClient, methode: str, pfad: str, body: dict[str, Any] | None
+) -> None:
+    assert client.request(methode, pfad, json=body).status_code == 401
     falsch = {"Authorization": "Bearer falsch"}
-    assert client.get("/core/anfragen?warten=0", headers=falsch).status_code == 401
+    assert client.request(methode, pfad, json=body, headers=falsch).status_code == 401
 
 
 def test_ohne_eingerichteten_kanal_404(
@@ -45,6 +61,25 @@ def test_stelle_prueft_nutzlast(db: Session) -> None:
         anfragen.stelle(db, typ="gibtsnicht", konto_id=None, nutzlast={})
     with pytest.raises(ValueError):
         anfragen.stelle(db, typ="buchung_anfragen", konto_id=None, nutzlast={"feld_id": "x"})
+
+
+def test_stelle_speichert_validierte_nutzlast(db: Session) -> None:
+    """Gespeichert wird das validierte, JSON-taugliche Ergebnis, nicht die rohe Nutzlast: UUID-
+    und Datetime-Werte lassen sich sonst nicht in die JSONB-Spalte schreiben."""
+    beginn = JETZT
+    ende = JETZT + timedelta(hours=1)
+    a = anfragen.stelle(
+        db,
+        typ="buchung_anfragen",
+        konto_id=None,
+        nutzlast={"feld_id": uuid.UUID(FELD_ID), "beginn": beginn, "ende": ende},
+    )
+    db.expire_all()
+    zeile = db.get(Anfrage, a.id)
+    geladen = BuchungAnfragen.model_validate(zeile.nutzlast_json)
+    assert geladen.feld_id == uuid.UUID(FELD_ID)
+    assert geladen.beginn == beginn
+    assert geladen.ende == ende
 
 
 def test_abholen_aelteste_zuerst_und_nur_einmal(kanal_client: TestClient, uhr_steht) -> None:
@@ -66,12 +101,70 @@ def test_unbeantwortete_nach_60_s_erneut(kanal_client: TestClient, uhr_steht) ->
     assert [x["anfrage_id"] for x in liste] == [str(a.id)]
 
 
+def test_abholen_gleiche_zeit_sortiert_nach_id(kanal_client: TestClient, uhr_steht) -> None:
+    """Zweiter Sortierschlüssel `id`: Ohne ihn wäre die Reihenfolge bei gleichem erstellt_am
+    (eingefrorene Uhr) vom Ausführungsplan der Datenbank abhängig statt deterministisch."""
+    erste = _stelle()
+    zweite = _stelle()
+    liste = kanal_client.get("/core/anfragen?warten=0").json()["anfragen"]
+    erwartet = sorted([str(erste.id), str(zweite.id)])
+    assert [a["anfrage_id"] for a in liste] == erwartet
+
+
+def test_abholen_hoechstens_50(kanal_client: TestClient, uhr_steht) -> None:
+    ids = []
+    for _ in range(51):
+        ids.append(_stelle().id)
+        uhr_steht.weiter(seconds=1)
+    erste_runde = kanal_client.get("/core/anfragen?warten=0").json()["anfragen"]
+    assert len(erste_runde) == 50
+    assert [a["anfrage_id"] for a in erste_runde] == [str(i) for i in ids[:50]]
+    zweite_runde = kanal_client.get("/core/anfragen?warten=0").json()["anfragen"]
+    assert [a["anfrage_id"] for a in zweite_runde] == [str(ids[50])]
+
+
+class _AbgebrochenerRequest:
+    """Fälschung von fastapi.Request für den Unit-Test des Verbindungsabbruchs: Der TestClient
+    bietet keine Möglichkeit, eine Verbindung während eines laufenden Long-Polls zu kappen."""
+
+    async def is_disconnected(self) -> bool:
+        return True
+
+
+def test_long_poll_bricht_bei_verbindungsabbruch_ab(db: Session) -> None:
+    a = _stelle()
+    ergebnis = asyncio.run(
+        kanal_routes.anfragen_abholen(_AbgebrochenerRequest(), warten=5)  # type: ignore[arg-type]
+    )
+    assert ergebnis == {"anfragen": []}
+    assert db.get(Anfrage, a.id).status == Anfrage.OFFEN
+
+
+def test_long_poll_schreibt_kontakt_nur_einmal(
+    kanal_client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    aufrufe: list[datetime] = []
+    original = anfragen.markiere_kontakt
+
+    def _spion(db: Session, jetzt: datetime) -> None:
+        aufrufe.append(jetzt)
+        original(db, jetzt)
+
+    monkeypatch.setattr(anfragen, "markiere_kontakt", _spion)
+    kanal_client.get("/core/anfragen?warten=2")
+    assert len(aufrufe) == 1
+
+
 def test_long_poll_wacht_bei_neuer_anfrage_auf(kanal_client: TestClient) -> None:
-    threading.Timer(0.3, _stelle).start()
-    beginn = time.monotonic()
-    r = kanal_client.get("/core/anfragen?warten=5")
-    assert len(r.json()["anfragen"]) == 1
-    assert time.monotonic() - beginn < 2
+    timer = threading.Timer(0.3, _stelle)
+    timer.start()
+    try:
+        beginn = time.monotonic()
+        r = kanal_client.get("/core/anfragen?warten=5")
+        assert len(r.json()["anfragen"]) == 1
+        assert time.monotonic() - beginn < 2
+    finally:
+        timer.join()
 
 
 def test_long_poll_ohne_anfrage_wartet_und_liefert_leer(kanal_client: TestClient) -> None:
@@ -143,6 +236,24 @@ def test_lesestand_falsche_signatur_422(kanal_client: TestClient, db: Session) -
     assert r.json()["verworfen"] == [{"dokument": "belegung", "grund": "signatur"}]
     assert r.json()["uebernommen"] == ["tarife"]
     assert lesestand.belegung(db) is None
+    assert lesestand.tarife(db) is not None
+
+
+def test_lesestand_doppelter_dokumentname_in_einer_sendung(
+    kanal_client: TestClient, db: Session
+) -> None:
+    """Ohne db.flush() nach dem Einfügen sieht der zweite Durchlauf der Schleife die erste,
+    noch nicht geflushte Zeile nicht und versucht, denselben Primärschlüssel erneut anzulegen
+    (IntegrityError, 500 statt einer geordneten Antwort)."""
+    dokumente = [
+        signiert("belegung", 1, belegung(fenster_tage=7)),
+        signiert("belegung", 2, belegung()),
+    ]
+    r = kanal_client.post("/core/lesestand", json={"dokumente": dokumente})
+    assert r.status_code == 200
+    assert r.json()["uebernommen"] == ["belegung", "belegung"]
+    assert lesestand.belegung(db).fenster_tage == 14
+    assert kanal_client.get("/core/lesestand/versionen").json() == {"belegung": 2}
 
 
 def test_lesestand_nur_erlaubte_dokumente(kanal_client: TestClient, db: Session) -> None:
