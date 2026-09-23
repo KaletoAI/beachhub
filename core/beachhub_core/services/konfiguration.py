@@ -18,16 +18,28 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "ust_satz": (Decimal, Decimal("19.00")),
     "rechnung_tag_im_folgemonat": (int, 3),
     "rechnung_zahlungsziel_tage": (int, 14),
-    "heiz_vorlauf_minuten": (int, 60),
+    "heiz_vorlauf_minuten": (int, 30),
     "licht_vorlauf_minuten": (int, 5),
     "licht_nachlauf_minuten": (int, 5),
     "zutritt_vorlauf_minuten": (int, 15),
-    "spiel_temperatur": (Decimal, Decimal("16.0")),
-    "grund_temperatur": (Decimal, Decimal("8.0")),
+    "praesenz_alarm_minuten": (int, 10),
+    "spiel_temperatur": (Decimal, Decimal("18.0")),
+    "grund_temperatur": (Decimal, Decimal("0.0")),
     "antwort_hinweis_sekunden": (int, 120),
     "pin_laenge": (int, 6),
     "portal_kundengruppe": (str, ""),
 }
+
+# Werte, die in den Plan der Halle eingehen (shared.hallenplan.PlanKonfig).
+HALLEN_KONFIG: tuple[str, ...] = (
+    "heiz_vorlauf_minuten",
+    "spiel_temperatur",
+    "grund_temperatur",
+    "licht_vorlauf_minuten",
+    "licht_nachlauf_minuten",
+    "zutritt_vorlauf_minuten",
+    "praesenz_alarm_minuten",
+)
 
 _TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool"}
 
@@ -92,7 +104,10 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
     ),
     "spiel_temperatur": Beschreibung("Halle", "Spieltemperatur", "Grad"),
     "grund_temperatur": Beschreibung(
-        "Halle", "Grundtemperatur", "Grad", "Temperatur außerhalb der Buchungen."
+        "Halle",
+        "Grundtemperatur",
+        "Grad",
+        "Temperatur außerhalb der Buchungen. 0 °C muss am Heizgerät dem Frostschutz entsprechen.",
     ),
     "licht_vorlauf_minuten": Beschreibung("Halle", "Licht an vor Beginn", "Minuten"),
     "licht_nachlauf_minuten": Beschreibung("Halle", "Licht aus nach Ende", "Minuten"),
@@ -101,6 +116,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Zahlencode gültig ab",
         "Minuten vor Beginn",
         "Bis zum Ende der Buchung bleibt der Code gültig.",
+    ),
+    "praesenz_alarm_minuten": Beschreibung(
+        "Halle",
+        "Alarm bei Anwesenheit ohne Buchung",
+        "Minuten",
+        "Meldet ein Sensor so lange Anwesenheit auf einem Feld ohne laufende Buchung, "
+        "bekommen Sie eine E-Mail.",
     ),
     "antwort_hinweis_sekunden": Beschreibung(
         "Portal und Zugang",
@@ -180,3 +202,7 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         from beachhub_core.services import lesestand
 
         lesestand.markiere_geaendert(db, "belegung")
+    if schluessel in HALLEN_KONFIG:
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_geaendert(db, "hallenplan")

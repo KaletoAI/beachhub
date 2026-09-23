@@ -125,13 +125,13 @@ def test_aenderungen_markieren_und_verarbeiten(db: Session, welt) -> None:
     )
     db.commit()
     markiert = {v.dokument for v in db.query(LesestandVersion).filter_by(geaendert=True)}
-    assert markiert == {"belegung", f"konto:{a.id}"}
+    assert markiert == {"belegung", "hallenplan", f"konto:{a.id}"}
     assert sorted(lesestand.verarbeite_geaenderte(db)) == sorted(markiert)
     db.commit()
     assert db.query(LesestandVersion).filter_by(geaendert=True).count() == 0
     storno.storniere(db, bu, durch="kunde")
     db.commit()
-    assert db.query(LesestandVersion).filter_by(geaendert=True).count() == 2
+    assert db.query(LesestandVersion).filter_by(geaendert=True).count() == 3
 
 
 def test_lade_und_pruefe_roundtrip(db: Session, welt) -> None:
@@ -146,6 +146,6 @@ def test_lade_und_pruefe_roundtrip(db: Session, welt) -> None:
 def test_verarbeite_geaenderte_ueberspringt_fehlerhaftes_dokument(db: Session, welt) -> None:
     lesestand.markiere_geaendert(db, "konto:not-a-uuid", "belegung")
     db.commit()
-    assert lesestand.verarbeite_geaenderte(db) == ["belegung"]
+    assert sorted(lesestand.verarbeite_geaenderte(db)) == ["belegung", "hallenplan"]
     assert Path(settings.data_dir, "lesestand", "belegung.json").exists()
     assert db.get(LesestandVersion, "konto:not-a-uuid") is None

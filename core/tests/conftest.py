@@ -38,6 +38,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from sqlalchemy.orm import Session  # noqa: E402
 
+# Fixture `welt` (Task 13/14/16 rund um den Hallenplan): einmal in core/tests/hilfen_halle.py,
+# hier für alle Testmodule registriert statt in jedem einzeln importiert oder dupliziert.
+pytest_plugins = ["hilfen_halle"]
+
 
 @pytest.fixture(autouse=True)
 def frisches_schema() -> Iterator[None]:

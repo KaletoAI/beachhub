@@ -10,7 +10,7 @@ import httpx
 import pytest
 from beachhub_core import kanal
 from beachhub_core.config import settings
-from beachhub_core.models import Kunde, Kundengruppe, LesestandVersion
+from beachhub_core.models import Kunde, Kundengruppe
 from beachhub_core.services import anfragen, kunden, lesestand
 from beachhub_shared import kanal as vertrag
 from sqlalchemy import select
@@ -195,18 +195,13 @@ def test_verteilen_gleichzeitig_kein_wettlauf(
 
 
 def test_verteilen_nur_portal_dokumente(db: Session, welt, portal: FakePortal, k) -> None:
-    # "hallenplan" ist ein echtes, fälliges Dokument (eigene LesestandVersion-Zeile + Datei),
-    # aber nicht in vertrag.PORTAL_DOKUMENTE – verteilen() muss es trotzdem draußen lassen.
+    # Jede Änderung von "belegung" markiert seit Task 13 automatisch auch "hallenplan" mit
+    # (lesestand.markiere_geaendert) – ein echtes, fälliges Dokument mit eigener
+    # LesestandVersion-Zeile und Datei, aber nicht in vertrag.PORTAL_DOKUMENTE. verteilen()
+    # muss es trotzdem draußen lassen.
     lesestand.markiere_geaendert(db, "belegung")
     db.commit()
     lesestand.verarbeite_geaenderte(db)
-    beleg = lesestand.lade("belegung")
-    hallenplan = beleg.model_copy(update={"dokument": "hallenplan"})
-    (settings.data_dir / "lesestand" / "hallenplan.json").write_text(
-        hallenplan.model_dump_json(), encoding="utf-8"
-    )
-    db.add(LesestandVersion(dokument="hallenplan", version=hallenplan.version, geaendert=False))
-    db.commit()
     assert k.verteilen() == 1
     assert [d["dokument"] for d in portal.dokumente] == ["belegung"]
 
