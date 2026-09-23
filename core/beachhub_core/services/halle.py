@@ -95,9 +95,7 @@ def _zeit(t: datetime) -> str:
     return lokal(t).strftime("%d.%m.%Y %H:%M")
 
 
-def speichere_ereignisse(
-    db: Session, lieferung: EreignisLieferung, jetzt: datetime
-) -> tuple[int, list[Ereignis]]:
+def speichere_ereignisse(db: Session, lieferung: EreignisLieferung) -> tuple[int, list[Ereignis]]:
     # Je Dienst-ID genau eine Zeile mit der zuletzt bestätigten seq (Upsert, falls neu) – dann
     # sperren (SELECT … FOR UPDATE). Das serialisiert parallele Lieferungen derselben Dienst-ID:
     # eine zweite, gleichzeitige Lieferung wartet hier, bis die erste committet hat, und sieht

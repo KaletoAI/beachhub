@@ -106,6 +106,30 @@ def test_ereignisse_idempotent_je_dienst(client: TestClient, db: Session, welt) 
     assert leer.json()["bestaetigt_bis"] == 3
 
 
+def test_ereignis_created_at_nutzt_echte_uhr_trotz_datums_override(
+    client: TestClient, db: Session
+) -> None:
+    """`Ereignis.created_at`/`updated_at` müssen mit der echten Uhr gesetzt werden, nicht mit
+    `clock.now(db)` (vom Admin für Tests/Abnahme überschreibbar) – sonst verfälscht ein
+    Datums-Override, wann ein Ereignis tatsächlich empfangen wurde (Ruling zu Task 14)."""
+    clock.set_override(db, date(2030, 1, 1))
+    db.commit()
+    try:
+        jetzt = clock.now(db)
+        assert jetzt.year == 2030  # Override wirkt wie erwartet
+        r = client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 1))
+        assert r.status_code == 200
+        ereignis = db.query(Ereignis).filter(Ereignis.halle_seq == 1).one()
+        db.refresh(ereignis)
+        abstand = abs((datetime.now(UTC) - ereignis.created_at).total_seconds())
+        assert abstand < 60
+        assert ereignis.updated_at == ereignis.created_at
+        assert ereignis.created_at.year != 2030
+    finally:
+        clock.set_override(db, None)
+        db.commit()
+
+
 def test_ereignisse_luecke_haelt_bestaetigt_bis_zurueck(
     client: TestClient, db: Session, welt
 ) -> None:
@@ -188,15 +212,13 @@ def test_sperre_blockiert_zweite_lieferung_bis_zum_commit(welt) -> None:
 
     db1, db2 = SessionLocal(), SessionLocal()
     try:
-        bis1, _ = halle.speichere_ereignisse(
-            db1, lieferung1, jetzt
-        )  # nicht committet: hält die Sperre
+        bis1, _ = halle.speichere_ereignisse(db1, lieferung1)  # nicht committet: hält die Sperre
         assert bis1 == 1
 
         ergebnis: list[int] = []
 
         def rufe2() -> None:
-            bis2, _ = halle.speichere_ereignisse(db2, lieferung2, jetzt)
+            bis2, _ = halle.speichere_ereignisse(db2, lieferung2)
             ergebnis.append(bis2)
 
         t = threading.Thread(target=rufe2)

@@ -54,7 +54,7 @@ def ereignisse(
     lieferung: EreignisLieferung, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
 ) -> EreignisAntwort:
     jetzt = clock.now(db)
-    bis, neu = halle.speichere_ereignisse(db, lieferung, jetzt)
+    bis, neu = halle.speichere_ereignisse(db, lieferung)
     entwarnung = halle.kontakt(db, jetzt, lieferung.status)
     mails = halle.alarm_mails(db, neu, jetzt)
     antwort = EreignisAntwort(
