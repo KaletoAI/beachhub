@@ -27,6 +27,10 @@ class HaSimulator:
         self.aufrufe: list[tuple[str, str, dict[str, Any]]] = []
         self.geschrieben: dict[str, dict[str, Any]] = {}
         self.fehler_bei_diensten = False
+        # Lässt genau die nächsten N Dienstaufrufe scheitern (unabhängig von
+        # fehler_bei_diensten), danach läuft der Simulator wieder normal – für Tests von
+        # Wiederholungslogik (z. B. „scheitert zweimal, dritter Versuch klappt“).
+        self.fehler_verbleibend = 0
         self.verbindungen_gesamt = 0
         self._abos: dict[web.WebSocketResponse, dict[int, str | None]] = {}
         self._server: TestServer | None = None
@@ -107,7 +111,11 @@ class HaSimulator:
         domain, service = request.match_info["domain"], request.match_info["service"]
         daten = await request.json()
         self.aufrufe.append((domain, service, daten))
-        if self.fehler_bei_diensten:
+        fehlschlagen = self.fehler_bei_diensten
+        if self.fehler_verbleibend > 0:
+            fehlschlagen = True
+            self.fehler_verbleibend -= 1
+        if fehlschlagen:
             return web.json_response({"message": "Service call failed"}, status=500)
         ziele = daten.get("entity_id", [])
         for entity_id in [ziele] if isinstance(ziele, str) else ziele:

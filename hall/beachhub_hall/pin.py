@@ -27,7 +27,9 @@ from beachhub_hall.tuer import Tuer
 
 SERIE_SCHWELLE = 5
 SERIE_ENDE = timedelta(minutes=15)
-_ZIFFERN = re.compile(r"\d{4,12}")
+# Nur ASCII-Ziffern: \d ohne re.ASCII träfe auch auf andere Unicode-Ziffern (z. B. Fullwidth-
+# oder Devanagari-Ziffern) zu, die argon2 anders hasht als das Hauptsystem erwartet.
+_ZIFFERN = re.compile(r"[0-9]{4,12}")
 _ph = PasswordHasher()
 MASTER = "master"
 
@@ -59,6 +61,11 @@ class PinPruefer:
         self._ereignisse = ereignisse
         self._tuer = tuer
         self._schlafen = schlafen
+        # Nur während einer laufenden Fehlversuchsserie ernst zu nehmen: Task 10 startet jede
+        # Tastenfeld-Eingabe als eigene Aufgabe, ohne diesen Lock würden mehrere gleichzeitige
+        # Eingaben parallel verzögert statt nacheinander – die Verzögerung wäre wirkungslos.
+        # Außerhalb einer Serie wird nicht serialisiert.
+        self._verzoegerung_lock = asyncio.Lock()
 
     def _serie(self, db: Session, jetzt: datetime) -> dict[str, Any]:
         serie: dict[str, Any] = lies(db, "fehlserie") or _leere_serie()
@@ -72,9 +79,13 @@ class PinPruefer:
         with self._sitzungen() as db:
             serie = self._serie(db, self._uhr.jetzt())
         if serie["anzahl"] >= SERIE_SCHWELLE:
-            await self._schlafen(self._z.tastenfeld.verzoegerung_sekunden)
-        jetzt = self._uhr.jetzt()
-        treffer = await self._pruefe(code, jetzt)
+            async with self._verzoegerung_lock:
+                await self._schlafen(self._z.tastenfeld.verzoegerung_sekunden)
+                jetzt = self._uhr.jetzt()
+                treffer = await self._pruefe(code, jetzt)
+        else:
+            jetzt = self._uhr.jetzt()
+            treffer = await self._pruefe(code, jetzt)
         if treffer is None:
             self._fehlversuch(jetzt)
             return False
