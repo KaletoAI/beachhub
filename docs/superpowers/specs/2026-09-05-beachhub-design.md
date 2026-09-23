@@ -1,6 +1,6 @@
 # Beachhub – Anforderungen und Systemdesign
 
-Stand: 2026-09-11 · Status: Entwurf zur Abstimmung · Zielgruppe: Entwicklungsteam
+Stand: 2026-09-23 · Status: Entwurf zur Abstimmung · Zielgruppe: Entwicklungsteam
 
 Diese Fassung arbeitet die Antworten des Betreibers vom 10. September 2026 ein. Wesentlich geändert: zwei Kundengruppen mit eigenem Umsatzsteuersatz (3.2), Mitgliedsstatus mit Freischaltung und Jahresprüfung (3.2), Gutscheine und Freischaltcodes (3.9a), Saisonrechnung statt Monatsrechnung (3.9), Zahlungsanbieter offen hinter einem Adapter (3.8), Türcode ohne Sperre (3.10), Heizwerte des Betreibers (3.10), Gerätezuordnung nur noch im Hallendienst (3.1), die Hosting-Entscheidung für das Portal (11) und der ersatzlose Wegfall der Nachbuchung (3.7).
 
@@ -27,7 +27,7 @@ selbst auf. Kein System verbindet sich zum Hauptsystem.**
 | **Hallendienst** (`hall/`) | Rechner in der Halle, neben Home Assistant | Betriebsplan der nächsten 7 Tage (Buchungs-ID, Feld, Zeit, PIN-Hash), Ereignis-Warteschlange | Licht, Heizung, Türfreigabe, Präsenzbewertung; autonom bis 7 Tage |
 
 ```
- Kunde ──HTTPS──▶ Buchungsportal ◀──WebSocket/mTLS (ausgehend)── Hauptsystem ──WireGuard (ausgehend vom Hallendienst)──▶ Hallendienst ──REST/WS──▶ Home Assistant
+ Kunde ──HTTPS──▶ Buchungsportal ◀──Long-Poll/mTLS (ausgehend)── Hauptsystem ──WireGuard (ausgehend vom Hallendienst)──▶ Hallendienst ──REST/WS──▶ Home Assistant
                   (Anfragetabelle,                                 (Master, Admin-UI                                         (SQLite, 7-Tage-Plan)       (Licht, Heizung,
                    Lesestand, Gruppen)                              nur im VPN)                                                                            Tür, Sensoren)
 ```
@@ -170,7 +170,7 @@ Zwei Vorgänge, die der Betreiber unterscheidet: Jemand **kauft** einen Slot in 
 - **A-ADM-3** Kunden: Liste, Suche, Mitgliedsstatus freischalten/verlängern/beenden, Guthaben buchen, Auszahlung abhaken, Historie. Dazu die Prüfliste der auslaufenden Mitgliedschaften (A-KUND-5) mit Sammelaktionen und CSV.
 - **A-ADM-4** Rechnungen: Liste, Filter, PDF, auf bezahlt setzen, Storno- und Teil-Stornorechnung, CSV-Export. Kein Monatslauf mehr (A-RECH-3).
 - **A-ADM-8** Gutscheine: Liste mit Status und Restwert, Freischaltcodes ausstellen (einzeln oder als Serie) mit Einschränkungen und Gültigkeit, Code sperren, Einlösungen je Gutschein einsehen.
-- **A-ADM-5** Halle: Live-Status (Planversion, Kontakt, HA-Status, Licht/Heizung/Tür je Feld), Ereignisliste, Alarme, Handbetrieb.
+- **A-ADM-5** Halle: Live-Status (Planversion, Kontakt, HA-Status, Licht/Heizung/Tür je Feld), Ereignisliste, Alarme, Handbetrieb (nur Anzeige; geschaltet wird in HA, weil das Hauptsystem die Halle nicht erreicht).
 - **A-ADM-6** Liste der kostenpflichtigen Stornos (Arbeitsliste für Kulanzentscheidungen), Klärungsliste (unzuordenbare Zahlungen, Präsenz ohne Buchung), Audit-Log.
 - **A-ADM-7** Login mit Benutzername/Passwort und TOTP-2FA; mehrere Admin-Benutzer mit Rollen `admin` und `lesend`.
 
@@ -269,7 +269,7 @@ Der Plan wird bei jedem Abruf als Ganzes ersetzt (Version steigt monoton). Ein A
 
 ### 8.1 Portal ↔ Hauptsystem
 
-**Kanal.** Das Hauptsystem öffnet eine WebSocket-Verbindung zu `wss://portal/.well-known/beachhub-core` mit Client-Zertifikat (mTLS, eigene interne CA; Portal-Reverse-Proxy erzwingt das Zertifikat nur auf diesem Pfad). Nachrichten sind JSON mit `typ`, `id`, `nutzlast`. Bei Abbruch: Reconnect mit Backoff; nach Verbindung holt das Hauptsystem alle Anfragen mit `status = offen` nach. Unabhängig davon fragt es alle 60 s per HTTPS (ebenfalls mTLS) `GET /core/anfragen?status=offen` ab, als Rückfall und Kontrolle.
+**Kanal.** *(geändert 2026-09-23: Long-Polling statt WebSocket, Details in `2026-09-23-portal-kern-design.md` § 2)* Das Hauptsystem ruft per HTTPS mit Client-Zertifikat (mTLS, eigene interne CA; der Portal-Reverse-Proxy erzwingt das Zertifikat nur auf `/core/*`) und zusätzlichem Bearer-Token `GET /core/anfragen?warten=25` auf. Das Portal hält die Anfrage offen, bis eine Anfrage eintrifft oder 25 s vergangen sind, und antwortet dann sofort. Antworten gehen per `POST /core/antworten`, Lesestände per `POST /core/lesestand` zurück. Abgeholte, aber nach 60 s noch unbeantwortete Anfragen liefert das Portal erneut aus. Damit gibt es einen einzigen Transportweg: Rückfall und Normalbetrieb sind derselbe Code.
 
 **Anfragetypen** (Portal → Hauptsystem):
 
@@ -313,9 +313,9 @@ Das Hauptsystem behandelt jede Nutzlast als nicht vertrauenswürdig: Konto muss 
 
 Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster ändert (Version steigt). Der Hallendienst holt zusätzlich sofort, wenn das Hauptsystem über den Status-Aufruf `plan_neu = true` zurückmeldet.
 
-**Ereignistypen:** `pin_akzeptiert`, `pin_abgelehnt`, `tastenfeld_gesperrt`, `praesenz_start`, `praesenz_ende`, `praesenz_ohne_buchung`, `tuer_offen_ausserhalb`, `licht_geschaltet`, `heizung_gesetzt`, `ha_nicht_erreichbar`, `aktor_fehler`, `plan_verworfen`, `handbetrieb_an/aus`, `dienst_gestartet`.
+**Ereignistypen:** `pin_akzeptiert`, `pin_abgelehnt`, `tastenfeld_fehlversuche`, `praesenz_start`, `praesenz_ende`, `praesenz_ohne_buchung`, `tuer_offen_ausserhalb`, `licht_geschaltet`, `heizung_gesetzt`, `ha_nicht_erreichbar`, `aktor_fehler`, `plan_verworfen`, `handbetrieb_an/aus`, `dienst_gestartet`.
 
-**Home Assistant.** Home Assistant wird für die neue Halle eingeplant (noch nicht vorhanden). Der Hallendienst nutzt die HA-REST-API (Dienste aufrufen) und den HA-WebSocket (Zustandsänderungen abonnieren) mit einem Long-Lived Access Token. Keine Custom Component. Erwartete HA-Entitäten je Konfiguration: `light.*` je Feld, `climate.*` je Heizzone, `lock.*`/`switch.*` für den Türöffner, `binary_sensor.*` für Präsenz je Feld und Türkontakt, ein Eingabekanal für das Tastenfeld (z. B. `event.*` oder MQTT-Topic). Der Sollzustand wird alle 30 s aus dem Plan neu berechnet und mit dem Ist abgeglichen (idempotente Steuerung). Präsenzalarm-Erkennung in HA selbst nur als Rückfall, falls der Dienst ausfällt (einfache HA-Automation: Licht aus außerhalb Betriebszeit).
+**Home Assistant.** Home Assistant wird für die neue Halle eingeplant (noch nicht vorhanden). Der Hallendienst nutzt die HA-REST-API (Dienste aufrufen) und den HA-WebSocket (Zustandsänderungen abonnieren) mit einem Long-Lived Access Token. Keine Custom Component: Seinen Zustand schreibt der Dienst als `sensor.beachhub_*` per REST nach HA, den Handbetrieb schaltet ein Helfer `input_boolean.beachhub_handbetrieb`, das Tastenfeld liefert ein konfigurierbares HA-Ereignis mit dem eingegebenen Code (Details in `2026-09-23-hallendienst-design.md`). Sperren schalten weder Licht noch Heizung (Ⓞ-16). Erwartete HA-Entitäten je Konfiguration: `light.*` je Feld, `climate.*` je Heizzone, `lock.*`/`switch.*` für den Türöffner, `binary_sensor.*` für Präsenz je Feld und Türkontakt, ein Eingabekanal für das Tastenfeld (z. B. `event.*` oder MQTT-Topic). Der Sollzustand wird alle 30 s aus dem Plan neu berechnet und mit dem Ist abgeglichen (idempotente Steuerung). Präsenzalarm-Erkennung in HA selbst nur als Rückfall, falls der Dienst ausfällt (einfache HA-Automation: Licht aus außerhalb Betriebszeit).
 
 **Sicherheit Halle.** Kein Kundenname, keine E-Mail. PIN nur als Argon2id-Hash. Master-PIN lokal in der Konfiguration. Bei Diebstahl des Hallenrechners sind ausschließlich Buchungszeiten und Hashes betroffen.
 
@@ -353,7 +353,7 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
 
 ## 11. Technik und Vorgehen
 
-- **Stack:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic, Jinja2 (serverseitig gerendert, kein Frontend-Build, eine `style.css` mit Design-Tokens, Hell/Dunkel, PWA-fähig – wie im SportAbo-Manager). PostgreSQL 16 für Portal und Hauptsystem, SQLite für die Halle. `httpx`/`websockets` für die Kanäle, `pynacl` für Ed25519, `argon2-cffi`, `stripe`, `weasyprint` für Rechnungs-PDFs, `APScheduler` für Jobs.
+- **Stack:** Python 3.12, FastAPI, SQLAlchemy 2.0, Alembic, Jinja2 (serverseitig gerendert, kein Frontend-Build, eine `style.css` mit Design-Tokens, Hell/Dunkel, PWA-fähig – wie im SportAbo-Manager). PostgreSQL 16 für Portal und Hauptsystem, SQLite für die Halle. `httpx` für die Kanäle, `aiohttp` für den HA-WebSocket, `pynacl` für Ed25519, `argon2-cffi`, `stripe`, `weasyprint` für Rechnungs-PDFs, `APScheduler` für Jobs.
 - **Monorepo:**
   ```
   beachhub/
@@ -382,8 +382,8 @@ Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung im 7-Tage-Fenster
 - **Ausbaustufen:**
   1. `core`: Datenmodell, Admin-UI (Felder, Betriebszeiten, Tarife, Kunden, Belegungsplan, Sperren, Dauerbuchungen), Rechnungen, Signatur/Lesestand-Erzeugung.
   1a. `core`: Umstellung nach Betreiber-Feedback – zwei Kundengruppen mit eigenem Steuersatz, Mitgliedsstatus mit Freischaltung und Jahresprüfung, Saisonrechnung statt Monatslauf, Teil-Stornorechnung mit Korrekturbeleg, Gutscheine und Freischaltcodes.
-  2. `portal`: Konten, Magic Link, Anfragetabelle, Kanal, Lesestand-Anzeige, Buchung/Storno, Zahlungsanbindung, Gutscheinkauf.
-  3. `hall`: Plan-Abruf, Licht/Heizung/Tür über HA, PIN-Prüfung, Ereignisse, Offline-Betrieb, Handbetrieb.
+  2. `portal`: Konten, Magic Link, Anfragetabelle, Kanal, Lesestand-Anzeige, Buchung/Storno, Zahlungsanbindung, Gutscheinkauf. *Der Kern ohne 1a-Anteile (ohne Mitgliedschaft, Gutscheine, echten Zahlungsanbieter) wird vorgezogen: `2026-09-23-portal-kern-design.md`.*
+  3. `hall`: Plan-Abruf, Licht/Heizung/Tür über HA, PIN-Prüfung, Ereignisse, Offline-Betrieb, Handbetrieb. *Design: `2026-09-23-hallendienst-design.md`.*
   4. `portal`: Gruppenverwaltung (Muster SportAbo-Manager).
   5. Präsenz-Ableitung, Alarme, Klärungslisten, CSV-Export, Feinschliff.
 
@@ -431,3 +431,4 @@ Neu hinzugekommen: Gutscheincodes (Kauf und Einlösung, Abschnitt 3.9a) und ein 
 | Ⓞ-13 | Ist Wero wichtig genug, um Mollie statt Stripe zu nehmen? | offen, Adapter hält beides (A-ZAHL-5) |
 | Ⓞ-14 | Mehrere Felder in einer Buchung (Turniere durch Kunden) | Stufe 1 nein, Betreiber legt Sperre/Buchungen an |
 | Ⓞ-15 | Anzeige fremder Belegung: nur „belegt" ohne Namen | ja |
+| Ⓞ-16 | Sollen Sperren (etwa ein Turnier) Licht und Heizung automatisch schalten? | nein; der Betreiber nutzt Handbetrieb und Master-PIN (Hallendienst-Design § 1) |
