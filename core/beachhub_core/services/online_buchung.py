@@ -71,8 +71,7 @@ def _storno_mail(storno_id: uuid.UUID) -> Nachlauf:
 
 
 def alarm(betreff: str, text: str) -> Nachlauf:
-    """Betreiber-Alarm als Nachlauf-Schritt (A-ZAHL-2). Öffentlich, weil Task 5 (anfragen.py)
-    dieselbe Funktion braucht – kein Duplikat (Ruling)."""
+    """Schickt dem Betreiber nach dem Commit eine Alarm-Mail mit dem gegebenen Betreff/Text."""
 
     def lauf(db: Session) -> None:
         benachrichtigung.betreiber_alarm(betreff, text)
@@ -142,7 +141,7 @@ def anfragen(
         return abgelehnt("belegt")
 
     db.refresh(kunde)
-    verrechnet = min(kunde.guthaben, b.preis)
+    verrechnet = max(NULL, min(kunde.guthaben, b.preis))
     if verrechnet > NULL:
         guthaben.buche(
             db,
@@ -203,13 +202,28 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
     z = db.scalar(select(Zahlung).where(Zahlung.provider_ref == ref).with_for_update())
     if z is None:
         logger.warning("Zahlungsrückmeldung zu unbekannter Referenz %s", ref)
-        return ignoriert("zahlung_unbekannt")
+        text = (
+            f"Zahlungsrückmeldung ({n.provider}) zu unbekannter Referenz {ref} eingegangen; "
+            "keine passende Zahlung im System gefunden."
+        )
+        return Ergebnis(
+            kanal.Antwort(status="ignoriert", grund="zahlung_unbekannt"),
+            [alarm("Zahlungsrückmeldung ohne Zuordnung", text)],
+        )
     if z.status == Zahlung.BEZAHLT:
         return ok()
     # Dem Anbieter trauen, nie den Rohdaten (A-ZAHL-2).
     zustand, betrag = anbieter.status(ref)
     if zustand == "offen":
         return ignoriert("offen")
+    if zustand == "bezahlt" and betrag <= NULL:
+        # Ein unplausibler Betrag darf die Zahlung nicht als bezahlt markieren – sonst würde
+        # eine später eingehende echte Zahlung am frühen `z.status == BEZAHLT`-Ausstieg oben
+        # folgenlos verpuffen (Reservierung verfällt, Geld wäre weg).
+        logger.warning(
+            "Zahlungsrückmeldung zu %s mit unplausiblem Betrag %s ignoriert", ref, betrag
+        )
+        return ignoriert("betrag_ungueltig")
     if zustand != "bezahlt":
         z.status = Zahlung.ABGEBROCHEN
         return ok()
@@ -223,23 +237,42 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         else None
     )
     if b is not None and b.status == Buchung.RESERVIERT and betrag >= z.betrag:
-        return _bestaetige(db, b, kanal.Antwort(status="ok"))
+        erg = _bestaetige(db, b, kanal.Antwort(status="ok"))
+        ueberzahlt = betrag - z.betrag
+        if ueberzahlt > NULL:
+            guthaben.buche(
+                db,
+                kunde=b.kunde,
+                betrag=ueberzahlt,
+                art="ueberzahlung",
+                bezug_id=z.id,
+                notiz="Überzahlung bei Online-Buchung",
+                quelle="portal",
+            )
+            text = (
+                f"Die Zahlung {ref} über {betrag} € zur Buchung {b.id} überzahlt den offenen "
+                f"Betrag ({z.betrag} €) um {ueberzahlt} €. Die Differenz wurde dem Kunden "
+                f"{b.kunde.name} <{b.kunde.email}> als Guthaben gutgeschrieben."
+            )
+            erg.nach_commit.append(alarm("Überzahlung bei Online-Buchung", text))
+        return erg
 
     # Geld ist da, aber es gibt nichts (mehr) zu bestätigen: Guthaben, der Betreiber entscheidet.
-    if betrag >= z.betrag:
-        grund = "Zahlung nach Verfall oder Storno"
-    else:
-        grund = "Zahlung unter dem offenen Betrag"
-    if betrag > NULL:
-        guthaben.buche(
-            db,
-            kunde=z.kunde,
-            betrag=betrag,
-            art="ueberzahlung",
-            bezug_id=z.id,
-            notiz=grund,
-            quelle="portal",
-        )
+    # betrag > NULL ist hier garantiert (der Zweig oben hat betrag <= NULL bereits behandelt).
+    grund = (
+        "Zahlung nach Verfall oder Storno"
+        if betrag >= z.betrag
+        else "Zahlung unter dem offenen Betrag"
+    )
+    guthaben.buche(
+        db,
+        kunde=z.kunde,
+        betrag=betrag,
+        art="ueberzahlung",
+        bezug_id=z.id,
+        notiz=grund,
+        quelle="portal",
+    )
     text = (
         f"Die Zahlung {ref} über {betrag} € zur Buchung {z.buchung_id} ist eingegangen, "
         f"konnte aber nichts bestätigen ({grund}). Der Betrag wurde dem Kunden "

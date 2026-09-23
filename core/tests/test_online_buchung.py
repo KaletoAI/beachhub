@@ -108,6 +108,8 @@ def test_guthaben_teilweise(db: Session, welt) -> None:
     assert erg.antwort.guthaben_verrechnet == Decimal("10.00")
     assert erg.antwort.zu_zahlen == Decimal("20.00")
     assert k.guthaben == Decimal("0.00")
+    z = db.scalar(select(Zahlung))
+    assert z.betrag == Decimal("20.00")
 
 
 def test_abgelehnt_mit_gruenden(db: Session, welt) -> None:
@@ -199,15 +201,27 @@ def test_zu_geringer_betrag_bestaetigt_nicht(db: Session, welt) -> None:
 
 def test_negativer_betrag_bestaetigt_nicht_und_bucht_kein_guthaben(db: Session, welt) -> None:
     """FakeProvider lässt negative Beträge durch (Task 3, R-Minor). Ein Zahlungseingang mit
-    Betrag <= 0 darf weder bestätigen noch Guthaben erzeugen."""
+    Betrag <= 0 darf weder bestätigen noch Guthaben erzeugen noch die Zahlung als bezahlt
+    markieren – sonst würde eine später eingehende echte Zahlung folgenlos verpuffen
+    (`z.status == BEZAHLT` löst den frühen `return ok()` aus, siehe Fix-Runde 1)."""
     f, k, _ = welt
     a = _anfragen(db, f, k).antwort
     db.commit()
-    ref = db.scalar(select(Zahlung)).provider_ref
+    z = db.scalar(select(Zahlung))
+    ref = z.provider_ref
     erg = online_buchung.zahlung_eingegangen(db, _rueckmeldung(ref, betrag="-5.00"))
     _nachlauf(db, erg)
+    assert erg.antwort.status == "ignoriert" and erg.antwort.grund == "betrag_ungueltig"
+    assert erg.nach_commit == []
+    assert z.status == "offen"
     assert db.get(Buchung, a.buchung_id).status == "reserviert"
     assert k.guthaben == Decimal("0.00")
+
+    # Eine später eingehende gültige Rückmeldung zur selben Referenz bestätigt weiterhin.
+    zweite = online_buchung.zahlung_eingegangen(db, _rueckmeldung(ref))
+    _nachlauf(db, zweite)
+    assert db.get(Buchung, a.buchung_id).status == "bestaetigt"
+    assert z.status == "bezahlt"
 
 
 def test_abgebrochene_zahlung_laesst_reservierung_stehen(db: Session, welt) -> None:
@@ -229,6 +243,34 @@ def test_unbrauchbare_rueckmeldungen_werden_ignoriert(db: Session, welt) -> None
     assert online_buchung.zahlung_eingegangen(db, kaputt).antwort.grund == "nicht_verifiziert"
     unbekannt = _rueckmeldung("fake_gibtsnicht")
     assert online_buchung.zahlung_eingegangen(db, unbekannt).antwort.grund == "zahlung_unbekannt"
+
+
+def test_unbekannte_referenz_alarmiert_betreiber(db: Session, welt, mail_ausgang) -> None:
+    unbekannt = _rueckmeldung("fake_gibtsnicht")
+    erg = online_buchung.zahlung_eingegangen(db, unbekannt)
+    assert erg.antwort.status == "ignoriert" and erg.antwort.grund == "zahlung_unbekannt"
+    assert len(erg.nach_commit) == 1
+    _nachlauf(db, erg)
+    assert any(m["an"] == settings.email_from for m in mail_ausgang)
+
+
+def test_ueberzahlung_bestaetigt_und_bucht_ueberschuss_als_guthaben(
+    db: Session, welt, mail_ausgang
+) -> None:
+    f, k, _ = welt
+    a = _anfragen(db, f, k).antwort
+    db.commit()
+    ref = db.scalar(select(Zahlung)).provider_ref
+    erg = online_buchung.zahlung_eingegangen(db, _rueckmeldung(ref, betrag="35.00"))
+    _nachlauf(db, erg)
+    assert erg.antwort.status == "ok"
+    assert db.get(Buchung, a.buchung_id).status == "bestaetigt"
+    assert k.guthaben == Decimal("5.00")
+    arten = [
+        g.art for g in db.scalars(select(GuthabenBuchung).order_by(GuthabenBuchung.created_at))
+    ]
+    assert arten == ["ueberzahlung"]
+    assert any(m["an"] == settings.email_from for m in mail_ausgang)
 
 
 def test_storno_reservierung_kostenfrei_mit_rueckbuchung(db: Session, welt) -> None:
@@ -281,6 +323,36 @@ def test_storno_nach_beginn_zu_spaet(db: Session, welt) -> None:
     clock.set_override(db, date(2027, 12, 2))
     erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=b.id)
     assert erg.antwort.grund == "zu_spaet"
+
+
+def test_storno_waehrend_der_buchung_zu_spaet(db: Session, welt, monkeypatch) -> None:
+    f, k, _ = welt
+    b = buchungen.lege_an(
+        db, feld_id=f.id, kunde_id=k.id, beginn=kombiniere(D, time(9)), ende=kombiniere(D, time(10))
+    )
+    db.commit()
+    monkeypatch.setattr(online_buchung.clock, "now", lambda db: kombiniere(D, time(9, 30)))
+    erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=b.id)
+    assert erg.antwort.grund == "zu_spaet"
+    assert db.get(Buchung, b.id).status == "bestaetigt"
+
+
+def test_storno_bestaetigt_nach_frist_kostenpflichtig_ohne_gutschrift(
+    db: Session, welt, monkeypatch
+) -> None:
+    f, k, _ = welt
+    guthaben.buche(db, kunde=k, betrag=Decimal("30.00"), art="manuell")
+    a = _anfragen(db, f, k).antwort
+    db.commit()
+    assert a.status == "bestaetigt"
+    # 23 h vor Buchungsbeginn (Do 19:00): innerhalb der Default-Stornofrist von 24 h.
+    monkeypatch.setattr(
+        online_buchung.clock, "now", lambda db: kombiniere(date(2027, 11, 30), time(20))
+    )
+    erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=a.buchung_id)
+    assert erg.antwort.status == "ok" and erg.antwort.kostenfrei is False
+    assert db.get(Buchung, a.buchung_id).status == "storniert"
+    assert k.guthaben == Decimal("0.00")
 
 
 def test_verfall_job_bucht_zurueck_und_mailt(db: Session, welt, mail_ausgang) -> None:
