@@ -88,6 +88,39 @@ def test_buchen_legt_anfrage_an(angemeldet: TestClient, welt, db: Session) -> No
     assert a.nutzlast_json == erwartet
 
 
+def test_buchen_doppelklick_erzeugt_nur_eine_anfrage(
+    angemeldet: TestClient, welt, db: Session
+) -> None:
+    daten = {
+        "feld": FELD_ID,
+        "beginn": B17.isoformat(),
+        "ende": B18.isoformat(),
+        "csrf_token": angemeldet.csrf,
+    }
+    r1 = angemeldet.post("/buchen", data=daten, follow_redirects=False)
+    r2 = angemeldet.post("/buchen", data=daten, follow_redirects=False)
+    assert r1.headers["location"] == r2.headers["location"]
+    assert len(db.scalars(select(Anfrage)).all()) == 1
+
+
+def test_buchen_nach_beantwortung_und_wartezeit_neue_anfrage(
+    angemeldet: TestClient, welt, db: Session, uhr_steht
+) -> None:
+    daten = {
+        "feld": FELD_ID,
+        "beginn": B17.isoformat(),
+        "ende": B18.isoformat(),
+        "csrf_token": angemeldet.csrf,
+    }
+    r1 = angemeldet.post("/buchen", data=daten, follow_redirects=False)
+    a = db.scalar(select(Anfrage))
+    _antworte(db, a, status="abgelehnt", grund="belegt")
+    uhr_steht.weiter(seconds=121)
+    r2 = angemeldet.post("/buchen", data=daten, follow_redirects=False)
+    assert r1.headers["location"] != r2.headers["location"]
+    assert len(db.scalars(select(Anfrage)).all()) == 2
+
+
 def test_buchen_ueber_belegung_hinaus_abgewiesen(angemeldet: TestClient, welt, db: Session) -> None:
     r = angemeldet.post(
         "/buchen",
