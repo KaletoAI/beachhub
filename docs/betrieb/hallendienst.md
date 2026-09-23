@@ -92,9 +92,26 @@ Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensank
 
 ## 3. Home Assistant einrichten
 
-1. **Benutzer und Token:** In HA einen eigenen Benutzer „beachhub“ anlegen (kein Administrator),
-   mit ihm anmelden, unter *Profil → Sicherheit* einen Long-Lived Access Token erzeugen und als
-   `HA_TOKEN` eintragen.
+1. **Benutzer und Token:** In HA einen eigenen Benutzer „beachhub“ anlegen und ihm
+   **Administratorrechte** geben („Administrator“ beim Anlegen einschalten), mit ihm anmelden,
+   unter *Profil → Sicherheit* einen Long-Lived Access Token erzeugen und als `HA_TOKEN`
+   eintragen. Ohne Administratorrechte geht es nicht, weil HA zwei Dinge nur Administratoren
+   erlaubt, die der Dienst braucht:
+   - **Tastenfeld-Ereignis abonnieren:** Über den WebSocket (`subscribe_events`) darf ein
+     Nicht-Administrator nur Ereignistypen aus HAs fester Freigabeliste abonnieren
+     (`SUBSCRIBE_ALLOWLIST`, z. B. `state_changed`) – ein eigener Typ wie `esphome.beachhub_pin`
+     wird mit „Unauthorized“ abgelehnt. Der Dienst schreibt dann ins Log
+     „Tastenfeld abgeschaltet: … HA-Token braucht Administratorrechte …“; Licht, Heizung und
+     Präsenz laufen weiter, aber **keine PIN öffnet die Tür**.
+   - **Status-Sensoren schreiben:** `POST /api/states/<entity_id>` (für `sensor.beachhub_*`)
+     beantwortet HA für Nicht-Administratoren mit HTTP 401; im Log steht dann
+     „Status nach HA nicht geschrieben: … HTTP 401 – HA-Token ungültig oder ohne
+     Administratorrechte“.
+
+   Der Token hat damit volle Rechte über HA: nur in `hall/.env` eintragen (Dateirechte `600`),
+   nicht in Tickets, Chats oder Screenshots weitergeben, und bei Verdacht auf Weitergabe unter
+   *Profil → Sicherheit* des Benutzers „beachhub“ widerrufen und neu erzeugen. Mit dem Benutzer
+   „beachhub“ niemanden interaktiv arbeiten lassen.
 2. **Handbetrieb-Schalter:** *Einstellungen → Geräte & Dienste → Helfer → Schalter* mit dem Namen
    „beachhub_handbetrieb“ anlegen (`input_boolean.beachhub_handbetrieb`). Ist er an, schaltet der
    Dienst weder Licht noch Heizung; die Tür öffnet weiterhin mit gültiger PIN.
@@ -284,6 +301,7 @@ Beispieldateien dieses Dokuments bereits ohne echtes HA und ohne echtes Hauptsys
 | Mail „Halle ohne Kontakt“ | Hauptsystem hört seit 60 min nichts | wie oben; neue Buchungen kennt die Halle erst nach der Rückkehr |
 | Mail „Gerät in der Halle reagiert nicht“ | `aktor_fehler`: Dienstaufruf scheitert oder Gerät schaltet nicht | Entität in HA prüfen, Zuordnung in `hall.toml` prüfen |
 | Mail „Home Assistant nicht erreichbar“ | Dienst erreicht HA seit 2 min nicht | HA-Status, `HA_URL` und `HA_TOKEN` prüfen |
+| Tastenfeld öffnet nie; Log „Tastenfeld abgeschaltet: … Administratorrechte“ oder „Status nach HA nicht geschrieben: … HTTP 401“ | HA-Benutzer „beachhub“ ist kein Administrator (oder Token widerrufen) | Benutzer in HA zum Administrator machen (Abschnitt 3, Punkt 1), danach `docker compose restart hall` |
 | Mail „Halle hat den Plan verworfen“ | Signatur oder Version passt nicht | `CORE_PUBLIC_KEY` mit der System-Seite vergleichen |
 | Dienst startet nicht: „master_pin_hash fehlt“ | Platzhalter in `hall.toml` | `beachhub-hall master-pin` ausführen und eintragen |
 | Dienst startet nicht: Zertifikatsfehler | `halle.crt`/`halle.key`/`caddy-root.crt` fehlen oder Docker hat leere Verzeichnisse an ihrer Stelle angelegt | `docker compose down`, `hall/zertifikate/` prüfen (Abschnitt 2), danach `docker compose up -d` |

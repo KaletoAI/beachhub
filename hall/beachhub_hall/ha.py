@@ -6,7 +6,9 @@ wie beim WebSocket) wird zur Unterklasse `HaNichtErreichbar`; eine Fehlerantwort
 einzelne Anfrage (z. B. HTTP 500, eine abgelehnte Anmeldung, ein abgelehntes Abonnement) bleibt
 die Basisklasse. Aufrufer, die zwischen „diese eine Anfrage ist gescheitert“ und „HA ist gerade
 gar nicht da“ unterscheiden müssen (z. B. die Steuerung, der HA-Zuhörer), fangen dafür gezielt
-`HaNichtErreichbar`.
+`HaNichtErreichbar`. Lehnt HA eine Anfrage wegen fehlender Rechte ab (abgelehntes Abonnement mit
+`unauthorized`, HTTP 401/403), wird daraus `HaKeineRechte` – der HA-Benutzer „beachhub“ braucht
+Administratorrechte (docs/betrieb/hallendienst.md, Abschnitt 3).
 """
 
 import json
@@ -25,6 +27,18 @@ class HaNichtErreichbar(HaFehler):
     Unterschied zu einer Fehlerantwort für eine einzelne Anfrage (z. B. HTTP 500 für eine
     Entität). Aufrufer, die einen Fehler pro Entität von einer echten Nichterreichbarkeit
     unterscheiden müssen (z. B. die Steuerung), fangen dafür gezielt diese Unterklasse."""
+
+
+class HaKeineRechte(HaFehler):
+    """HA hat die Anfrage wegen fehlender Rechte abgelehnt – typischerweise, weil der Token
+    einem Benutzer ohne Administratorrechte gehört: HA erlaubt ihm per WebSocket nur Ereignistypen
+    aus der SUBSCRIBE_ALLOWLIST (nicht den eigenen Tastenfeld-Typ) und `POST /api/states` gar
+    nicht."""
+
+
+RECHTE_HINWEIS = "HA-Token braucht Administratorrechte (Benutzer „beachhub“ als Administrator)"
+# Per REST unterscheidet HA ein ungültiges Token nicht von fehlenden Rechten (beides HTTP 401).
+REST_RECHTE_HINWEIS = "HA-Token ungültig oder ohne Administratorrechte"
 
 
 class HaWebSocket:
@@ -71,6 +85,10 @@ class HaWebSocket:
             antwort = await self._lies()
             if antwort.get("type") == "result" and antwort.get("id") == self._id:
                 if not antwort.get("success"):
+                    fehler = antwort.get("error")
+                    code = fehler.get("code") if isinstance(fehler, dict) else None
+                    if code == "unauthorized":
+                        raise HaKeineRechte(f"Abonnement {event_type} abgelehnt – {RECHTE_HINWEIS}")
                     raise HaFehler(f"Abonnement {event_type} abgelehnt")
                 return
             if antwort.get("type") == "event":
@@ -108,6 +126,10 @@ class HaClient:
             async with self._s().request(methode, self._basis + pfad, json=daten) as r:
                 if r.status == 404:
                     return None
+                if r.status in (401, 403):
+                    raise HaKeineRechte(
+                        f"HA {methode} {pfad}: HTTP {r.status} – {REST_RECHTE_HINWEIS}"
+                    )
                 if r.status >= 400:
                     raise HaFehler(f"HA {methode} {pfad}: HTTP {r.status}")
                 return await r.json(content_type=None)

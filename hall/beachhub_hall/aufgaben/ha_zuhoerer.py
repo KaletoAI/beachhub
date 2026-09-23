@@ -26,7 +26,7 @@ from beachhub_hall.clock import Uhr
 from beachhub_hall.config import Zuordnung
 from beachhub_hall.db import lies, schreibe
 from beachhub_hall.ereignisse import Ereignisse
-from beachhub_hall.ha import HaClient, HaFehler
+from beachhub_hall.ha import HaClient, HaFehler, HaKeineRechte, HaWebSocket
 from beachhub_hall.lage import Lage
 from beachhub_hall.pin import PinPruefer
 from beachhub_hall.soll import laufende_buchung, zutritt_offen
@@ -80,7 +80,7 @@ class HaZuhoerer:
                 ws = await self._ha.websocket()
                 try:
                     await ws.abonniere("state_changed")
-                    await ws.abonniere(self._z.tastenfeld.ereignis)
+                    await self._abonniere_tastenfeld(ws)
                     await self.verbunden()
                     backoff = self._backoff_start
                     while True:
@@ -110,6 +110,20 @@ class HaZuhoerer:
             # nächsten Verbindungsversuch – sonst könnte `ha_nicht_erreichbar` bei großem
             # Backoff verspätet gemeldet werden.
             self.pruefe_ausfall()
+
+    async def _abonniere_tastenfeld(self, ws: HaWebSocket) -> None:
+        """Abonniert den Tastenfeld-Ereignistyp. Lehnt HA das wegen fehlender Rechte ab (der
+        HA-Benutzer ist kein Administrator, eigene Ereignistypen stehen nicht in HAs
+        SUBSCRIBE_ALLOWLIST), ist das kein HA-Ausfall: laut als Fehler loggen, aber mit
+        state_changed weiterarbeiten – Licht, Heizung, Handbetrieb und Präsenz laufen weiter,
+        nur das Tastenfeld bleibt bis zur Korrektur des Benutzers taub. Ein Neuverbinden
+        änderte daran nichts und ließe nach 2 min fälschlich `ha_nicht_erreichbar` melden. Ein
+        Ereignis dafür gibt es bewusst nicht (neuer Typ wäre eine Vertragsänderung); beim
+        nächsten Verbindungsaufbau wird es erneut versucht."""
+        try:
+            await ws.abonniere(self._z.tastenfeld.ereignis)
+        except HaKeineRechte as e:
+            logger.error("Tastenfeld abgeschaltet: %s", e)
 
     def _naechster_schlaf(self, backoff: float) -> float:
         """Begrenzt die Backoff-Schlafzeit auf die Restzeit bis zur 2-min-Ausfallmeldung, damit

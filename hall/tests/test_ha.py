@@ -5,7 +5,7 @@ from typing import Any
 
 import aiohttp
 import pytest
-from beachhub_hall.ha import HaClient, HaFehler, HaNichtErreichbar, HaWebSocket
+from beachhub_hall.ha import HaClient, HaFehler, HaKeineRechte, HaNichtErreichbar, HaWebSocket
 
 from tests.ha_simulator import HaSimulator
 
@@ -117,3 +117,25 @@ async def test_websocket_falsches_token_und_trennung(ha: HaSimulator) -> None:
     with pytest.raises(HaFehler):
         await asyncio.wait_for(ws.naechstes(), timeout=2)
     await c.schliesse()
+
+
+async def test_ohne_administratorrechte_abo_und_status_abgelehnt(
+    ha: HaSimulator, client: HaClient
+) -> None:
+    """Wie im echten HA: Ein Token ohne Administratorrechte darf nur Typen aus HAs
+    SUBSCRIBE_ALLOWLIST abonnieren (state_changed ja, der eigene Tastenfeld-Typ nicht) und nicht
+    per POST /api/states schreiben. Beide Ablehnungen sind Rechtefehler (HaKeineRechte), keine
+    Nichterreichbarkeit – und sagen das in der Meldung."""
+    ha.admin = False
+    ws = await client.websocket()
+    await ws.abonniere("state_changed")
+    with pytest.raises(HaKeineRechte, match="Administratorrechte"):
+        await ws.abonniere("esphome.beachhub_pin")
+    assert ha.abonnements() == 1
+    await ws.schliesse()
+    with pytest.raises(HaKeineRechte, match="Administratorrechte"):
+        await client.setze_zustand("sensor.beachhub_planversion", "3", {})
+    assert ha.geschrieben == {}
+    # Lesen und Dienste aufrufen geht weiterhin.
+    assert (await client.zustand("light.feld_1")) is not None
+    await client.dienst("light", "turn_on", {"entity_id": "light.feld_1"})

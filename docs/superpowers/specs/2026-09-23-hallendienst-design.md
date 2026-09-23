@@ -225,6 +225,10 @@ Entitäten) und den Ereignistyp des Tastenfelds. Bei Verbindungsverlust verbinde
 Backoff (1 s bis 60 s) neu. Sind 2 min ohne Verbindung vergangen, meldet er einmal
 `ha_nicht_erreichbar`. Nach der Wiederverbindung liest er alle Zustände neu ein und stößt die
 Steuerung an.
+Lehnt HA das Abo des Tastenfeld-Ereignistyps wegen fehlender Rechte ab (Token ohne
+Administratorrechte), ist das kein Ausfall: Der Dienst loggt einen Fehler („HA-Token braucht
+Administratorrechte“) und arbeitet mit `state_changed` weiter; ein eigenes Ereignis dafür gibt es
+nicht.
 
 **PIN-Prüfung** (auf das Tastenfeld-Ereignis):
 
@@ -287,8 +291,11 @@ ersten Sekunde aus dem gespeicherten Plan, noch bevor Hauptsystem oder HA erreic
 
 Die Dokumentation `docs/betrieb/hallendienst.md` beschreibt:
 
-- einen Long-Lived Access Token für einen eigenen HA-Benutzer „beachhub“ (kein Administrator
-  nötig, sofern die Dienste freigegeben sind),
+- einen Long-Lived Access Token für einen eigenen HA-Benutzer „beachhub“ **mit
+  Administratorrechten**: HA erlaubt Nicht-Administratoren per WebSocket nur Ereignistypen aus
+  seiner `SUBSCRIBE_ALLOWLIST` (der eigene Tastenfeld-Typ gehört nicht dazu) und
+  `POST /api/states/<entity_id>` (Status-Sensoren) gar nicht; der Token ist deshalb sicher zu
+  verwahren,
 - den Helfer `input_boolean.beachhub_handbetrieb`,
 - ein Beispiel-Dashboard mit den `beachhub`-Sensoren und dem Handbetrieb-Schalter,
 - die Rückfall-Automation aus Hauptspec § 8.2 (Licht aus außerhalb der Betriebszeit, falls der

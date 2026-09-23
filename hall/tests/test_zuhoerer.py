@@ -345,6 +345,31 @@ async def test_wiederverbindung_ueber_websocket(a: Aufbau) -> None:
             await aufgabe
 
 
+async def test_ohne_administratorrechte_laeuft_state_changed_weiter(
+    a: Aufbau, caplog: pytest.LogCaptureFixture
+) -> None:
+    """HA lehnt für einen Benutzer ohne Administratorrechte das Abo des eigenen
+    Tastenfeld-Ereignistyps ab. Das ist kein HA-Ausfall: klare Fehlermeldung im Log, aber
+    state_changed (Handbetrieb, Präsenz, Tür) läuft weiter, kein Reconnect-Kreislauf und kein
+    `ha_nicht_erreichbar`."""
+    caplog.set_level(logging.ERROR)
+    a.sim.admin = False
+    aufgabe = asyncio.create_task(a.zuhoerer.laufen())
+    try:
+        await warte_bis(lambda: a.sim.abonnements() == 1 and a.lage.ha_verbunden)
+        await a.sim.setze("input_boolean.beachhub_handbetrieb", "on")
+        await warte_bis(lambda: len(a.ereignis("handbetrieb_an")) == 1)
+        a.uhr.vor(minutes=5)
+        a.zuhoerer.pruefe_ausfall()
+        assert a.ereignis("ha_nicht_erreichbar") == []
+        assert a.sim.verbindungen_gesamt == 1  # kein Neuverbinden wegen des abgelehnten Abos
+    finally:
+        aufgabe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await aufgabe
+    assert "Administratorrechte" in caplog.text
+
+
 async def test_laufen_uebersteht_ausnahme_in_verarbeite(
     a: Aufbau, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
