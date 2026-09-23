@@ -237,7 +237,8 @@ def baue_hallenplan(db: Session) -> hallenplan.HallenplanInhalt:
                 feld_id=str(b.feld_id),
                 beginn=b.beginn,
                 ende=b.ende,
-                pin_hash=b.pin_hash or "",
+                # Der Filter oben (Buchung.pin_hash.is_not(None)) schließt None hier aus.
+                pin_hash=b.pin_hash,
             )
             for b in gebucht
         ],

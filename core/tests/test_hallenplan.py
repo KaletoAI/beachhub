@@ -1,9 +1,11 @@
 import base64
 import hashlib
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 
+import pytest
 from argon2.low_level import Type, hash_secret_raw
+from beachhub_core import clock
 from beachhub_core.config import settings
 from beachhub_core.models import Buchung, LesestandVersion, Sperre
 from beachhub_core.services import buchungen, konfiguration, lesestand, pin, storno
@@ -36,7 +38,16 @@ def test_neue_vorgaben_des_betreibers(db: Session) -> None:
 
 def test_pin_hash_ist_unveraendert() -> None:
     """Bestehende Buchungen tragen Hashes aus Stufe 1 – der Umbau auf shared darf keinen
-    einzigen davon ungültig machen."""
+    einzigen davon ungültig machen. Die Goldwerte sind mit dem alten Algorithmus (vor der
+    Umstellung auf shared) und dem PIN_SCHLUESSEL aus conftest.py berechnet und fest
+    hinterlegt, damit ein zukünftiger Bug in der Nachrechnung selbst diesen Test nicht mehr
+    grün aussehen lässt."""
+    assert pin.hash("482913") == "argon2id$T0ZWylobq8ZodOzcaVFAac73RaKoG/u4gJROclD42IE="
+    assert pin.parameter().salt_b64 == "DzmZWTngLr0Yo5w45jX/7g=="
+
+    # Nachrechnung mit dem alten, direkt hier nachgebauten Algorithmus – bleibt zusätzlich zu
+    # den Goldwerten bestehen, damit auch eine unbeabsichtigte Änderung von PIN_SCHLUESSEL in
+    # conftest.py auffiele (die Goldwerte allein würden dann nur beide falsch, aber gleich sein).
     schluessel = hashlib.sha256(settings.pin_schluessel.encode()).digest()
     salt = hashlib.sha256(b"beachhub-pin-salt" + schluessel).digest()[:16]
     raw = hash_secret_raw(
@@ -72,6 +83,42 @@ def test_plan_enthaelt_nur_bestaetigte_buchungen_der_naechsten_7_tage(db: Sessio
     )
     assert (inhalt.gueltig_bis - inhalt.gueltig_ab).days == 7
     assert "a@x.de" not in inhalt.model_dump_json() and '"A"' not in inhalt.model_dump_json()
+
+
+def test_hallenplan_grenzfaelle_des_fensters(
+    db: Session, welt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Laufende Buchung (beginn < jetzt < ende) ist enthalten; eine Buchung, die erst mit
+    gueltig_bis beginnt, und eine Sperre, die schon vor jetzt endet, dagegen nicht – mit fest
+    gesetzter Uhr, damit die Grenzen exakt getroffen werden."""
+    f, k = welt
+    tag = date(2027, 11, 27)
+    # Zur Anlage eine frühere Uhr als zum Planbau: sonst würde buchungen.lege_an eine Buchung
+    # mit beginn in der Vergangenheit ablehnen ("vergangenheit").
+    monkeypatch.setattr(clock, "now", lambda db: kombiniere(tag, time(8)))
+    laufend = _buchung(db, f, k, tag, 11, 13)
+    genau_am_rand = _buchung(db, f, k, date(2027, 12, 4), 12, 13)
+    db.add(
+        Sperre(
+            feld_id=None,
+            beginn=kombiniere(tag, time(8)),
+            ende=kombiniere(tag, time(9)),
+            grund="Endet vor jetzt",
+        )
+    )
+    db.commit()
+
+    jetzt = kombiniere(tag, time(12))
+    monkeypatch.setattr(clock, "now", lambda db: jetzt)
+    inhalt = lesestand.baue_hallenplan(db)
+
+    assert inhalt.gueltig_ab == jetzt
+    assert inhalt.gueltig_bis == jetzt + timedelta(days=7)
+    # genau_am_rand.beginn == gueltig_bis (2027-12-04 12:00): per Filter "beginn < bis"
+    # ausgeschlossen.
+    assert genau_am_rand.beginn == inhalt.gueltig_bis
+    assert [b.buchung_id for b in inhalt.buchungen] == [str(laufend.id)]
+    assert inhalt.sperren == []
 
 
 def test_vertrag_pin_hash_halle_gleich_hauptsystem(db: Session, welt) -> None:
