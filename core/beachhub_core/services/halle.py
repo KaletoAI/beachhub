@@ -17,6 +17,7 @@ from beachhub_core.models import (
     HalleDienst,
     HallenStatusZeile,
     LesestandVersion,
+    utcnow,
 )
 
 KONTAKT_MARKER = "halle_ohne_kontakt_seit"
@@ -47,10 +48,38 @@ ALARM_FELDER: dict[str, tuple[str, ...]] = {
 }
 WERT_MAX_LAENGE = 200
 
+# Dieselbe Idee wie ALARM_FELDER, aber für alle 15 Ereignistypen (EREIGNISTYPEN): Die
+# Admin-Seite „Halle“ zeigt `daten_json` nie ungefiltert, sondern nur die für den jeweiligen
+# Typ erwarteten Schlüssel, Werte gekürzt. Enthält ALARM_FELDER als Teilmenge.
+EREIGNIS_FELDER: dict[str, tuple[str, ...]] = {
+    "pin_akzeptiert": ("feld_id", "buchung_id", "master"),
+    "pin_abgelehnt": ("fehlversuche",),
+    "tastenfeld_fehlversuche": ("anzahl",),
+    "praesenz_start": ("feld_id", "buchung_id"),
+    "praesenz_ende": ("feld_id", "dauer_minuten"),
+    "praesenz_ohne_buchung": ("feld_id", "minuten"),
+    "tuer_offen_ausserhalb": (),
+    "licht_geschaltet": ("feld_id", "entity", "an"),
+    "heizung_gesetzt": ("soll", "ist_temperatur"),
+    "ha_nicht_erreichbar": ("seit",),
+    "aktor_fehler": ("feld_id", "entity", "grund"),
+    "plan_verworfen": ("grund", "version"),
+    "handbetrieb_an": (),
+    "handbetrieb_aus": (),
+    "dienst_gestartet": ("version",),
+}
+
 
 def _kuerze(wert: Any) -> str:
     text = str(wert)
     return text if len(text) <= WERT_MAX_LAENGE else text[:WERT_MAX_LAENGE] + "…"
+
+
+def anzeige_daten(e: Ereignis) -> dict[str, str]:
+    """Gefilterte, gekürzte Ereignisdaten für die Admin-Seite „Halle“ (nie das rohe
+    `daten_json` anzeigen, siehe EREIGNIS_FELDER)."""
+    erlaubt = EREIGNIS_FELDER.get(e.typ, ())
+    return {k: _kuerze(v) for k, v in e.daten_json.items() if k in erlaubt}
 
 
 def _uuid(wert: str | None) -> uuid.UUID | None:
@@ -83,6 +112,10 @@ def speichere_ereignisse(
         select(HalleDienst).where(HalleDienst.dienst_id == lieferung.dienst_id).with_for_update()
     ).scalar_one()
 
+    # created_at/updated_at mit der echten Uhr, nicht mit `jetzt` (clock.now, vom Admin
+    # überschreibbar für Tests/Abnahme): Ein Datums-Override darf nicht verfälschen, wann ein
+    # Ereignis tatsächlich empfangen wurde.
+    empfangen = utcnow()
     zeilen: list[dict[str, Any]] = []
     gesehen: set[int] = set()
     for e in sorted(lieferung.ereignisse, key=lambda x: x.seq):
@@ -105,8 +138,8 @@ def speichere_ereignisse(
                 "daten_json": daten,
                 "halle_dienst_id": lieferung.dienst_id,
                 "halle_seq": e.seq,
-                "created_at": jetzt,
-                "updated_at": jetzt,
+                "created_at": empfangen,
+                "updated_at": empfangen,
             }
         )
 
@@ -230,7 +263,11 @@ def alarm_mails(db: Session, neu: list[Ereignis], jetzt: datetime) -> list[tuple
 def pruefe_kontakt(db: Session, jetzt: datetime) -> bool:
     """Job alle 5 min: meldet einmal, wenn die Halle seit 60 min schweigt (A-HALLE-8).
     Hat sich die Halle noch nie gemeldet, ist sie noch nicht eingerichtet – kein Alarm."""
-    zeile = db.get(HallenStatusZeile, 1)
+    # Mit FOR UPDATE wie kontakt(): serialisiert Job und Zustellung (/hall/ereignisse,
+    # /hall/status), damit nie beide gleichzeitig den Marker setzen bzw. löschen.
+    zeile = db.execute(
+        select(HallenStatusZeile).where(HallenStatusZeile.id == 1).with_for_update()
+    ).scalar_one_or_none()
     if zeile is None or jetzt - zeile.empfangen_am <= KONTAKT_GRENZE:
         return False
     if db.get(AppSetting, KONTAKT_MARKER) is not None:

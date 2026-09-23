@@ -27,6 +27,7 @@ SEITEN = [
     "/admin/system",
     "/admin/system/stornos",
     "/admin/system/audit",
+    "/admin/halle",
 ]
 
 STAMMDATEN_UNTERPUNKTE = [
