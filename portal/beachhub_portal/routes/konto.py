@@ -37,8 +37,9 @@ def willkommen(
             status_code=400,
             fehler="Bitte gib einen Namen an.",
         )
+    # Ruling Fix-Runde 1 (Item 10): keine eigene db.commit() hier – anfragen.stelle() committet
+    # gleich beides (Namensänderung und Anfrage) in einer Transaktion.
     konto.anzeigename = name
-    db.commit()
     anfragen.stelle(
         db,
         typ="konto_angelegt",
@@ -65,8 +66,9 @@ def name_aendern(
         return mit_flash(ziel, "Bitte gib einen Namen an.", "fehler")
     if name != konto.anzeigename:
         bisher = konto.anzeigename
+        # Ruling Fix-Runde 1 (Item 10): siehe willkommen() – ein gemeinsamer Commit über
+        # anfragen.stelle() statt eines eigenen db.commit() davor.
         konto.anzeigename = name
-        db.commit()
         anfragen.stelle(
             db,
             typ="konto_geaendert",
@@ -85,7 +87,10 @@ def loeschen_seite(request: Request, konto: Konto = Depends(auth.konto_pflicht))
 def loeschen(
     konto: Konto = Depends(auth.konto_pflicht), db: Session = Depends(get_db)
 ) -> RedirectResponse:
-    anfragen.stelle(db, typ="konto_loeschen", konto_id=konto.id, nutzlast={})
+    # Ruling Fix-Runde 1 (Item 10): Anfrage ohne eigenen Commit anlegen (commit=False) – erst
+    # konten.loesche() schließt Anfrage und Löschung in einer gemeinsamen Transaktion ab und
+    # löscht die Rechnungs-PDFs erst danach von der Platte.
+    anfragen.stelle(db, typ="konto_loeschen", konto_id=konto.id, nutzlast={}, commit=False)
     konten.loesche(db, konto)
     resp = RedirectResponse("/", status_code=303)
     auth.loesche_cookie(resp)

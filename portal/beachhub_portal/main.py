@@ -48,7 +48,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         return response
 
 
+class SessionCookieMiddleware(BaseHTTPMiddleware):
+    """Ruling Fix-Runde 1 (Item 3): `auth.lade_sitzung` verlängert den Ablauf gleitend nur in der
+    Datenbank; das Cookie im Browser behält seinen ursprünglichen `max_age` und verfiele sonst
+    trotzdem fest 30 Tage nach dem ersten Login. `lade_sitzung` vermerkt eine Verlängerung in
+    `request.state.sitzung_verlaengert` (Token); hier wird das Cookie dann mit frischem
+    `max_age` erneut gesetzt."""
+
+    async def dispatch(self, request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        token = getattr(request.state, "sitzung_verlaengert", None)
+        if token:
+            auth.setze_cookie(response, token)
+        return response
+
+
 app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(SessionCookieMiddleware)
 
 static_dir = Path(__file__).resolve().parent / "static"
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")

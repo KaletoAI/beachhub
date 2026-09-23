@@ -20,9 +20,19 @@ HOECHSTENS = 50
 
 
 def stelle(
-    db: Session, *, typ: str, konto_id: uuid.UUID | None, nutzlast: dict[str, Any]
+    db: Session,
+    *,
+    typ: str,
+    konto_id: uuid.UUID | None,
+    nutzlast: dict[str, Any],
+    commit: bool = True,
 ) -> Anfrage:
-    """Legt eine Anfrage an, committet und weckt wartende Long-Polls."""
+    """Legt eine Anfrage an, committet und weckt wartende Long-Polls.
+
+    `commit=False` (Ruling Fix-Runde 1, Item 10): Anfrage nur vormerken, wenn der Aufrufer sie
+    zusammen mit weiteren Änderungen (z. B. Konto löschen) in einer Transaktion abschließen will –
+    committet und weckt dann selbst, nachdem auch die übrigen Änderungen angewendet sind.
+    """
     schema = kanal.NUTZLAST.get(typ)
     if schema is None:
         raise ValueError(f"Unbekannter Anfragetyp: {typ}")
@@ -39,8 +49,9 @@ def stelle(
         status=Anfrage.OFFEN,
     )
     db.add(a)
-    db.commit()
-    wecker.wecke()
+    if commit:
+        db.commit()
+        wecker.wecke()
     return a
 
 

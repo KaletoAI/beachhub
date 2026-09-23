@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 
+from beachhub_portal import auth
 from beachhub_portal.config import settings
 from beachhub_portal.models import Konto
 
@@ -68,12 +69,19 @@ def render(
             flash = _flash.loads(roh, max_age=60)
         except BadSignature:
             flash = None
+    csrf_token = getattr(request.state, "csrf", "")
+    neues_vor_csrf: str | None = None
+    if not csrf_token:
+        # Keine Sitzung: Double-Submit-Vor-Session-Cookie für anonyme Formulare (Ruling
+        # Fix-Runde 1, Item 2) – dieselbe Funktion liest ein vorhandenes Cookie oder liefert
+        # einen neuen Rohwert, der unten als Set-Cookie mitgeschickt wird.
+        csrf_token, neues_vor_csrf = auth.vor_csrf_token(request)
     resp = templates.TemplateResponse(
         request,
         name,
         {
             "konto": konto,
-            "csrf_token": getattr(request.state, "csrf", ""),
+            "csrf_token": csrf_token,
             "flash": flash,
             "betreiber": settings.betreiber_name,
             **ctx,
@@ -82,6 +90,8 @@ def render(
     )
     if roh:
         resp.delete_cookie(FLASH_COOKIE, path="/")
+    if neues_vor_csrf is not None:
+        auth.setze_vor_csrf_cookie(resp, neues_vor_csrf)
     return resp
 
 

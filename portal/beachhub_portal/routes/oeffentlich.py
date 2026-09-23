@@ -1,3 +1,5 @@
+import re
+
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy.orm import Session
@@ -19,9 +21,16 @@ FALSCHER_CODE = (
     "Der Code ist ungültig oder abgelaufen. "
     "Nach mehreren Fehlversuchen bitte einen neuen anfordern."
 )
+CODE_GESPERRT = "Bitte melde dich über den Link in der Mail an."
 UNGUELTIGER_LINK = (
     "Der Anmeldelink ist ungültig, abgelaufen oder wurde schon benutzt. "
     "Bitte fordere einen neuen an."
+)
+UNGUELTIGE_ADRESSE = "Bitte gib eine gültige E-Mail-Adresse an."
+# Ruling Fix-Runde 1 (Item 5): genau eine Adresse, kein Leerraum/Steuerzeichen (auch nicht
+# CR/LF), kein „,“/„<>“ – sonst nie ein 500, sondern immer die neutrale 400-Antwort.
+EMAIL_MUSTER = re.compile(
+    r"^[^\s,<>\x00-\x1f\x7f@]+@[^\s,<>\x00-\x1f\x7f@]+\.[^\s,<>\x00-\x1f\x7f@]+$"
 )
 
 
@@ -39,23 +48,17 @@ def anmelden(
     request: Request,
     email: str = Form(..., max_length=200),
     db: Session = Depends(get_db),
-    # Ruling: löst eine bestehende Sitzung auf, damit die gerenderte Seite deren echtes
-    # CSRF-Token trägt (sonst 403 beim Absenden, wenn im Browser schon eine Sitzung existiert).
-    _konto: Konto | None = Depends(auth.konto_optional),
 ) -> HTMLResponse:
     auth.pruefe_rate_limit(f"anfordern-ip:{auth.client_ip(request)}", 5)
     adresse = auth.normalisiere_email(email)
-    if "@" not in adresse or len(adresse) < 3:
-        return render(
-            request,
-            "anmelden.html",
-            status_code=400,
-            fehler="Bitte gib eine gültige E-Mail-Adresse an.",
-        )
+    if not EMAIL_MUSTER.match(adresse):
+        return render(request, "anmelden.html", status_code=400, fehler=UNGUELTIGE_ADRESSE)
     auth.pruefe_rate_limit(f"anfordern-mail:{adresse}", 3)
     token, code = auth.fordere_an(db, adresse, uhr.jetzt())
     link = f"{settings.base_url.rstrip('/')}/anmelden/link/{token}"
-    zeigen = not settings.smtp_host and settings.app_env != "production"
+    # Ruling Fix-Runde 1 (Item 7): Nur im Entwicklungsmodus, nicht bei jeder Nicht-Produktion
+    # (z. B. Staging) ohne konfiguriertes SMTP.
+    zeigen = not settings.smtp_host and settings.app_env == "dev"
     resp = render(
         request,
         "anmelden.html",
@@ -74,7 +77,10 @@ def anmelden(
     return resp
 
 
-def _angemeldet(db: Session, adresse: str) -> RedirectResponse:
+def _angemeldet(db: Session, request: Request, adresse: str) -> RedirectResponse:
+    # Ruling Fix-Runde 1 (Item 8): eine im Browser noch bestehende Sitzung zuerst beenden, sonst
+    # bleiben nach einem Kontowechsel mehrere Sitzungen parallel gültig.
+    auth.beende(db, request.cookies.get(auth.COOKIE))
     konto, token = auth.melde_an(db, adresse, uhr.jetzt())
     resp = RedirectResponse("/" if konto.anzeigename else "/willkommen", status_code=303)
     auth.setze_cookie(resp, token)
@@ -87,27 +93,23 @@ def anmelden_mit_code(
     email: str = Form(..., max_length=200),
     code: str = Form(..., max_length=12),
     db: Session = Depends(get_db),
-    # Ruling: siehe anmelden() – Code-Anmeldeseite braucht bei bestehender Sitzung das echte Token.
-    _konto: Konto | None = Depends(auth.konto_optional),
 ) -> Response:
     auth.pruefe_rate_limit(f"code-ip:{auth.client_ip(request)}", 10)
     adresse = auth.normalisiere_email(email)
-    if not auth.pruefe_code(db, adresse, code, uhr.jetzt()):
+    jetzt = uhr.jetzt()
+    if auth.code_gesperrt(db, adresse, jetzt):
+        return render(
+            request, "anmelden.html", status_code=401, fehler=CODE_GESPERRT, code_email=adresse
+        )
+    if not auth.pruefe_code(db, adresse, code, jetzt):
         return render(
             request, "anmelden.html", status_code=401, fehler=FALSCHER_CODE, code_email=adresse
         )
-    return _angemeldet(db, adresse)
+    return _angemeldet(db, request, adresse)
 
 
 @router.get("/anmelden/link/{token}", response_class=HTMLResponse)
-def link_seite(
-    request: Request,
-    token: str,
-    db: Session = Depends(get_db),
-    # Ruling: siehe anmelden() – ohne das rendert die Link-Seite bei bestehender Sitzung ein
-    # leeres CSRF-Token, und das Einlösen schlägt mit 403 fehl (Review-Fund R16).
-    _konto: Konto | None = Depends(auth.konto_optional),
-) -> HTMLResponse:
+def link_seite(request: Request, token: str, db: Session = Depends(get_db)) -> HTMLResponse:
     """Nur ein Knopf: Mail-Scanner öffnen Links per GET und würden ihn sonst verbrauchen."""
     if auth.email_zum_link(db, token, uhr.jetzt()) is None:
         return render(request, "anmelden.html", status_code=400, fehler=UNGUELTIGER_LINK)
@@ -119,7 +121,7 @@ def link_einloesen(request: Request, token: str, db: Session = Depends(get_db)) 
     adresse = auth.loese_link_ein(db, token, uhr.jetzt())
     if adresse is None:
         return render(request, "anmelden.html", status_code=400, fehler=UNGUELTIGER_LINK)
-    return _angemeldet(db, adresse)
+    return _angemeldet(db, request, adresse)
 
 
 @router.post("/abmelden")

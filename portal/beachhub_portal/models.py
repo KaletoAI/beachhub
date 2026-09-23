@@ -47,6 +47,19 @@ class LoginToken(Base):
     verwendet_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CodeFehlversuch(Base):
+    """Fehlversuche beim Code-Login je Adresse, unabhängig von einzelnen `LoginToken`-Zeilen
+    (die bei jeder neuen Anforderung verworfen werden): dauerhafte Grundlage für die 24-Stunden-
+    Sperre (Ruling Fix-Runde 1) – ein Neustart des Portals darf die Zählung nicht zurücksetzen."""
+
+    __tablename__ = "code_fehlversuch"
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    email: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    versucht_am: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: uhr.jetzt(), nullable=False
+    )
+
+
 class Sitzung(Base):
     __tablename__ = "session"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

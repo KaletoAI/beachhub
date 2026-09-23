@@ -1,29 +1,40 @@
 """Anmeldung per Link oder Code aus der Mail (Muster SportAbo-Manager), serverseitige
 Sessions, CSRF-Token und Rate-Limits (Hauptspec § 10)."""
 
-import hmac
 import secrets
+import threading
 import time as _time
 import uuid
 from collections import defaultdict
 from datetime import datetime, timedelta
 
 from fastapi import Depends, HTTPException, Request, Response
-from sqlalchemy import delete, select
+from itsdangerous import BadSignature, URLSafeTimedSerializer
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from beachhub_portal import uhr
 from beachhub_portal.config import settings
 from beachhub_portal.database import get_db
-from beachhub_portal.models import Konto, LoginToken, Sitzung
-from beachhub_portal.sicherheit import hash_token
+from beachhub_portal.models import CodeFehlversuch, Konto, LoginToken, Sitzung
+from beachhub_portal.sicherheit import hash_code, hash_token
 
 COOKIE = "bp_session"
 SESSION_DAUER = timedelta(days=30)
 TOKEN_DAUER = timedelta(minutes=15)
 MAX_CODE_FEHLVERSUCHE = 5
 RATE_FENSTER_SEKUNDEN = 15 * 60
+# Ruling Fix-Runde 1 (Item 4): 20 Fehlversuche je Adresse in 24 h, unabhängig von einzelnen
+# Tokens – die bei jeder neuen Anforderung verworfen werden und den Zähler sonst mitnehmen.
+CODE_SPERRE_FENSTER = timedelta(hours=24)
+CODE_SPERRE_MAXIMUM = 20
+# Ruling Fix-Runde 1 (Item 2): Double-Submit-CSRF-Cookie für Formulare ohne Sitzung (Anmelden).
+VOR_CSRF_COOKIE = "bp_vor_csrf"
+VOR_CSRF_DAUER = timedelta(hours=1)
+
 _versuche: dict[str, list[float]] = defaultdict(list)
+_versuche_sperre = threading.Lock()  # Ruling Fix-Runde 1 (Item 1): verlorene Updates verhindern
+_vor_csrf_signer = URLSafeTimedSerializer(settings.secret_key, salt="vor-csrf")
 
 
 def normalisiere_email(email: str) -> str:
@@ -39,7 +50,7 @@ def fordere_an(db: Session, email: str, jetzt: datetime) -> tuple[str, str]:
         LoginToken(
             email=email,
             token_hash=hash_token(token),
-            code_hash=hash_token(code),
+            code_hash=hash_code(code, settings.secret_key),
             laeuft_ab=jetzt + TOKEN_DAUER,
         )
     )
@@ -47,17 +58,41 @@ def fordere_an(db: Session, email: str, jetzt: datetime) -> tuple[str, str]:
     return token, code
 
 
+def _code_fehlversuche_24h(db: Session, email: str, jetzt: datetime) -> int:
+    n = db.scalar(
+        select(func.count(CodeFehlversuch.id)).where(
+            CodeFehlversuch.email == email,
+            CodeFehlversuch.versucht_am > jetzt - CODE_SPERRE_FENSTER,
+        )
+    )
+    return int(n or 0)
+
+
+def code_gesperrt(db: Session, email: str, jetzt: datetime) -> bool:
+    """Obergrenze 20 Code-Fehlversuche je Adresse in 24 Stunden (Ruling Fix-Runde 1, Item 4):
+    dauerhaft in der DB und unabhängig von einzelnen Tokens. Der Anmeldelink bleibt davon
+    unberührt – nur die Codeeingabe wird für die Adresse vorübergehend gesperrt."""
+    return _code_fehlversuche_24h(db, email, jetzt) >= CODE_SPERRE_MAXIMUM
+
+
 def pruefe_code(db: Session, email: str, code: str, jetzt: datetime) -> bool:
+    if code_gesperrt(db, email, jetzt):
+        return False
+    # Ruling Fix-Runde 1 (Item 1): Zeilen sperren, sonst lesen parallele Fehlversuche denselben
+    # alten Stand und überschreiben sich gegenseitig – das Fünf-Versuche-Limit wäre umgehbar.
     offen = db.scalars(
-        select(LoginToken).where(
+        select(LoginToken)
+        .where(
             LoginToken.email == email,
             LoginToken.verwendet_am.is_(None),
             LoginToken.laeuft_ab > jetzt,
         )
+        .with_for_update()
     ).all()
-    gesucht = hash_token(code.strip())
-    treffer = next((t for t in offen if hmac.compare_digest(t.code_hash, gesucht)), None)
+    gesucht = hash_code(code.strip(), settings.secret_key)
+    treffer = next((t for t in offen if secrets.compare_digest(t.code_hash, gesucht)), None)
     if treffer is None:
+        db.add(CodeFehlversuch(email=email, versucht_am=jetzt))
         for t in offen:
             t.fehlversuche += 1
             if t.fehlversuche >= MAX_CODE_FEHLVERSUCHE:
@@ -109,7 +144,13 @@ def melde_an(db: Session, email: str, jetzt: datetime) -> tuple[Konto, str]:
     return konto, token
 
 
-def lade_sitzung(db: Session, token: str | None, jetzt: datetime) -> Sitzung | None:
+def lade_sitzung(
+    db: Session, token: str | None, jetzt: datetime, request: Request | None = None
+) -> Sitzung | None:
+    """`request`, falls übergeben: Verlängert `lade_sitzung` die Sitzung, wird das an
+    `request.state` vermerkt, damit `SessionCookieMiddleware` das Cookie mit neuem `max_age`
+    erneut setzt (Ruling Fix-Runde 1, Item 3) – die DB verlängert sonst gleitend, das Cookie im
+    Browser verfällt aber weiter fest nach 30 Tagen ab dem ersten Login."""
     if not token:
         return None
     s = db.scalar(select(Sitzung).where(Sitzung.token_hash == hash_token(token)))
@@ -118,6 +159,8 @@ def lade_sitzung(db: Session, token: str | None, jetzt: datetime) -> Sitzung | N
     if s.laeuft_ab - jetzt < SESSION_DAUER - timedelta(days=1):
         s.laeuft_ab = jetzt + SESSION_DAUER  # gleitend, höchstens einmal am Tag geschrieben
         db.commit()
+        if request is not None:
+            request.state.sitzung_verlaengert = token
     return s
 
 
@@ -144,7 +187,7 @@ def loesche_cookie(response: Response) -> None:
 
 
 def aktuelles_konto(request: Request, db: Session) -> Konto | None:
-    s = lade_sitzung(db, request.cookies.get(COOKIE), uhr.jetzt())
+    s = lade_sitzung(db, request.cookies.get(COOKIE), uhr.jetzt(), request)
     if s is None:
         return None
     request.state.csrf = s.csrf_token
@@ -164,14 +207,68 @@ def konto_pflicht(request: Request, db: Session = Depends(get_db)) -> Konto:
     return konto
 
 
+def vor_csrf_token(request: Request) -> tuple[str, str | None]:
+    """CSRF-Token für Formulare ohne Sitzung (Double-Submit-Cookie, Ruling Fix-Runde 1, Item 2):
+    aus dem signierten Cookie lesen oder neu erzeugen. Gibt (Token, neuer Cookie-Rohwert) zurück;
+    Zweites ist nur gesetzt, wenn ein neues Cookie geschrieben werden muss."""
+    roh = request.cookies.get(VOR_CSRF_COOKIE)
+    if roh:
+        try:
+            wert: str = _vor_csrf_signer.loads(roh, max_age=int(VOR_CSRF_DAUER.total_seconds()))
+            return wert, None
+        except BadSignature:
+            pass
+    wert = secrets.token_urlsafe(32)
+    return wert, wert
+
+
+def setze_vor_csrf_cookie(response: Response, wert: str) -> None:
+    response.set_cookie(
+        VOR_CSRF_COOKIE,
+        _vor_csrf_signer.dumps(wert),
+        httponly=True,
+        secure=settings.cookie_secure,
+        samesite="lax",
+        max_age=int(VOR_CSRF_DAUER.total_seconds()),
+        path="/",
+    )
+
+
+def pruefe_vor_csrf(request: Request, eingereicht: str) -> bool:
+    roh = request.cookies.get(VOR_CSRF_COOKIE)
+    if not roh:
+        return False
+    try:
+        erwartet: str = _vor_csrf_signer.loads(roh, max_age=int(VOR_CSRF_DAUER.total_seconds()))
+    except BadSignature:
+        return False
+    # Ruling Fix-Runde 1 (Item 9): auf bytes vergleichen – compare_digest lehnt zwei Strings mit
+    # Nicht-ASCII-Zeichen mit TypeError ab (500 statt 403 bei einem manipulierten Formularfeld).
+    return secrets.compare_digest(erwartet.encode(), eingereicht.encode())
+
+
 async def verify_csrf(request: Request, db: Session = Depends(get_db)) -> None:
+    """Läuft für jede Route der geschützten Router (main.py), auch für GET: setzt
+    `request.state.csrf` aus einer bestehenden Sitzung, egal welche Methode – so tragen auch
+    reine Lese-Seiten (z. B. der Anmeldelink) immer das echte Token, statt es über einen
+    Umweg-Parameter je Route nachzurüsten (Ruling Fix-Runde 1, Item 2).
+
+    Bei änderenden Methoden ohne Sitzung wird nicht mehr stillschweigend durchgelassen: Das
+    ermöglichte bisher Login-CSRF (eine fremde Seite loggt ein abgemeldetes Opfer unbemerkt in
+    das Konto des Angreifers ein). Ohne Sitzung gilt stattdessen das Double-Submit-Vor-Session-
+    Cookie, das dieselbe render()-Funktion für jedes anonyme Formular ausstellt."""
+    s = lade_sitzung(db, request.cookies.get(COOKIE), uhr.jetzt(), request)
+    if s is not None:
+        request.state.csrf = s.csrf_token
     if request.method in ("GET", "HEAD", "OPTIONS"):
         return
-    s = lade_sitzung(db, request.cookies.get(COOKIE), uhr.jetzt())
-    if s is None:
-        return  # Anmeldeformulare ohne Session; dort greift das Rate-Limit
     form = await request.form()
-    if not secrets.compare_digest(str(form.get("csrf_token", "")), s.csrf_token):
+    eingereicht = str(form.get("csrf_token", ""))
+    if s is not None:
+        gueltig = secrets.compare_digest(eingereicht.encode(), s.csrf_token.encode())
+    else:
+        gueltig = pruefe_vor_csrf(request, eingereicht)
+    if not gueltig:
         raise HTTPException(
             status_code=403,
             detail="Die Seite ist veraltet. Bitte lade sie neu und versuche es noch einmal.",
@@ -184,13 +281,18 @@ def client_ip(request: Request) -> str:
 
 def pruefe_rate_limit(schluessel: str, maximum: int) -> None:
     jetzt = _time.monotonic()
-    _versuche[schluessel] = [t for t in _versuche[schluessel] if jetzt - t < RATE_FENSTER_SEKUNDEN]
-    if len(_versuche[schluessel]) >= maximum:
-        raise HTTPException(
-            status_code=429, detail="Zu viele Versuche. Bitte in einigen Minuten erneut versuchen."
-        )
-    _versuche[schluessel].append(jetzt)
+    with _versuche_sperre:
+        rest = [t for t in _versuche[schluessel] if jetzt - t < RATE_FENSTER_SEKUNDEN]
+        if len(rest) >= maximum:
+            _versuche[schluessel] = rest
+            raise HTTPException(
+                status_code=429,
+                detail="Zu viele Versuche. Bitte in einigen Minuten erneut versuchen.",
+            )
+        rest.append(jetzt)
+        _versuche[schluessel] = rest
 
 
 def reset_rate_limits() -> None:
-    _versuche.clear()
+    with _versuche_sperre:
+        _versuche.clear()
