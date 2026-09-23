@@ -1,0 +1,78 @@
+"""Schnittstelle für den Hallendienst (Hauptspec § 8.2). Der Hallendienst ruft, das
+Hauptsystem antwortet – nie umgekehrt. Caddy erzwingt mTLS, hier zusätzlich ein Token."""
+
+import hmac
+from typing import Annotated
+
+from beachhub_shared.hallenplan import (
+    DOKUMENT,
+    EreignisAntwort,
+    EreignisLieferung,
+    HallenStatus,
+    StatusAntwort,
+)
+from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi.responses import JSONResponse, Response
+from sqlalchemy.orm import Session
+
+from beachhub_core import clock
+from beachhub_core.config import settings
+from beachhub_core.database import get_db
+from beachhub_core.models import LesestandVersion
+from beachhub_core.services import benachrichtigung, halle, lesestand
+
+
+def pruefe_token(authorization: Annotated[str, Header()] = "") -> None:
+    if not settings.hall_token:
+        raise HTTPException(status_code=404)
+    erwartet = f"Bearer {settings.hall_token}"
+    if not hmac.compare_digest(authorization.encode(), erwartet.encode()):
+        raise HTTPException(status_code=401, detail="Token ungültig")
+
+
+router = APIRouter(prefix="/hall", dependencies=[Depends(pruefe_token)])
+
+
+@router.get("/plan")
+def plan(ab: int = 0, db: Session = Depends(get_db)) -> Response:
+    zeile = db.get(LesestandVersion, DOKUMENT)
+    dok = lesestand.lade(DOKUMENT)
+    if zeile is None or zeile.geaendert or dok is None or dok.version != zeile.version:
+        try:
+            dok = lesestand.publiziere(db, DOKUMENT)
+            db.commit()
+        except FileNotFoundError as e:
+            db.rollback()
+            raise HTTPException(status_code=503, detail="Signaturschlüssel fehlt") from e
+    if ab == dok.version:
+        return Response(status_code=304)
+    return JSONResponse(dok.model_dump(mode="json"))
+
+
+@router.post("/ereignisse")
+def ereignisse(lieferung: EreignisLieferung, db: Session = Depends(get_db)) -> EreignisAntwort:
+    jetzt = clock.now(db)
+    bis, neu = halle.speichere_ereignisse(db, lieferung, jetzt)
+    entwarnung = halle.kontakt(db, jetzt, lieferung.status)
+    mails = halle.alarm_mails(db, neu, jetzt)
+    antwort = EreignisAntwort(
+        bestaetigt_bis=bis,
+        plan_neu=halle.plan_neu(db, lieferung.status.planversion if lieferung.status else None),
+    )
+    db.commit()
+    for betreff, text in mails:
+        benachrichtigung.betreiber_alarm(betreff, text)
+    if entwarnung:
+        benachrichtigung.betreiber_alarm("Halle wieder verbunden", entwarnung)
+    return antwort
+
+
+@router.post("/status")
+def status(daten: HallenStatus, db: Session = Depends(get_db)) -> StatusAntwort:
+    jetzt = clock.now(db)
+    entwarnung = halle.kontakt(db, jetzt, daten)
+    antwort = StatusAntwort(plan_neu=halle.plan_neu(db, daten.planversion))
+    db.commit()
+    if entwarnung:
+        benachrichtigung.betreiber_alarm("Halle wieder verbunden", entwarnung)
+    return antwort

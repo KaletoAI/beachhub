@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     smtp_password: str = ""
     email_from: str = "beachhub@example.org"
     enable_scheduler: bool = True
+    hall_token: str = ""  # leer = Hallenschnittstelle abgeschaltet (404)
     betreiber_name: str = "Beachhalle"
     betreiber_adresse: str = ""
     betreiber_ust_id: str = ""
