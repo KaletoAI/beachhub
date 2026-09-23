@@ -308,6 +308,25 @@ def test_checkout_url_offene_weiterleitung_wird_abgelehnt(
     assert stand["zustand"] == "fehler" and stand["ziel"] is None
 
 
+@pytest.mark.parametrize(
+    ("url", "erwartet"),
+    [
+        ("//evil", False),  # protokollrelativ – Browser lesen das als fremden Host
+        ("/\\evil", False),  # Backslash direkt nach "/" – Browser lesen \ wie / bei http(s)
+        ("/\\/evil", False),  # dito, zweites Zeichen ist der Backslash
+        ("https:evil", False),  # kein "//", also kein Host (urlparse: netloc == "")
+        ("HTTPS://x", True),  # Schema ist laut RFC 3986 case-insensitiv, wie im Browser
+        (" /x", False),  # führender Leerraum
+        ("/x\ny", False),  # eingebettetes Steuerzeichen (Zeilenumbruch)
+        ("javascript:alert(1)", False),  # kein https, kein relativer Pfad
+        ("/test-zahlung/abc?betrag=1", True),  # gültiger relativer Pfad (Fake-Zahlung)
+        ("https://zahlung.example/x", True),  # gültige absolute https-URL
+    ],
+)
+def test_gueltige_checkout_url(url: str, erwartet: bool) -> None:
+    assert anfragen._gueltige_checkout_url(url) is erwartet
+
+
 def test_nach_zahlung_bestaetigt(angemeldet: TestClient, welt, db: Session) -> None:
     a = _anfrage(db, angemeldet.konto_id)
     bid = uuid.uuid4()

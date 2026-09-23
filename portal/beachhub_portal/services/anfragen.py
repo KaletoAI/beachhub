@@ -3,10 +3,12 @@
 Das Portal entscheidet nichts. Es legt Anfragen ab, liefert sie aus und merkt sich die Antwort.
 """
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Literal
+from urllib.parse import urlparse
 
 from beachhub_shared import kanal
 from sqlalchemy import and_, or_, select
@@ -164,16 +166,30 @@ class Stand:
     zahlung_url: str | None = None
 
 
+# ASCII-Steuerzeichen (inkl. Tab/Zeilenumbruch/CR) und Leerraum – auch am Rand verboten, sonst
+# ließe sich z. B. ein führendes Leerzeichen oder ein eingebetteter Zeilenumbruch missbrauchen.
+_STEUERZEICHEN_ODER_LEERRAUM = re.compile(r"[\x00-\x20\x7f]")
+
+
 def _gueltige_checkout_url(url: str | None) -> bool:
     """Verteidigung gegen eine offene Weiterleitung (N-1: Das Hauptsystem ist zwar
     vertrauenswürdig, das Portal erzeugt aber selbst kein Ziel aus dieser fremden Angabe, ohne
-    es zu prüfen): nur ein absoluter https-Link oder ein Pfad, der mit genau einem `/` beginnt
-    ("//host/…" wäre eine protokollrelative, vom Browser als fremder Host interpretierte URL)."""
-    if url is None:
+    es zu prüfen). Fix-Runde 2: Browser behandeln bei http(s)-URLs einen Backslash wie einen
+    Schrägstrich – `/\\evil` und `/\\/evil` würden wie `//evil` als protokollrelative, absolute
+    URL auf einen fremden Host gelesen. Backslashes sind deshalb überall verboten, nicht nur am
+    Anfang.
+
+    Akzeptiert:
+    - einen Pfad, der mit genau einem `/` beginnt (zweites Zeichen weder `/` noch `\\`),
+    - eine absolute `https://…`-URL mit nicht leerem Host (per `urlparse`; das Schema wird dabei
+      klein geschrieben – case-insensitiv wie im Web üblich, `HTTPS://…` ist also gültig).
+    Abgelehnt wird jede URL mit Backslash, ASCII-Steuerzeichen oder Leerraum (auch am Rand)."""
+    if url is None or "\\" in url or _STEUERZEICHEN_ODER_LEERRAUM.search(url):
         return False
-    if url.startswith("https://"):
-        return True
-    return url.startswith("/") and not url.startswith("//")
+    if url.startswith("/"):
+        return len(url) > 1 and url[1] not in ("/", "\\")
+    teile = urlparse(url)
+    return teile.scheme == "https" and bool(teile.netloc)
 
 
 def _nach_zahlung(
