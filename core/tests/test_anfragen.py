@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from beachhub_core import clock
 from beachhub_core.config import settings
+from beachhub_core.database import SessionLocal
 from beachhub_core.models import (
     AnfrageVerarbeitet,
     Audit,
@@ -18,12 +19,14 @@ from beachhub_core.models import (
     Kundengruppe,
     LesestandVersion,
     Tarif,
+    utcnow,
 )
 from beachhub_core.services import (
     anfragen,
     buchungen,
     konfiguration,
     kunden,
+    lesestand,
     rechnung_pdf,
     rechnungen,
 )
@@ -95,6 +98,34 @@ def test_konto_angelegt_verknuepft_bestehenden_kunden(db: Session, welt) -> None
     neu = uuid.uuid4()
     assert _angelegt(db, neu).id == alt.id  # Portal wiederhergestellt: neue Konto-ID
     assert db.get(Kunde, alt.id).portal_konto_id == neu
+
+
+def test_konto_angelegt_ignoriert_anonymisierten_kunden_mit_gleicher_email(
+    db: Session, welt
+) -> None:
+    # kunden.anonymisiere überschreibt die E-Mail zwar immer mit einem Hash – der Ausschluss in
+    # anfragen._konto_angelegt bleibt trotzdem bestehen, falls sich das je ändert: Ein gelöschtes
+    # Konto darf nie über eine (zufällig) passende E-Mail mit einem neuen Portal-Konto verknüpft
+    # werden. Ohne den Ausschluss würde die folgende Anfrage `alt.portal_konto_id` setzen und
+    # einen Audit-Eintrag mit quelle="portal" auf den bereits gelöschten Kunden schreiben.
+    _, p, _ = welt
+    alt = kunden.lege_an(db, name="Anna Alt", email="anna@x.de", kundengruppe_id=p.id)
+    alt.anonymisiert_am = utcnow()
+    db.commit()
+    antwort, _ = anfragen.bearbeite(
+        db, anfrage("konto_angelegt", uuid.uuid4(), email="anna@x.de", anzeigename="Anna")
+    )
+    # Die E-Mail bleibt in diesem (künstlich herbeigeführten) Zustand auf `alt` belegt, daher
+    # scheitert die Neuanlage über kunden.lege_an – entscheidend ist, dass `alt` dabei
+    # unangetastet bleibt, statt reaktiviert zu werden.
+    assert antwort.status == "fehler"
+    db.expire_all()
+    alt_danach = db.get(Kunde, alt.id)
+    assert alt_danach.portal_konto_id is None
+    assert alt_danach.anonymisiert_am is not None
+    assert not db.scalars(
+        select(Audit).where(Audit.objekt_id == alt.id, Audit.quelle == "portal")
+    ).all()
 
 
 def test_konto_angelegt_zweimal_gleicher_kunde(db: Session, welt) -> None:
@@ -182,7 +213,7 @@ def test_buchung_anfragen_mit_rueckkehradresse(
     # portal_url ist nur die mTLS-Kanaladresse (:8443); die Rückkehradresse für den
     # Kunden-Browser stammt aus portal_oeffentliche_url.
     monkeypatch.setattr(settings, "portal_url", "https://portal-kanal.example:8443")
-    monkeypatch.setattr(settings, "portal_oeffentliche_url", "https://portal.example:8443")
+    monkeypatch.setattr(settings, "portal_oeffentliche_url", "https://portal.example")
     a = anfrage(
         "buchung_anfragen",
         konto,
@@ -193,7 +224,7 @@ def test_buchung_anfragen_mit_rueckkehradresse(
     antwort, _ = anfragen.bearbeite(db, a)
     assert antwort.status == "reserviert"
     assert (
-        f"zurueck=https%3A%2F%2Fportal.example%3A8443%2Fzahlung%2Fzurueck%3Fanfrage%3D{a.anfrage_id}"
+        f"zurueck=https%3A%2F%2Fportal.example%2Fzahlung%2Fzurueck%3Fanfrage%3D{a.anfrage_id}"
         in antwort.checkout_url
     )
     assert db.get(Buchung, antwort.buchung_id).anfrage_id == a.anfrage_id
@@ -272,7 +303,10 @@ def test_ausnahme_wird_fehler_mit_alarm(
     def kaputt(*args, **kwargs):
         raise RuntimeError("kaputt")
 
-    monkeypatch.setattr(anfragen, "_konto_angelegt", kaputt)
+    # Wirft erst NACHDEM kunden.lege_an den neuen Kunden bereits geflusht hat (letzter Schritt
+    # von _konto_angelegt) – der Rollback muss diesen Teil-Schreibvorgang zurücknehmen, nicht
+    # nur bestätigen, dass "nichts geschah".
+    monkeypatch.setattr(lesestand, "markiere_geaendert", kaputt)
     a = anfrage("konto_angelegt", uuid.uuid4(), email="a@x.de", anzeigename="A")
     antwort, nachlauf = anfragen.bearbeite(db, a)
     assert antwort.status == "fehler"
@@ -280,4 +314,62 @@ def test_ausnahme_wird_fehler_mit_alarm(
     for schritt in nachlauf:
         schritt(db)
     assert mail_ausgang[-1]["betreff"] == "[Beachhub] Portal-Anfrage fehlgeschlagen"
+    assert db.scalars(select(Kunde)).all() == []
+
+
+def test_gleichzeitige_zustellung_liefert_die_andere_antwort(
+    db: Session, welt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Zwei Zustellungen derselben Anfrage laufen in unabhängigen Sessions gleichzeitig ab. Die
+    # andere gewinnt den Wettlauf um den Commit von AnfrageVerarbeitet; unser eigener Commit
+    # kollidiert danach am Primärschlüssel (anfrage_id) und muss die schon gespeicherte Antwort
+    # der anderen Session übernehmen, statt selbst noch einmal etwas anzulegen.
+    a = anfrage("konto_angelegt", uuid.uuid4(), email="a@x.de", anzeigename="A")
+    andere_antwort = {"status": "ok", "kunde_id": str(uuid.uuid4())}
+    original = anfragen.verarbeite
+
+    def wettlauf(db_: Session, anfrage_: kanal.Anfrage):
+        erg = original(db_, anfrage_)
+        with SessionLocal() as andere:
+            andere.add(
+                AnfrageVerarbeitet(
+                    anfrage_id=anfrage_.anfrage_id,
+                    typ=anfrage_.typ,
+                    antwort_json=andere_antwort,
+                )
+            )
+            andere.commit()
+        return erg
+
+    monkeypatch.setattr(anfragen, "verarbeite", wettlauf)
+    antwort, nachlauf = anfragen.bearbeite(db, a)
+    assert antwort.model_dump(mode="json", exclude_none=True) == andere_antwort
+    assert nachlauf == []
+    # Unser eigener Versuch (kunden.lege_an im Original-verarbeite) wurde durch den Rollback
+    # nach dem kollidierenden Commit zurückgenommen – kein zusätzlicher Kunde.
+    assert db.scalars(select(Kunde)).all() == []
+
+
+def test_gleichzeitige_zustellung_im_fehlerpfad_liefert_die_andere_antwort(
+    db: Session, welt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Diese Session scheitert (Ausnahme); während sie noch dabei ist, hat eine andere Session die
+    # Anfrage bereits erfolgreich verarbeitet und committet. Der Commit der lokalen "fehler"-
+    # Antwort muss ebenfalls gegen diesen Wettlauf abgesichert sein und darf die echte Antwort
+    # nicht überschreiben.
+    a = anfrage("konto_angelegt", uuid.uuid4(), email="a@x.de", anzeigename="A")
+    andere_antwort = {"status": "ok", "kunde_id": str(uuid.uuid4())}
+
+    def kaputt(*args, **kwargs):
+        with SessionLocal() as andere:
+            andere.add(
+                AnfrageVerarbeitet(anfrage_id=a.anfrage_id, typ=a.typ, antwort_json=andere_antwort)
+            )
+            andere.commit()
+        raise RuntimeError("kaputt")
+
+    monkeypatch.setattr(anfragen, "_konto_angelegt", kaputt)
+    antwort, nachlauf = anfragen.bearbeite(db, a)
+    assert antwort.model_dump(mode="json", exclude_none=True) == andere_antwort
+    assert nachlauf == []
     assert db.scalars(select(Kunde)).all() == []

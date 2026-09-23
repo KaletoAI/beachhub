@@ -7,7 +7,6 @@ das Hauptsystem selbst über `kunde.portal_konto_id`, nie über ein Feld der Anf
 import base64
 import logging
 from collections.abc import Callable
-from pathlib import Path
 from typing import Any
 
 from beachhub_shared import kanal
@@ -61,7 +60,14 @@ def _konto_angelegt(db: Session, anfrage: kanal.Anfrage, n: kanal.KontoAngelegt)
     k = _kunde_zum_konto(db, anfrage.konto_id)
     if k is None:
         email = n.email.strip().lower()
-        k = db.scalar(select(Kunde).where(Kunde.email == email).with_for_update())
+        # Ein anonymisierter Kunde trägt zwar eine geschwärzte E-Mail (kunden.anonymisiere), der
+        # Ausschluss hier bleibt trotzdem bestehen: Ein gelöschtes Konto darf über keinen Pfad
+        # wiederbelebt werden, auch nicht durch eine künftige Änderung an der Anonymisierung.
+        k = db.scalar(
+            select(Kunde)
+            .where(Kunde.email == email, Kunde.anonymisiert_am.is_(None))
+            .with_for_update()
+        )
         if k is None:
             gruppe = _portal_gruppe(db)
             if gruppe is None:
@@ -153,7 +159,10 @@ def _rechnung_anfordern(
     )
     if r is None or not r.pdf_pfad:
         return abgelehnt("nicht_gefunden")
-    if not rechnung_pdf.pruefe_integritaet(r):
+    # Einmal lesen und gegen pdf_sha256 prüfen; dieselben Bytes gehen (falls intakt) auch raus –
+    # kein zweiter, ungeprüfter Lesevorgang derselben Datei.
+    daten = rechnung_pdf.lese_geprueft(r)
+    if daten is None:
         text = (
             f"Das archivierte PDF der Rechnung {r.nummer} fehlt oder stimmt nicht mit seiner "
             "Prüfsumme überein. Der Kunde konnte es im Portal nicht abrufen."
@@ -161,7 +170,6 @@ def _rechnung_anfordern(
         erg = abgelehnt("nicht_gefunden")
         erg.nach_commit.append(alarm("Rechnungs-PDF beschädigt", text))
         return erg
-    daten = Path(r.pdf_pfad).read_bytes()
     return ok(pdf_base64=base64.b64encode(daten).decode(), dateiname=f"Rechnung-{r.nummer}.pdf")
 
 
@@ -203,12 +211,24 @@ def _speichere(db: Session, anfrage: kanal.Anfrage, antwort: kanal.Antwort) -> N
     )
 
 
+def _bereits_verarbeitet(
+    db: Session, anfrage: kanal.Anfrage
+) -> tuple[kanal.Antwort, list[Nachlauf]] | None:
+    vorhanden = db.get(AnfrageVerarbeitet, anfrage.anfrage_id)
+    if vorhanden is None:
+        return None
+    return kanal.Antwort.model_validate(vorhanden.antwort_json), []
+
+
 def bearbeite(db: Session, anfrage: kanal.Anfrage) -> tuple[kanal.Antwort, list[Nachlauf]]:
     """Verarbeitet eine Anfrage genau einmal und committet. Eine erneut zugestellte Anfrage
-    bekommt die gespeicherte Antwort, ohne dass etwas ein zweites Mal geschieht."""
-    vorhanden = db.get(AnfrageVerarbeitet, anfrage.anfrage_id)
-    if vorhanden is not None:
-        return kanal.Antwort.model_validate(vorhanden.antwort_json), []
+    bekommt die gespeicherte Antwort, ohne dass etwas ein zweites Mal geschieht. Committet eine
+    andere Session dieselbe anfrage_id zuerst (Wettlauf zweier Zustellungen), kollidiert unser
+    eigener Commit am Primärschlüssel von anfrage_verarbeitet; dann gilt die zuerst gespeicherte
+    Antwort."""
+    ergebnis = _bereits_verarbeitet(db, anfrage)
+    if ergebnis is not None:
+        return ergebnis
     try:
         erg = verarbeite(db, anfrage)
         _speichere(db, anfrage, erg.antwort)
@@ -216,16 +236,32 @@ def bearbeite(db: Session, anfrage: kanal.Anfrage) -> tuple[kanal.Antwort, list[
         return erg.antwort, erg.nach_commit
     except IntegrityError:
         db.rollback()
-        vorhanden = db.get(AnfrageVerarbeitet, anfrage.anfrage_id)
-        if vorhanden is not None:
-            return kanal.Antwort.model_validate(vorhanden.antwort_json), []
+        ergebnis = _bereits_verarbeitet(db, anfrage)
+        if ergebnis is not None:
+            return ergebnis
         logger.exception("Anfrage %s (%s) fehlgeschlagen", anfrage.anfrage_id, anfrage.typ)
     except Exception:
         db.rollback()
         logger.exception("Anfrage %s (%s) fehlgeschlagen", anfrage.anfrage_id, anfrage.typ)
+
     fehler = kanal.Antwort(status="fehler")
-    _speichere(db, anfrage, fehler)
-    db.commit()
+    try:
+        _speichere(db, anfrage, fehler)
+        db.commit()
+    except IntegrityError:
+        # Auch hier kann inzwischen eine andere Session (mit einer echten, erfolgreichen
+        # Antwort) gewonnen haben – deren Antwort gilt, statt unseres lokalen "fehler" darüber
+        # zu schreiben.
+        db.rollback()
+        ergebnis = _bereits_verarbeitet(db, anfrage)
+        if ergebnis is not None:
+            return ergebnis
+        logger.exception(
+            "Anfrage %s (%s): Fehlerantwort konnte nicht gespeichert werden",
+            anfrage.anfrage_id,
+            anfrage.typ,
+        )
+        raise
     text = (
         f"Die Portal-Anfrage {anfrage.anfrage_id} vom Typ {anfrage.typ} konnte nicht "
         "verarbeitet werden. Der Kunde sieht eine Fehlermeldung. Details im Log des Hauptsystems."
