@@ -1,5 +1,6 @@
 """Testhilfen: Schlüsselpaar des „Hauptsystems“, signierte Dokumente, Beispielinhalte."""
 
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -132,3 +133,9 @@ def speichere(db: Session, name: str, inhalt: dict[str, Any], version: int = 1) 
         )
     )
     db.commit()
+
+
+def csrf(html: str) -> str:
+    treffer = re.search(r'name="csrf_token" value="([^"]+)"', html)
+    assert treffer, "kein CSRF-Token in der Seite"
+    return treffer.group(1)

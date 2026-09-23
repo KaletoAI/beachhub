@@ -3,15 +3,16 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from beachhub_portal import auth
 from beachhub_portal.config import INSECURE_SECRET, pruefe_produktionsstart, settings
-from beachhub_portal.routes import kanal
+from beachhub_portal.routes import kanal, konto, oeffentlich
 from beachhub_portal.templating import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -63,7 +64,10 @@ def health() -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+csrf = [Depends(auth.verify_csrf)]
 app.include_router(kanal.router, prefix="/core")
+app.include_router(oeffentlich.router, dependencies=csrf)
+app.include_router(konto.router, dependencies=csrf)
 
 
 @app.exception_handler(StarletteHTTPException)

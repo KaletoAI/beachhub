@@ -1,0 +1,12 @@
+Hallo,
+
+mit diesem Link meldest du dich im Buchungsportal der {{ betreiber }} an:
+{{ link }}
+
+Oder gib diesen Code auf der Anmeldeseite ein: {{ code }}
+
+Link und Code gelten 15 Minuten und nur einmal. Wenn du keine Anmeldung angefordert hast,
+kannst du diese Mail ignorieren.
+
+Viele Grüße
+{{ betreiber }}
