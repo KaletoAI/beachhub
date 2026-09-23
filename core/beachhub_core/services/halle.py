@@ -2,13 +2,22 @@
 
 import uuid
 from datetime import datetime, timedelta
+from typing import Any
 
 from beachhub_shared.hallenplan import ALARM_TYPEN, DOKUMENT, EreignisLieferung, HallenStatus
 from beachhub_shared.zeit import lokal
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import AppSetting, Ereignis, Feld, HallenStatusZeile, LesestandVersion
+from beachhub_core.models import (
+    AppSetting,
+    Ereignis,
+    Feld,
+    HalleDienst,
+    HallenStatusZeile,
+    LesestandVersion,
+)
 
 KONTAKT_MARKER = "halle_ohne_kontakt_seit"
 KONTAKT_GRENZE = timedelta(minutes=60)
@@ -22,6 +31,26 @@ ALARM_BETREFF: dict[str, str] = {
     "plan_verworfen": "Halle hat den Plan verworfen",
     "tuer_offen_ausserhalb": "Tür außerhalb der Buchungszeiten geöffnet",
 }
+
+# Nur diese Schlüssel aus `daten_json` landen in der Alarm-Mail (Fix-Runde 1, Punkt 4): Die
+# Halle meldet nach Vertrag keine PIN, aber `daten` ist ein freies dict – ohne Allowlist würde
+# jeder künftige, unbedachte Zusatzschlüssel ungefiltert in einer Mail landen. Felder je Typ
+# nach hall/beachhub_hall (pin.py, tuer.py, aufgaben/steuerung.py, aufgaben/ha_zuhoerer.py,
+# aufgaben/plan_abruf.py).
+ALARM_FELDER: dict[str, tuple[str, ...]] = {
+    "tastenfeld_fehlversuche": ("anzahl",),
+    "praesenz_ohne_buchung": ("minuten",),
+    "aktor_fehler": ("entity", "grund"),
+    "ha_nicht_erreichbar": ("seit",),
+    "plan_verworfen": ("grund", "version"),
+    "tuer_offen_ausserhalb": (),
+}
+WERT_MAX_LAENGE = 200
+
+
+def _kuerze(wert: Any) -> str:
+    text = str(wert)
+    return text if len(text) <= WERT_MAX_LAENGE else text[:WERT_MAX_LAENGE] + "…"
 
 
 def _uuid(wert: str | None) -> uuid.UUID | None:
@@ -40,63 +69,106 @@ def _zeit(t: datetime) -> str:
 def speichere_ereignisse(
     db: Session, lieferung: EreignisLieferung, jetzt: datetime
 ) -> tuple[int, list[Ereignis]]:
-    seqs = [e.seq for e in lieferung.ereignisse]
-    vorhanden = (
-        set(
-            db.scalars(
-                select(Ereignis.halle_seq).where(
-                    Ereignis.halle_dienst_id == lieferung.dienst_id, Ereignis.halle_seq.in_(seqs)
-                )
-            ).all()
-        )
-        if seqs
-        else set()
+    # Je Dienst-ID genau eine Zeile mit der zuletzt bestätigten seq (Upsert, falls neu) – dann
+    # sperren (SELECT … FOR UPDATE). Das serialisiert parallele Lieferungen derselben Dienst-ID:
+    # eine zweite, gleichzeitige Lieferung wartet hier, bis die erste committet hat, und sieht
+    # danach deren bereits gespeicherte Ereignisse – kein IntegrityError durch einen doppelten
+    # Insert-Versuch für dieselbe (Dienst-ID, seq) (Fix-Runde 1, Punkt 2).
+    db.execute(
+        pg_insert(HalleDienst)
+        .values(dienst_id=lieferung.dienst_id, bestaetigt_bis=0)
+        .on_conflict_do_nothing(index_elements=["dienst_id"])
     )
-    neu: list[Ereignis] = []
+    dienst = db.execute(
+        select(HalleDienst).where(HalleDienst.dienst_id == lieferung.dienst_id).with_for_update()
+    ).scalar_one()
+
+    zeilen: list[dict[str, Any]] = []
+    gesehen: set[int] = set()
     for e in sorted(lieferung.ereignisse, key=lambda x: x.seq):
-        if e.seq in vorhanden:
+        # Bereits bestätigt oder innerhalb dieser Lieferung doppelt gesendet: gar nicht erst für
+        # den Insert vormerken (Duplikate werden zusätzlich unten per ON CONFLICT abgefangen).
+        if e.seq <= dienst.bestaetigt_bis or e.seq in gesehen:
             continue
-        vorhanden.add(e.seq)
+        gesehen.add(e.seq)
         daten = dict(e.daten)
         if e.feld_id and _uuid(e.feld_id) is None:
             daten.setdefault("feld_id_unbekannt", e.feld_id)
-        zeile = Ereignis(
-            quelle="halle",
-            typ=e.typ,
-            zeitpunkt=e.zeitpunkt,
-            feld_id=_uuid(e.feld_id),
-            buchung_id=_uuid(e.buchung_id),
-            daten_json=daten,
-            halle_dienst_id=lieferung.dienst_id,
-            halle_seq=e.seq,
+        zeilen.append(
+            {
+                "id": uuid.uuid4(),
+                "quelle": "halle",
+                "typ": e.typ,
+                "zeitpunkt": e.zeitpunkt,
+                "feld_id": _uuid(e.feld_id),
+                "buchung_id": _uuid(e.buchung_id),
+                "daten_json": daten,
+                "halle_dienst_id": lieferung.dienst_id,
+                "halle_seq": e.seq,
+                "created_at": jetzt,
+                "updated_at": jetzt,
+            }
         )
-        db.add(zeile)
-        neu.append(zeile)
-    db.flush()
-    # bestaetigt_bis ist die höchste LÜCKENLOS gespeicherte seq ab 1 (die Halle startet ihre
-    # Zählung je Dienst-ID immer bei 1, siehe hall/beachhub_hall/db.py:dienst_id). Ein einfaches
-    # max(halle_seq) würde bei einer Lücke (z. B. 1, 2, 4 – seq 3 fehlt) fälschlich bis 4
-    # bestätigen; die Halle löscht dann seq 3 nie erneut aus ihrer Warteschlange, weil ihr
-    # bestaetige_bis() alles bis zur bestätigten seq als zugestellt markiert.
-    bestaetigt_bis = 0
-    erwartet = 1
+
+    neu: list[Ereignis] = []
+    if zeilen:
+        # ON CONFLICT DO NOTHING statt „erst prüfen, dann einfügen“: Auch falls zwei Prozesse
+        # (z. B. nach einem Neustart mit alter und neuer Dienst-ID-Kombination) doch einmal
+        # gleichzeitig dieselbe (Dienst-ID, seq) einfügen wollen, entsteht kein IntegrityError,
+        # sondern die zweite Zeile wird stillschweigend übersprungen (Fix-Runde 1, Punkt 2).
+        eingefuegte_seqs = list(
+            db.scalars(
+                pg_insert(Ereignis)
+                .values(zeilen)
+                .on_conflict_do_nothing(constraint="ereignis_halle_seq_eindeutig")
+                .returning(Ereignis.halle_seq)
+            )
+        )
+        if eingefuegte_seqs:
+            neu = list(
+                db.scalars(
+                    select(Ereignis).where(
+                        Ereignis.halle_dienst_id == lieferung.dienst_id,
+                        Ereignis.halle_seq.in_(eingefuegte_seqs),
+                    )
+                )
+            )
+
+    # Lückenlos ab der gespeicherten Marke weiterzählen (nicht ab 1 über die ganze Tabelle
+    # scannen): Ereignisse werden nach 90 Tagen gelöscht (Spec § 10); ein Scan ab 1 würde nach
+    # dem Aufräumen dauerhaft bei 0 hängen bleiben und mit wachsender Historie zusätzlich immer
+    # langsamer werden (Fix-Runde 1, Punkt 1). Ein einfaches max(halle_seq) wäre zudem bei einer
+    # Lücke (z. B. 1, 2, 4 – seq 3 fehlt) falsch: Die Halle markiert mit ihrem bestaetige_bis()
+    # alles bis zur bestätigten seq als zugestellt und würde seq 3 nie nachliefern.
+    marke = dienst.bestaetigt_bis
+    erwartet = marke + 1
     for s in db.scalars(
         select(Ereignis.halle_seq)
-        .where(Ereignis.halle_dienst_id == lieferung.dienst_id)
+        .where(Ereignis.halle_dienst_id == lieferung.dienst_id, Ereignis.halle_seq > marke)
         .order_by(Ereignis.halle_seq)
     ):
         if s != erwartet:
             break
-        bestaetigt_bis = s
+        marke = s
         erwartet += 1
-    return bestaetigt_bis, neu
+    dienst.bestaetigt_bis = marke
+    db.flush()
+    return marke, neu
 
 
 def kontakt(db: Session, jetzt: datetime, status: HallenStatus | None) -> str | None:
-    zeile = db.get(HallenStatusZeile, 1)
-    if zeile is None:
-        zeile = HallenStatusZeile(id=1, daten_json=None, empfangen_am=jetzt)
-        db.add(zeile)
+    # Upsert + Sperre der Singleton-Zeile (id=1): serialisiert parallele Aufrufe aus /hall/status
+    # und /hall/ereignisse, damit die Kontakt-Marker-Entwarnung nie doppelt ausgelöst wird – ohne
+    # die Sperre könnten zwei gleichzeitige Aufrufe den Marker beide lesen, bevor der eine ihn
+    # löscht, und beide eine „wieder verbunden“-Mail auslösen (Fix-Runde 1, Punkt 2).
+    db.execute(
+        pg_insert(HallenStatusZeile)
+        .values(id=1, daten_json=None, empfangen_am=jetzt)
+        .on_conflict_do_nothing(index_elements=["id"])
+    )
+    zeile = db.execute(
+        select(HallenStatusZeile).where(HallenStatusZeile.id == 1).with_for_update()
+    ).scalar_one()
     if status is not None:
         zeile.daten_json = status.model_dump(mode="json")
     zeile.empfangen_am = jetzt
@@ -124,8 +196,13 @@ def _zeile(e: Ereignis, felder: dict[uuid.UUID, str]) -> str:
     teile = [f"{_zeit(e.zeitpunkt)} Uhr", ALARM_BETREFF[e.typ]]
     if e.feld_id is not None and e.feld_id in felder:
         teile.append(f"Feld {felder[e.feld_id]}")
-    if e.daten_json:
-        teile.append(", ".join(f"{k}: {v}" for k, v in sorted(e.daten_json.items())))
+    # Nur die für diesen Typ erwarteten Schlüssel, Werte gekürzt (Fix-Runde 1, Punkt 4): daten
+    # ist ein freies dict der Halle; ohne Allowlist würde jeder unerwartete Zusatzschlüssel
+    # (z. B. das defensive feld_id_unbekannt) ungefiltert in der Mail landen.
+    erlaubt = ALARM_FELDER.get(e.typ, ())
+    eintraege = {k: v for k, v in e.daten_json.items() if k in erlaubt}
+    if eintraege:
+        teile.append(", ".join(f"{k}: {_kuerze(v)}" for k, v in sorted(eintraege.items())))
     return " – ".join(teile)
 
 

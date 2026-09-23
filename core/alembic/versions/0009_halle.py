@@ -1,5 +1,9 @@
 """halle: Ereignisse und Status des Hallendienstes
 
+`halle_dienst` hält je Dienst-ID die zuletzt lückenlos bestätigte seq – getrennt von
+`ereignis`, damit das spätere Aufräumen alter Ereignisse (90 Tage, Spec § 10) die Zählung nicht
+zurückwirft, und als Sperrzeile für parallele Lieferungen derselben Dienst-ID.
+
 Revision ID: 0009
 Revises: 0008
 Create Date: 2026-09-23
@@ -30,7 +34,7 @@ def upgrade() -> None:
         sa.Column("buchung_id", sa.UUID(), nullable=True),
         sa.Column("daten_json", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("halle_dienst_id", sa.UUID(), nullable=True),
-        sa.Column("halle_seq", sa.Integer(), nullable=True),
+        sa.Column("halle_seq", sa.BigInteger(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
@@ -45,9 +49,16 @@ def upgrade() -> None:
         sa.Column("empfangen_am", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
     )
+    op.create_table(
+        "halle_dienst",
+        sa.Column("dienst_id", sa.UUID(), nullable=False),
+        sa.Column("bestaetigt_bis", sa.BigInteger(), nullable=False),
+        sa.PrimaryKeyConstraint("dienst_id"),
+    )
 
 
 def downgrade() -> None:
+    op.drop_table("halle_dienst")
     op.drop_table("hallen_status")
     op.drop_index("ix_ereignis_zeitpunkt", table_name="ereignis")
     op.drop_index("ix_ereignis_typ", table_name="ereignis")

@@ -11,7 +11,7 @@ from beachhub_shared.hallenplan import (
     HallenStatus,
     StatusAntwort,
 )
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, HTTPException
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy.orm import Session
 
@@ -50,7 +50,9 @@ def plan(ab: int = 0, db: Session = Depends(get_db)) -> Response:
 
 
 @router.post("/ereignisse")
-def ereignisse(lieferung: EreignisLieferung, db: Session = Depends(get_db)) -> EreignisAntwort:
+def ereignisse(
+    lieferung: EreignisLieferung, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+) -> EreignisAntwort:
     jetzt = clock.now(db)
     bis, neu = halle.speichere_ereignisse(db, lieferung, jetzt)
     entwarnung = halle.kontakt(db, jetzt, lieferung.status)
@@ -60,19 +62,28 @@ def ereignisse(lieferung: EreignisLieferung, db: Session = Depends(get_db)) -> E
         plan_neu=halle.plan_neu(db, lieferung.status.planversion if lieferung.status else None),
     )
     db.commit()
+    # Mailversand erst nach dem commit(), aber als BackgroundTask, damit ein langsamer
+    # SMTP-Server nicht die Antwort blockiert und den 20-s-Timeout des Hallendienst-Clients
+    # reißt (Fix-Runde 1, Punkt 5); BackgroundTasks laufen ohnehin erst nach dem Response.
     for betreff, text in mails:
-        benachrichtigung.betreiber_alarm(betreff, text)
+        background_tasks.add_task(benachrichtigung.betreiber_alarm, betreff, text)
     if entwarnung:
-        benachrichtigung.betreiber_alarm("Halle wieder verbunden", entwarnung)
+        background_tasks.add_task(
+            benachrichtigung.betreiber_alarm, "Halle wieder verbunden", entwarnung
+        )
     return antwort
 
 
 @router.post("/status")
-def status(daten: HallenStatus, db: Session = Depends(get_db)) -> StatusAntwort:
+def status(
+    daten: HallenStatus, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
+) -> StatusAntwort:
     jetzt = clock.now(db)
     entwarnung = halle.kontakt(db, jetzt, daten)
     antwort = StatusAntwort(plan_neu=halle.plan_neu(db, daten.planversion))
     db.commit()
     if entwarnung:
-        benachrichtigung.betreiber_alarm("Halle wieder verbunden", entwarnung)
+        background_tasks.add_task(
+            benachrichtigung.betreiber_alarm, "Halle wieder verbunden", entwarnung
+        )
     return antwort

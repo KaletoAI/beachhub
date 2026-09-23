@@ -1,11 +1,13 @@
+import threading
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 
 import pytest
 from beachhub_core import clock
 from beachhub_core.config import settings
-from beachhub_core.models import AppSetting, Ereignis, HallenStatusZeile
+from beachhub_core.database import SessionLocal
+from beachhub_core.models import AppSetting, Ereignis, HalleDienst, HallenStatusZeile
 from beachhub_core.services import buchungen, halle, lesestand
 from beachhub_shared.hallenplan import EreignisLieferung, HallenEreignis, HallenStatus
 from beachhub_shared.lesestand import Dokument
@@ -118,6 +120,97 @@ def test_ereignisse_luecke_haelt_bestaetigt_bis_zurueck(
     assert db.query(Ereignis).count() == 4
 
 
+def test_bestaetigt_bis_bleibt_nach_loeschen_alter_ereignisse(
+    client: TestClient, db: Session, welt
+) -> None:
+    jetzt = clock.now(db)
+    client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 1))
+    # Simuliert das 90-Tage-Aufräumen (Spec § 10): die Ereignis-Zeile zu seq 1 verschwindet, die
+    # Marke in halle_dienst bleibt trotzdem erhalten. Ein Scan über die verbliebenen Ereignisse
+    # ab seq 1 fände jetzt nichts mehr und bliebe bei 0 hängen (fixiertes Verhalten).
+    db.query(Ereignis).filter(Ereignis.halle_seq == 1).delete()
+    db.commit()
+    leer = client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt))
+    assert leer.json()["bestaetigt_bis"] == 1
+    weiter = client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 2))
+    assert weiter.json()["bestaetigt_bis"] == 2
+
+
+def test_parallele_lieferungen_gleicher_dienst_id(
+    client: TestClient, db: Session, welt, mail_ausgang: list
+) -> None:
+    jetzt = clock.now(db)
+    db.add(AppSetting(key=halle.KONTAKT_MARKER, value=(jetzt - timedelta(hours=1)).isoformat()))
+    db.commit()
+    ergebnisse: list[tuple[int, dict] | None] = [None, None]
+
+    def rufe(i: int) -> None:
+        r = client.post(
+            "/hall/ereignisse", headers=H, json=_lieferung(jetzt, 1, 2, status=_status(0))
+        )
+        ergebnisse[i] = (r.status_code, r.json())
+
+    t1 = threading.Thread(target=rufe, args=(0,))
+    t2 = threading.Thread(target=rufe, args=(1,))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+    assert all(r is not None and r[0] == 200 for r in ergebnisse)
+    assert {r[1]["bestaetigt_bis"] for r in ergebnisse if r} == {2}
+    assert db.query(Ereignis).count() == 2
+    entwarnungen = [m for m in mail_ausgang if m["betreff"] == "[Beachhub] Halle wieder verbunden"]
+    assert len(entwarnungen) == 1
+
+
+def test_sperre_blockiert_zweite_lieferung_bis_zum_commit(welt) -> None:
+    """Direkter Servicetest mit zwei echten Sessions statt über HTTP: zeigt, dass die
+    halle_dienst-Sperre eine zweite, gleichzeitige Lieferung derselben Dienst-ID wirklich
+    blockiert, bis die erste committet (Fix-Runde 1, Punkt 2) – nicht nur, dass am Ende ein
+    plausibles Ergebnis herauskommt."""
+    jetzt = datetime(2027, 11, 25, 12, 0, tzinfo=UTC)
+    lieferung1 = EreignisLieferung(
+        dienst_id=DIENST,
+        ereignisse=[HallenEreignis(seq=1, typ="licht_geschaltet", zeitpunkt=jetzt)],
+    )
+    lieferung2 = EreignisLieferung(
+        dienst_id=DIENST,
+        ereignisse=[HallenEreignis(seq=2, typ="licht_geschaltet", zeitpunkt=jetzt)],
+    )
+    # Die halle_dienst-Zeile muss schon committet existieren, bevor die beiden Sessions
+    # anfangen: Sonst würde bereits der Upsert-Insert (ON CONFLICT gegen eine „in doubt“-Zeile
+    # der jeweils anderen, noch nicht committeten Transaktion) blockieren, und der Test würde
+    # nicht die hier zu prüfende SELECT-FOR-UPDATE-Sperre treffen, sondern nur diesen Nebeneffekt.
+    vorbereitung = SessionLocal()
+    vorbereitung.add(HalleDienst(dienst_id=DIENST, bestaetigt_bis=0))
+    vorbereitung.commit()
+    vorbereitung.close()
+
+    db1, db2 = SessionLocal(), SessionLocal()
+    try:
+        bis1, _ = halle.speichere_ereignisse(
+            db1, lieferung1, jetzt
+        )  # nicht committet: hält die Sperre
+        assert bis1 == 1
+
+        ergebnis: list[int] = []
+
+        def rufe2() -> None:
+            bis2, _ = halle.speichere_ereignisse(db2, lieferung2, jetzt)
+            ergebnis.append(bis2)
+
+        t = threading.Thread(target=rufe2)
+        t.start()
+        t.join(timeout=0.5)
+        assert not ergebnis and t.is_alive()  # db2 wartet auf die Sperre von db1
+        db1.commit()
+        t.join(timeout=5)
+        assert ergebnis == [2]
+    finally:
+        db1.close()
+        db2.close()
+
+
 def test_ereignis_mit_unbekannter_feld_id_wird_trotzdem_gespeichert(
     client: TestClient, db: Session, welt
 ) -> None:
@@ -156,6 +249,80 @@ def test_alarm_mails_frisch_einzeln_nachgeliefert_gesammelt(
     assert mail_ausgang[-1]["betreff"] == "[Beachhub] 2 nachgelieferte Meldungen der Halle"
     client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 4, typ="licht_geschaltet"))
     assert len(mail_ausgang) == 2
+
+
+def test_alarm_mail_nur_erwartete_felder(
+    client: TestClient, db: Session, welt, mail_ausgang: list
+) -> None:
+    jetzt = clock.now(db)
+    lieferung = EreignisLieferung(
+        dienst_id=DIENST,
+        ereignisse=[
+            HallenEreignis(
+                seq=1,
+                typ="aktor_fehler",
+                zeitpunkt=jetzt,
+                feld_id="kein-uuid",  # landet als daten.feld_id_unbekannt
+                daten={"grund": "x" * 500, "unerwartet": "geheim"},
+            )
+        ],
+    )
+    client.post("/hall/ereignisse", headers=H, json=lieferung.model_dump(mode="json"))
+    text = mail_ausgang[-1]["text"]
+    assert "unerwartet" not in text and "geheim" not in text
+    assert "feld_id_unbekannt" not in text
+    assert ("grund: " + "x" * 200 + "…") in text
+    assert "x" * 201 not in text
+
+
+def test_lieferung_ohne_status_plan_neu_false(client: TestClient, db: Session, welt) -> None:
+    jetzt = clock.now(db)
+    r = client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 1))
+    assert r.status_code == 200 and r.json()["plan_neu"] is False
+
+
+def test_post_ereignisse_braucht_token(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    valide = _lieferung(datetime(2027, 1, 1, tzinfo=UTC))
+    assert client.post("/hall/ereignisse", json=valide).status_code == 401
+    assert (
+        client.post(
+            "/hall/ereignisse", headers={"Authorization": "Bearer falsch"}, json=valide
+        ).status_code
+        == 401
+    )
+    monkeypatch.setattr(settings, "hall_token", "")
+    assert client.post("/hall/ereignisse", headers=H, json=valide).status_code == 404
+
+
+def test_post_status_braucht_token(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    valide = _status(0).model_dump(mode="json")
+    assert client.post("/hall/status", json=valide).status_code == 401
+    assert (
+        client.post(
+            "/hall/status", headers={"Authorization": "Bearer falsch"}, json=valide
+        ).status_code
+        == 401
+    )
+    monkeypatch.setattr(settings, "hall_token", "")
+    assert client.post("/hall/status", headers=H, json=valide).status_code == 404
+
+
+def test_ereignisse_ungueltige_nutzlast_422(client: TestClient) -> None:
+    assert (
+        client.post(
+            "/hall/ereignisse", headers=H, json={"dienst_id": "not-a-uuid", "ereignisse": []}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            "/hall/ereignisse",
+            headers=H,
+            json={"dienst_id": str(DIENST), "ereignisse": "not-a-list"},
+        ).status_code
+        == 422
+    )
+    assert client.post("/hall/ereignisse", headers=H, content=b"not json").status_code == 422
 
 
 def test_plan_neu_und_status(client: TestClient, db: Session, welt) -> None:
