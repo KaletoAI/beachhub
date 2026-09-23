@@ -230,9 +230,11 @@ async def test_tuer_offen_ausserhalb(a: Aufbau) -> None:
     a.uhr.stelle(t(18, 50))  # im Zutrittsfenster
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert a.ereignis("tuer_offen_ausserhalb") == []
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))  # Tür wieder zu
     a.uhr.stelle(t(22))
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))
     a.uhr.stelle(t(23))
     await a.zuhoerer.verarbeite(
         {"event_type": "esphome.beachhub_pin", "data": {"code": MASTER_PIN}}
@@ -253,6 +255,7 @@ async def test_tuer_offen_ausserhalb_nach_kulanzgrenze_erneut(a: Aufbau) -> None
     a.uhr.vor(minutes=3)
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert a.ereignis("tuer_offen_ausserhalb") == []  # noch innerhalb der 5-min-Kulanz
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))
     a.uhr.vor(minutes=3)  # insgesamt 6 min seit dem Master-PIN: Kulanz überschritten
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
@@ -265,6 +268,18 @@ async def test_tuer_attribut_update_loest_keinen_neuen_alarm_aus(a: Aufbau) -> N
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
     # Attribut-Update: Zustand war schon "on", kein echter Übergang.
     await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on", alter_state="on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
+async def test_tuer_unavailable_zwischen_offen_nur_ein_alarm(a: Aufbau) -> None:
+    """Ruling: unavailable/unknown behalten den zuletzt bekannten Zustand – on → unavailable →
+    on darf nicht zu einem zweiten Alarm führen, weil die Tür (soweit bekannt) nie zuging."""
+    a.plan(buchung(F1, t(19), t(21)))
+    a.uhr.stelle(t(22))  # außerhalb des Zutrittsfensters
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "unavailable"))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
 
 
@@ -360,6 +375,35 @@ async def test_laufen_uebersteht_ausnahme_in_verarbeite(
     assert "nicht verarbeitet" in caplog.text
 
 
+async def test_laufen_uebersteht_ausnahme_ausserhalb_verarbeite(
+    a: Aufbau, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Nicht nur ein kaputtes Ereignis, auch eine Ausnahme außerhalb von verarbeite() (hier in
+    verbunden()) darf laufen() nicht beenden – Backoff, Reconnect, kein Ende. Der finally-Block
+    mit `aufgabe.cancel()` prüft zugleich, dass CancelledError weiter durchgereicht wird."""
+    caplog.set_level(logging.ERROR)
+    original = a.zuhoerer.verbunden
+    aufrufe = 0
+
+    async def kaputt() -> None:
+        nonlocal aufrufe
+        aufrufe += 1
+        if aufrufe == 1:
+            raise RuntimeError("absichtlich kaputt")
+        await original()
+
+    monkeypatch.setattr(a.zuhoerer, "verbunden", kaputt)
+    aufgabe = asyncio.create_task(a.zuhoerer.laufen())
+    try:
+        await warte_bis(lambda: aufrufe >= 2)  # erster Verbindungsversuch scheitert
+        await warte_bis(lambda: a.sim.abonnements() == 2)  # zweiter verbindet erfolgreich
+    finally:
+        aufgabe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await aufgabe
+    assert "unerwarteter Fehler" in caplog.text
+
+
 async def test_wartende_eingabe_wird_beim_herunterfahren_abgebrochen(a: Aufbau) -> None:
     a.plan(buchung(F1, t(19), t(21), pin=PIN))
     a.uhr.stelle(t(19))
@@ -370,6 +414,31 @@ async def test_wartende_eingabe_wird_beim_herunterfahren_abgebrochen(a: Aufbau) 
     assert a.zuhoerer._eingaben == set()
     assert aufgaben[0].cancelled()
     assert a.sim.zustaende["lock.eingang"]["state"] == "locked"  # Tür bleibt zu
+    assert a.ereignis("pin_akzeptiert") == []
+
+
+async def test_beende_eingaben_bricht_waehrend_pruefung_ab(
+    a: Aufbau, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Der Abbruch muss auch mitten in der Prüfung greifen (z. B. während des Hashens in einem
+    Thread oder während tuer.oeffne() auf HA wartet), nicht nur vor dem allerersten Schritt."""
+    a.plan(buchung(F1, t(19), t(21), pin=PIN))
+    a.uhr.stelle(t(19))
+    gestartet = asyncio.Event()
+    haengt = asyncio.Event()
+
+    async def haengende_pruefung(code: str, jetzt: object) -> object:
+        gestartet.set()
+        await haengt.wait()  # bleibt hängen, bis beende_eingaben() abbricht
+        return None
+
+    monkeypatch.setattr(a.zuhoerer._pruefer, "_pruefe", haengende_pruefung)
+    await a.zuhoerer.verarbeite({"event_type": "esphome.beachhub_pin", "data": {"code": int(PIN)}})
+    await warte_bis(lambda: gestartet.is_set())
+    assert len(a.zuhoerer._eingaben) == 1
+    await a.zuhoerer.beende_eingaben()
+    assert a.zuhoerer._eingaben == set()
+    assert a.sim.zustaende["lock.eingang"]["state"] == "locked"
     assert a.ereignis("pin_akzeptiert") == []
 
 
@@ -402,6 +471,7 @@ async def test_letzter_kontakt_kaputt_schreibt_trotzdem_sensoren(
     g = a.sim.geschrieben
     assert g["binary_sensor.beachhub_verbunden"]["state"] == "off"
     assert g["sensor.beachhub_planversion"]["state"] == "1"
+    assert g["sensor.beachhub_letzter_kontakt"]["state"] == "unknown"  # nicht der kaputte Rohwert
     assert "Ungültiger Zeitpunkt" in caplog.text
 
 

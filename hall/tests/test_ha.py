@@ -1,8 +1,11 @@
 import asyncio
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
+from typing import Any
 
+import aiohttp
 import pytest
-from beachhub_hall.ha import HaClient, HaFehler, HaNichtErreichbar
+from beachhub_hall.ha import HaClient, HaFehler, HaNichtErreichbar, HaWebSocket
 
 from tests.ha_simulator import HaSimulator
 
@@ -79,6 +82,27 @@ async def test_websocket_event_waehrend_zweitem_abo_geht_nicht_verloren(
     assert event["event_type"] == "state_changed"
     assert event["data"]["entity_id"] == "binary_sensor.praesenz_feld_1"
     await ws.schliesse()
+
+
+async def test_websocket_kaputtes_json_wird_zu_hafehler() -> None:
+    """Eine WebSocket-Nachricht, die kein gültiges JSON ist, darf nicht als rohe
+    JSONDecodeError durchschlagen – sie wird wie jeder andere Protokollfehler zu HaFehler, damit
+    der HA-Zuhörer sie wie gewohnt fängt und neu verbindet, statt abzustürzen."""
+
+    class FakeWs:
+        def __init__(self) -> None:
+            self._gesendet = False
+
+        async def receive(self) -> Any:
+            self._gesendet = True
+            return SimpleNamespace(type=aiohttp.WSMsgType.TEXT, data="{kaputtes json")
+
+        async def close(self) -> None:
+            return None
+
+    ws = HaWebSocket(FakeWs())  # type: ignore[arg-type]
+    with pytest.raises(HaFehler):
+        await ws.naechstes()
 
 
 async def test_websocket_falsches_token_und_trennung(ha: HaSimulator) -> None:

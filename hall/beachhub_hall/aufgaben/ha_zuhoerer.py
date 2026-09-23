@@ -68,6 +68,10 @@ class HaZuhoerer:
         # Bis zur ersten Verbindung gilt HA als ausgefallen – seit dem Start des Dienstes.
         self._ausfall_seit: datetime | None = uhr.jetzt()
         self._ausfall_gemeldet = False
+        # Zuletzt bekannter on/off-Zustand des Türkontakts (nicht nur das old_state des
+        # jeweiligen Ereignisses) – "unavailable"/"unknown" dürfen ihn nicht auf None
+        # zurücksetzen, sonst löst ein Aussetzer (on → unavailable → on) erneut einen Alarm aus.
+        self._tuer_zustand: bool | None = None
 
     async def laufen(self) -> None:
         backoff = self._backoff_start
@@ -137,6 +141,12 @@ class HaZuhoerer:
                 an = self._als_bool(self._lage.state(z.praesenz))
                 if an is not None:
                     self._praesenz(feld_id, an)
+        if self._z.tuer.kontakt:
+            # Nur die Ausgangslage übernehmen (kein Alarm) – nur echte on/off-Werte, damit ein
+            # "unavailable" beim Reconnect nicht den zuletzt bekannten Zustand verwirft.
+            tuer_an = self._als_bool(self._lage.state(self._z.tuer.kontakt))
+            if tuer_an is not None:
+                self._tuer_zustand = tuer_an
         self._status_wecker.set()
         self._steuerung_wecker.set()
 
@@ -189,11 +199,15 @@ class HaZuhoerer:
             if an is not None:
                 self._praesenz(feld_id, an)
         elif entity == self._z.tuer.kontakt:
-            # Nur ein echter Übergang auf "on" ist ein Öffnen – ein Attribut-Update, bei dem
-            # der Zustand schon vorher "on" war, darf nicht erneut alarmieren.
-            alt = daten.get("old_state")
-            alt_zustand = alt.get("state") if isinstance(alt, dict) else None
-            if an and alt_zustand != "on":
+            # Nur ein echter Übergang von bekanntem "off" (oder unbekannt beim allerersten
+            # Mal) auf "on" ist ein Öffnen. Wir vergleichen mit dem selbst gemerkten, zuletzt
+            # bekannten on/off-Zustand – nicht mit old_state des Ereignisses –, damit weder ein
+            # Attribut-Update (state blieb "on") noch ein Aussetzer (on → unavailable → on)
+            # erneut alarmiert.
+            vorher = self._tuer_zustand
+            if an is not None:
+                self._tuer_zustand = an
+            if an and vorher is not True:
                 self._tuer_geoeffnet()
         elif entity in self._z.gesteuerte():
             self._steuerung_wecker.set()
@@ -213,20 +227,13 @@ class HaZuhoerer:
         """Bricht laufende Tastenfeld-Eingaben ab und wartet, bis sie beendet sind – fürs
         Herunterfahren des Dienstes. Task 11 ruft dies vor `tuer.schliesse()` und
         `ha.schliesse()` auf, damit keine Eingabe mehr auf die (dann geschlossene) Tür oder
-        HA-Verbindung zugreift."""
+        HA-Verbindung zugreift. Eine Ausnahme wird bereits vom Done-Callback (`_eingabe_beendet`)
+        geloggt, sobald die Aufgabe beendet ist – hier nicht erneut, sonst doppelt."""
         aufgaben = list(self._eingaben)
         for aufgabe in aufgaben:
             aufgabe.cancel()
-        if not aufgaben:
-            return
-        ergebnisse = await asyncio.gather(*aufgaben, return_exceptions=True)
-        for ergebnis in ergebnisse:
-            if isinstance(ergebnis, BaseException) and not isinstance(
-                ergebnis, asyncio.CancelledError
-            ):
-                logger.error(
-                    "Tastenfeld-Eingabe beim Herunterfahren fehlgeschlagen", exc_info=ergebnis
-                )
+        if aufgaben:
+            await asyncio.gather(*aufgaben, return_exceptions=True)
 
     def _handbetrieb(self, an: bool) -> None:
         with self._sitzungen() as db:

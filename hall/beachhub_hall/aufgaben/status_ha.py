@@ -38,8 +38,11 @@ class StatusHa:
                 verbunden = self._uhr.jetzt() - datetime.fromisoformat(kontakt) <= VERBUNDEN_FENSTER
             except (TypeError, ValueError) as e:
                 # Ein kaputter oder naiver Zeitstempel darf die übrigen Sensoren nicht
-                # blockieren – als „kein Kontakt“ behandeln, statt abzustürzen.
+                # blockieren – als „kein Kontakt“ behandeln, statt abzustürzen. Der Sensor
+                # bekommt dann "unknown" statt des kaputten Rohwerts (device_class timestamp
+                # erwartet ein gültiges ISO-Datum oder "unknown").
                 logger.warning("Ungültiger Zeitpunkt in letzter_kontakt verworfen: %s", e)
+                kontakt = None
         try:
             await self._ha.setze_zustand(
                 "sensor.beachhub_planversion",
