@@ -31,6 +31,9 @@ class HaSimulator:
         # fehler_bei_diensten), danach läuft der Simulator wieder normal – für Tests von
         # Wiederholungslogik (z. B. „scheitert zweimal, dritter Versuch klappt“).
         self.fehler_verbleibend = 0
+        # Entity-IDs, für die GET /api/states/<id> mit 500 statt dem echten Zustand antwortet –
+        # für Tests, dass der Fehler einer Entität die übrigen nicht blockiert.
+        self.fehler_bei_zustand: set[str] = set()
         self.verbindungen_gesamt = 0
         self._abos: dict[web.WebSocketResponse, dict[int, str | None]] = {}
         self._server: TestServer | None = None
@@ -94,7 +97,10 @@ class HaSimulator:
         return web.json_response(list(self.zustaende.values()))
 
     async def _einer(self, request: web.Request) -> web.Response:
-        z = self.zustaende.get(request.match_info["entity_id"])
+        entity_id = request.match_info["entity_id"]
+        if entity_id in self.fehler_bei_zustand:
+            return web.json_response({"message": "Internal error"}, status=500)
+        z = self.zustaende.get(entity_id)
         if z is None:
             return web.json_response({"message": "Entity not found."}, status=404)
         return web.json_response(z)
@@ -118,7 +124,22 @@ class HaSimulator:
         if fehlschlagen:
             return web.json_response({"message": "Service call failed"}, status=500)
         ziele = daten.get("entity_id", [])
-        for entity_id in [ziele] if isinstance(ziele, str) else ziele:
+        entity_ids = [ziele] if isinstance(ziele, str) else ziele
+        if (domain, service) == ("climate", "set_temperature"):
+            # Wie ein echtes climate-Gerät: eine Solltemperatur außerhalb von min_temp/max_temp
+            # wird abgelehnt (400), nicht stillschweigend übernommen oder gekappt.
+            temperatur = daten["temperature"]
+            for entity_id in entity_ids:
+                attribute = self.zustaende.get(entity_id, {}).get("attributes", {})
+                minimum, maximum = attribute.get("min_temp"), attribute.get("max_temp")
+                if (minimum is not None and temperatur < minimum) or (
+                    maximum is not None and temperatur > maximum
+                ):
+                    return web.json_response(
+                        {"message": f"{temperatur} liegt außerhalb {minimum}..{maximum}"},
+                        status=400,
+                    )
+        for entity_id in entity_ids:
             if entity_id not in self.zustaende:
                 continue  # wie echtes HA: unbekannte Entität, keine Wirkung
             if (domain, service) in (("light", "turn_on"), ("switch", "turn_on")):
@@ -204,7 +225,17 @@ def standard_entitaeten(sim: HaSimulator) -> None:
         "binary_sensor.tuer",
     ):
         sim.entitaet(e, "off")
-    sim.entitaet("climate.halle", "heat", temperature=0.0, current_temperature=5.0)
+    sim.entitaet(
+        "climate.halle",
+        "heat",
+        # 7.0 (min_temp) statt 0.0: ein echtes climate-Gerät hätte nie einen Sollwert unter
+        # seiner eigenen Grenze – 0.0 wird gezielt in einzelnen Tests gesetzt, die die
+        # Begrenzung selbst prüfen.
+        temperature=7.0,
+        current_temperature=5.0,
+        min_temp=7.0,
+        max_temp=35.0,
+    )
     sim.entitaet("lock.eingang", "locked")
     sim.entitaet("input_boolean.beachhub_handbetrieb", "off")
 

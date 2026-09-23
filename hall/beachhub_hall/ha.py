@@ -16,6 +16,13 @@ class HaFehler(Exception):  # noqa: N818
     pass
 
 
+class HaNichtErreichbar(HaFehler):
+    """HA konnte gar nicht erreicht werden (Verbindung, Timeout, keine gültige Antwort) – im
+    Unterschied zu einer Fehlerantwort für eine einzelne Anfrage (z. B. HTTP 500 für eine
+    Entität). Aufrufer, die einen Fehler pro Entität von einer echten Nichterreichbarkeit
+    unterscheiden müssen (z. B. die Steuerung), fangen dafür gezielt diese Unterklasse."""
+
+
 class HaWebSocket:
     def __init__(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         self._ws = ws
@@ -98,7 +105,7 @@ class HaClient:
                     raise HaFehler(f"HA {methode} {pfad}: HTTP {r.status}")
                 return await r.json(content_type=None)
         except (aiohttp.ClientError, TimeoutError, ValueError) as e:
-            raise HaFehler(f"HA {methode} {pfad}: {e}") from e
+            raise HaNichtErreichbar(f"HA {methode} {pfad}: {e}") from e
 
     async def zustand(self, entity_id: str) -> dict[str, Any] | None:
         z = await self._anfrage("GET", f"/api/states/{entity_id}")
