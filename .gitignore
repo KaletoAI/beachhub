@@ -9,3 +9,6 @@ core/.env
 *.egg-info/
 .mypy_cache/
 .ruff_cache/
+hall/data/
+hall/.env
+hall/hall.toml
