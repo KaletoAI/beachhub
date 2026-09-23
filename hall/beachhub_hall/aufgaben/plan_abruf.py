@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from collections.abc import Callable
+from typing import Any
 
 from beachhub_shared.hallenplan import HallenplanInhalt
 from sqlalchemy.orm import Session, sessionmaker
@@ -56,14 +57,32 @@ class PlanAbruf:
             dok, inhalt = plan.pruefe(roh, self._oeffentlich, aktuell)
         except plan.PlanFehler as e:
             logger.error("Plan verworfen: %s", e.grund)
-            self._ereignisse.melde("plan_verworfen", grund=e.grund, version=roh.get("version"))
+            self._melde_verworfen(e.grund, roh.get("version"))
             return False
         with self._sitzungen() as db:
             plan.speichere(db, dok, inhalt, jetzt)
+            schreibe(db, "plan_verworfen_gemeldet", None)
+            db.commit()
         logger.info("Plan Version %s übernommen (%s Buchungen)", dok.version, len(inhalt.buchungen))
         self._melde_unzugeordnete(inhalt)
         self._nach_neuem_plan()
         return True
+
+    def _melde_verworfen(self, grund: str, version: Any) -> None:
+        """Meldet `plan_verworfen` nur beim ersten Auftreten eines Fehlers – bietet das
+        Hauptsystem dauerhaft dieselbe fehlerhafte Version an (z. B. nach einer Wiederher-
+        stellung aus einem alten Backup), entstünde sonst alle 5 min ein neuer Alarm."""
+        with self._sitzungen() as db:
+            marker = lies(db, "plan_verworfen_gemeldet")
+            if (
+                marker is not None
+                and marker.get("grund") == grund
+                and marker.get("version") == version
+            ):
+                return
+            schreibe(db, "plan_verworfen_gemeldet", {"grund": grund, "version": version})
+            db.commit()
+        self._ereignisse.melde("plan_verworfen", grund=grund, version=version)
 
     def _melde_unzugeordnete(self, inhalt: HallenplanInhalt) -> None:
         with self._sitzungen() as db:

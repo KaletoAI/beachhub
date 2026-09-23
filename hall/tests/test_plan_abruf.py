@@ -85,6 +85,41 @@ async def test_falsche_signatur_wird_verworfen_und_gemeldet(a: Aufbau) -> None:
     assert len(verworfen) == 1 and verworfen[0].daten == {"grund": "signatur", "version": 2}
 
 
+async def test_plan_verworfen_wird_nur_bei_aenderung_erneut_gemeldet(a: Aufbau) -> None:
+    a.core.veroeffentliche(baue_plan([]))  # Version 1
+    await a.abruf.einmal()
+    a.core.veroeffentliche(baue_plan([]))  # Version 2
+    await a.abruf.einmal()
+    with a.sitzungen() as db:
+        assert plan.version(db) == 2
+
+    # Hauptsystem bietet zweimal dieselbe veraltete Version an (z. B. nach Wiederherstellung
+    # aus einem alten Backup) – genau ein plan_verworfen, nicht bei jedem Abruf erneut.
+    a.core.veroeffentliche(baue_plan([]), version=1)
+    assert await a.abruf.einmal() is False
+    assert await a.abruf.einmal() is False
+    verworfen = [e for e in a.ereignisse.unbestaetigt() if e.typ == "plan_verworfen"]
+    assert len(verworfen) == 1
+    assert verworfen[0].daten == {"grund": "version_alt", "version": 1}
+
+    # Anderer Grund (falsche Signatur), ebenfalls veraltete Version → neues Ereignis.
+    fremd, _ = erzeuge_schluesselpaar()
+    a.core.veroeffentliche(baue_plan([]), version=1, privat=fremd)
+    assert await a.abruf.einmal() is False
+    verworfen = [e for e in a.ereignisse.unbestaetigt() if e.typ == "plan_verworfen"]
+    assert len(verworfen) == 2
+    assert verworfen[1].daten == {"grund": "signatur", "version": 1}
+
+    # Nach einem erfolgreich übernommenen Plan wird ein erneuter Fehler wieder gemeldet.
+    a.core.veroeffentliche(baue_plan([]), version=3)
+    assert await a.abruf.einmal() is True
+    a.core.veroeffentliche(baue_plan([]), version=1)
+    assert await a.abruf.einmal() is False
+    verworfen = [e for e in a.ereignisse.unbestaetigt() if e.typ == "plan_verworfen"]
+    assert len(verworfen) == 3
+    assert verworfen[2].daten == {"grund": "version_alt", "version": 1}
+
+
 async def test_offline_ist_kein_ereignis(a: Aufbau) -> None:
     a.core.offline = True
     assert await a.abruf.einmal() is False
