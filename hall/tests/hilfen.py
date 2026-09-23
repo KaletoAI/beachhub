@@ -7,6 +7,13 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from argon2 import PasswordHasher
+from beachhub_hall import plan
+from beachhub_hall.clock import SimulierteUhr
+from beachhub_hall.config import TastenfeldKonfig, TuerKonfig, Zuordnung
+from beachhub_hall.ereignisse import Ereignisse
+from beachhub_hall.ha import HaClient
+from beachhub_hall.pin import PinPruefer
+from beachhub_hall.tuer import Tuer
 from beachhub_shared.hallenplan import (
     HallenplanInhalt,
     PinParameter,
@@ -17,8 +24,11 @@ from beachhub_shared.hallenplan import (
     pin_hash,
 )
 from beachhub_shared.lesestand import Dokument
-from beachhub_shared.signatur import signiere
+from beachhub_shared.signatur import erzeuge_schluesselpaar, signiere
 from beachhub_shared.zeit import kombiniere
+from sqlalchemy.orm import Session, sessionmaker
+
+from tests.ha_simulator import HaSimulator
 
 F1 = "11111111-1111-1111-1111-111111111111"
 F2 = "22222222-2222-2222-2222-222222222222"
@@ -135,3 +145,45 @@ def signiertes_dokument(
     )
     sig = signiere(entwurf.model_dump(mode="json", exclude={"signatur"}), privat_hex)
     return entwurf.model_copy(update={"signatur": sig})
+
+
+PRIV, _ = erzeuge_schluesselpaar()
+
+
+class Aufbau:
+    """Verdrahtet Tür und PIN-Prüfung gegen eine simulierte Uhr und ein simuliertes HA.
+    Gemeinsame Testinfrastruktur ab Task 8, von mehreren Testdateien wiederverwendet."""
+
+    def __init__(
+        self,
+        sitzungen: sessionmaker[Session],
+        uhr: SimulierteUhr,
+        ha: HaSimulator,
+        tuer: TuerKonfig,
+    ) -> None:
+        self.sitzungen, self.uhr, self.sim = sitzungen, uhr, ha
+        self.schlaf = FakeSchlaf()
+        self.client = HaClient(ha.url, HaSimulator.TOKEN)
+        self.ereignisse = Ereignisse(sitzungen, uhr)
+        self.tuer = Tuer(self.client, tuer, self.ereignisse, self.schlaf)
+        z = Zuordnung(
+            master_pin_hash=MASTER_HASH,
+            tuer=tuer,
+            tastenfeld=TastenfeldKonfig(verzoegerung_sekunden=3),
+        )
+        self.pruefer = PinPruefer(sitzungen, uhr, z, self.ereignisse, self.tuer, self.schlaf)
+
+    def plan(self, *buchungen: PlanBuchung) -> None:
+        inhalt = baue_plan(buchungen)
+        with self.sitzungen() as db:
+            plan.speichere(
+                db, signiertes_dokument(inhalt, plan.version(db) + 1, PRIV), inhalt, t(0)
+            )
+
+    def typen(self) -> list[str]:
+        return [e.typ for e in self.ereignisse.unbestaetigt(1000)]
+
+    def geoeffnet(self) -> int:
+        return sum(
+            1 for a in self.sim.aufrufe if a[:2] in (("lock", "unlock"), ("switch", "turn_on"))
+        )
