@@ -24,19 +24,31 @@ Auf dem Hauptsystem:
    /app/data/zertifikate` ausführen (siehe `docs/betrieb/portal.md`). Der Befehl legt Ergebnisse
    **auf dem Datenvolume** ab (`/app/data/…`), nicht im beschreibbaren Container-Dateisystem –
    sonst gingen sie beim nächsten `docker compose build`/Neuanlegen des Containers verloren. Es
-   entstehen dort u. a. `ca.crt`/`ca.key` (interne CA) sowie `halle.crt`/`halle.key`
-   (Client-Zertifikat der Halle).
-2. In `core/.env` `HALL_TOKEN` auf einen langen Zufallswert setzen
-   (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) und das Hauptsystem neu starten.
-3. Den öffentlichen Signaturschlüssel von der Seite **System** im Admin-UI kopieren.
+   entstehen dort u. a. `ca.crt`/`ca.key` (interne CA; dient ausschließlich core-seitig als
+   `client_auth`-`trust_pool` für Caddy, siehe `docs/betrieb/hauptsystem.md` „Hallendienst
+   anbinden“ – **nicht** auf den Hallenrechner kopieren) sowie `halle.crt`/`halle.key`
+   (Client-Zertifikat, mit dem sich die Halle bei Caddy ausweist).
+2. **Root-Zertifikat von Caddy exportieren.** Die Hallenschnittstelle (Port 8444) nutzt
+   `tls internal`, also Caddys **eigene**, interne Root-CA – eine andere CA als die `ca.crt` aus
+   Schritt 1. Nur mit dieser Root-CA kann der Hallendienst das Server-Zertifikat von Caddy prüfen
+   (Einstellung `CORE_CA`). `caddy_data` ist ein Named Volume, kein Bind-Mount, daher per
+   `docker compose cp` exportieren:
 
-Von `core/data/zertifikate/` auf den Hallenrechner kopieren: `halle.crt`, `halle.key`, `ca.crt`
-nach `hall/zertifikate/`.
+   ```bash
+   docker compose -f core/docker-compose.yml cp caddy:/data/caddy/pki/authorities/local/root.crt ./caddy-root.crt
+   ```
+3. In `core/.env` `HALL_TOKEN` auf einen langen Zufallswert setzen
+   (`python -c "import secrets; print(secrets.token_urlsafe(32))"`) und das Hauptsystem neu starten.
+4. Den öffentlichen Signaturschlüssel von der Seite **System** im Admin-UI kopieren.
+
+Auf den Hallenrechner kopieren: `halle.crt`, `halle.key` (aus `core/data/zertifikate/`, Schritt 1)
+sowie `caddy-root.crt` (aus Schritt 2) nach `hall/zertifikate/`. Die `ca.crt` aus Schritt 1 bleibt
+auf dem Hauptsystem.
 
 **Wichtig:** Diese drei Dateien müssen **vor dem ersten `docker compose up`** in
 `hall/zertifikate/` liegen. `docker-compose.yml` bindet `./zertifikate` als Verzeichnis ein;
 existiert eine der Dateien noch nicht, legt Docker beim Start selbst ein Verzeichnis mit diesem
-Namen an, und der Hallendienst findet weder Client-Zertifikat noch CA.
+Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensanker für den Server.
 
 ## 3. Home Assistant einrichten
 
@@ -129,7 +141,7 @@ Namen an, und der Hallendienst findet weder Client-Zertifikat noch CA.
 cd hall
 cp .env.example .env            # Werte aus Abschnitt 2 und 3 eintragen
 cp hall.toml.example hall.toml  # Feld-UUIDs und Entitäten eintragen
-mkdir -p zertifikate            # halle.crt, halle.key, ca.crt aus Abschnitt 2 hierher kopieren
+mkdir -p zertifikate            # halle.crt, halle.key, caddy-root.crt aus Abschnitt 2 hierher kopieren
 mkdir -p data && sudo chown 1000 data
 docker compose run --rm hall beachhub-hall master-pin   # Hash in hall.toml eintragen
 docker compose up -d --build
@@ -234,5 +246,5 @@ Beispieldateien dieses Dokuments bereits ohne echtes HA und ohne echtes Hauptsys
 | Mail „Home Assistant nicht erreichbar“ | Dienst erreicht HA seit 2 min nicht | HA-Status, `HA_URL` und `HA_TOKEN` prüfen |
 | Mail „Halle hat den Plan verworfen“ | Signatur oder Version passt nicht | `CORE_PUBLIC_KEY` mit der System-Seite vergleichen |
 | Dienst startet nicht: „master_pin_hash fehlt“ | Platzhalter in `hall.toml` | `beachhub-hall master-pin` ausführen und eintragen |
-| Dienst startet nicht: Zertifikatsfehler | `halle.crt`/`halle.key`/`ca.crt` fehlen oder Docker hat leere Verzeichnisse an ihrer Stelle angelegt | `docker compose down`, `hall/zertifikate/` prüfen (Abschnitt 2), danach `docker compose up -d` |
+| Dienst startet nicht: Zertifikatsfehler | `halle.crt`/`halle.key`/`caddy-root.crt` fehlen oder Docker hat leere Verzeichnisse an ihrer Stelle angelegt | `docker compose down`, `hall/zertifikate/` prüfen (Abschnitt 2), danach `docker compose up -d` |
 | `docker stop`/`docker compose down` dauert ungewöhnlich lange oder Tür bleibt bei `switch.*`-Türöffnern offen | `stop_grace_period` in `docker-compose.yml` zu knapp für das geordnete Herunterfahren | `stop_grace_period` erhöhen; der Dienst fängt `SIGTERM` ab und schaltet einen offenen Türöffner beim Herunterfahren aus, braucht dafür aber Zeit |

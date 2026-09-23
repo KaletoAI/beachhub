@@ -1,6 +1,9 @@
 # Multi-Arch (arm64/amd64): docker buildx build --platform linux/arm64,linux/amd64 -f hall/Dockerfile .
 FROM python:3.12-slim
-RUN useradd --create-home --uid 1000 halle && mkdir -p /data /config && chown halle /data
+# /config nimmt nur den Mountpoint für die schreibgeschützt eingebundene hall.toml auf
+# (docker-compose.yml: "./hall.toml:/config/hall.toml:ro"); chown auf halle, damit der Zugriff
+# nicht zufällig von den Standardrechten des mkdir abhängt.
+RUN useradd --create-home --uid 1000 halle && mkdir -p /data /config && chown halle /data /config
 WORKDIR /app
 COPY shared /app/shared
 COPY hall /app/hall
