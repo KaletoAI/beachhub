@@ -11,3 +11,6 @@ core/.env
 .ruff_cache/
 .claude/worktrees/
 .claude/settings.local.json
+hall/data/
+hall/.env
+hall/hall.toml

@@ -1,0 +1,35 @@
+# Zuordnung der Felder zu Home-Assistant-Entitäten (A-FELD-4).
+# Die Feld-UUIDs stehen im Admin-UI des Hauptsystems unter Stammdaten → Felder.
+
+# Pflicht: mit `beachhub-hall master-pin` erzeugen und hier eintragen.
+# Mit diesem Platzhalter startet der Dienst nicht.
+master_pin_hash = "$argon2id$ERSETZEN"
+
+[felder."00000000-0000-0000-0000-000000000001"]
+licht = "light.feld_1"
+praesenz = "binary_sensor.praesenz_feld_1"
+
+[felder."00000000-0000-0000-0000-000000000002"]
+licht = "light.feld_2"
+praesenz = "binary_sensor.praesenz_feld_2"
+
+[felder."00000000-0000-0000-0000-000000000003"]
+licht = "light.feld_3"
+praesenz = "binary_sensor.praesenz_feld_3"
+
+[heizung]
+entity = "climate.halle"
+# ist_sensor = "sensor.halle_temperatur"   # optional, sonst Attribut current_temperature
+
+[tuer]
+entity = "lock.eingang"            # lock.* → lock.unlock; switch.* → Impuls
+impuls_sekunden = 5                # nur bei switch.*
+kontakt = "binary_sensor.tuer"     # optional
+
+[tastenfeld]
+ereignis = "esphome.beachhub_pin"  # HA-Ereignistyp
+feld = "code"                      # Schlüssel in den Ereignisdaten
+verzoegerung_sekunden = 3          # ab dem 5. Fehlversuch einer Serie
+
+[handbetrieb]
+entity = "input_boolean.beachhub_handbetrieb"

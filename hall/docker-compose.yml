@@ -1,0 +1,16 @@
+# Betrieb neben Home Assistant. Netzwerk des Hosts, damit HA (127.0.0.1:8123) und der
+# WireGuard-Tunnel zum Hauptsystem ohne weitere Weiterleitung erreichbar sind.
+services:
+  hall:
+    build: { context: .., dockerfile: hall/Dockerfile }
+    restart: unless-stopped
+    network_mode: host
+    env_file: .env
+    # Zeit für das geordnete Herunterfahren: Dienst.schliesse() schaltet einen offenen
+    # switch.*-Türöffner aus (bis zu 3 Versuche) und lässt einen laufenden Impuls ablaufen,
+    # bevor der Prozess endet. Danach schickt Docker SIGKILL.
+    stop_grace_period: 30s
+    volumes:
+      - "./data:/data"
+      - "./hall.toml:/config/hall.toml:ro"
+      - "./zertifikate:/zertifikate:ro"
