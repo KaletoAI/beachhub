@@ -175,7 +175,7 @@ entity = "input_boolean.beachhub_handbetrieb"
 Ein Feld aus dem Plan ohne Eintrag in `hall.toml` wird nicht geschaltet. Beim ersten Plan meldet
 der Dienst das einmal als `aktor_fehler` mit `grund = "feld_nicht_zugeordnet"`. Ein
 Master-PIN-Hash ist Pflicht, sonst startet der Dienst nicht. `beachhub-hall master-pin` fragt die
-PIN ab und gibt den Hash aus.
+PIN ab (8 bis 12 Ziffern – sie öffnet immer, auch ohne Buchung) und gibt den Hash aus.
 
 ## 4. Hallendienst: Datenmodell (SQLite, WAL)
 

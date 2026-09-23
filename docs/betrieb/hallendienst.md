@@ -207,7 +207,8 @@ docker compose logs -f hall
 
 Der Master-PIN wird **nie im Klartext** in `hall.toml` eingetragen, sondern ausschließlich als
 Argon2id-Hash über `beachhub-hall master-pin` (fragt die PIN zweimal interaktiv ab und gibt den
-Hash aus). Mit dem Platzhalter `$argon2id$ERSETZEN` aus `hall.toml.example` startet der Dienst
+Hash aus). Er muss aus **8 bis 12 Ziffern** bestehen – er öffnet die Tür jederzeit, auch ohne
+Buchung, und muss deshalb deutlich schwerer zu erraten sein als eine Buchungs-PIN. Mit dem Platzhalter `$argon2id$ERSETZEN` aus `hall.toml.example` startet der Dienst
 absichtlich nicht.
 
 `GET http://127.0.0.1:8099/health` zeigt Planversion, HA-Verbindung und Länge der
