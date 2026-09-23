@@ -6,6 +6,7 @@ Jeder Fehler wird zu `HaFehler`. Die Aufrufer unterscheiden nur „HA hat geantw
 """
 
 import json
+from collections import deque
 from typing import Any
 
 import aiohttp
@@ -19,6 +20,10 @@ class HaWebSocket:
     def __init__(self, ws: aiohttp.ClientWebSocketResponse) -> None:
         self._ws = ws
         self._id = 0
+        # Events, die während des Wartens auf ein anderes `result` eintrafen (z. B. bei
+        # zwei aufeinanderfolgenden abonniere()-Aufrufen), gehen nicht verloren, sondern
+        # werden hier gepuffert und von naechstes() zuerst ausgeliefert.
+        self._ereignis_puffer: deque[dict[str, Any]] = deque()
 
     async def _lies(self) -> dict[str, Any]:
         try:
@@ -54,10 +59,14 @@ class HaWebSocket:
                 if not antwort.get("success"):
                     raise HaFehler(f"Abonnement {event_type} abgelehnt")
                 return
+            if antwort.get("type") == "event":
+                self._ereignis_puffer.append(antwort)
 
     async def naechstes(self) -> dict[str, Any]:
         while True:
-            nachricht = await self._lies()
+            nachricht = (
+                self._ereignis_puffer.popleft() if self._ereignis_puffer else await self._lies()
+            )
             if nachricht.get("type") == "event" and isinstance(nachricht.get("event"), dict):
                 event: dict[str, Any] = nachricht["event"]
                 return event

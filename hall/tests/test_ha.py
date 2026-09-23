@@ -65,6 +65,19 @@ async def test_websocket_abonnieren_und_empfangen(ha: HaSimulator, client: HaCli
     await ws.schliesse()
 
 
+async def test_websocket_event_waehrend_zweitem_abo_geht_nicht_verloren(
+    ha: HaSimulator, client: HaClient
+) -> None:
+    ws = await client.websocket()
+    await ws.abonniere("state_changed")
+    await ha.setze("binary_sensor.praesenz_feld_1", "on")
+    await ws.abonniere("esphome.beachhub_pin")
+    event = await asyncio.wait_for(ws.naechstes(), timeout=2)
+    assert event["event_type"] == "state_changed"
+    assert event["data"]["entity_id"] == "binary_sensor.praesenz_feld_1"
+    await ws.schliesse()
+
+
 async def test_websocket_falsches_token_und_trennung(ha: HaSimulator) -> None:
     falsch = HaClient(ha.url, "falsches-token")
     with pytest.raises(HaFehler, match="Anmeldung"):
