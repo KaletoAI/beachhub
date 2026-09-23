@@ -52,4 +52,13 @@ class Settings(BaseSettings):
         return fehler
 
 
+def pruefe_produktionsstart(einstellungen: Settings) -> None:
+    """Verweigert den Start, wenn im Produktivbetrieb unsichere Einstellungen aktiv sind.
+
+    Ausgelagert aus main.py, damit der Check ohne FastAPI-Import/Modul-Reload testbar ist.
+    """
+    if einstellungen.app_env == "production" and einstellungen.produktionsfehler:
+        raise RuntimeError("Start verweigert: " + "; ".join(einstellungen.produktionsfehler))
+
+
 settings = Settings()

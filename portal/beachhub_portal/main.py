@@ -10,14 +10,13 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
-from beachhub_portal.config import INSECURE_SECRET, settings
+from beachhub_portal.config import INSECURE_SECRET, pruefe_produktionsstart, settings
 from beachhub_portal.templating import render
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger(__name__)
 
-if settings.app_env == "production" and settings.produktionsfehler:
-    raise RuntimeError("Start verweigert: " + "; ".join(settings.produktionsfehler))
+pruefe_produktionsstart(settings)
 if settings.secret_key == INSECURE_SECRET:
     logger.warning("PORTAL_SECRET_KEY ist der Standardwert – nur für Entwicklung.")
 

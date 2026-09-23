@@ -5,18 +5,16 @@ Postadressen, Rechnungen und Zahlungsdaten liegen ausschließlich im Hauptsystem
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, MetaData, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+from beachhub_portal import uhr
+
 SCHEMA = "spiegel"
-
-
-def _jetzt() -> datetime:
-    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -31,7 +29,7 @@ class Konto(Base):
     anzeigename: Mapped[str] = mapped_column(String(100), default="", nullable=False)
     kunde_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     erstellt_am: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_jetzt, nullable=False
+        DateTime(timezone=True), default=lambda: uhr.jetzt(), nullable=False
     )
 
 
@@ -70,7 +68,7 @@ class Anfrage(Base):
     konto_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     nutzlast_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     erstellt_am: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_jetzt, nullable=False
+        DateTime(timezone=True), default=lambda: uhr.jetzt(), nullable=False
     )
     status: Mapped[str] = mapped_column(String(12), default=OFFEN, nullable=False)
     abgeholt_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -112,7 +110,7 @@ class WebhookEingang(Base):
     rohdaten: Mapped[str] = mapped_column(Text, nullable=False)
     signatur_header: Mapped[str | None] = mapped_column(Text)
     empfangen_am: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=_jetzt, nullable=False
+        DateTime(timezone=True), default=lambda: uhr.jetzt(), nullable=False
     )
     anfrage_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
 
