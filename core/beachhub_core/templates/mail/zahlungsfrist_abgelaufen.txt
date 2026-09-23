@@ -1,0 +1,10 @@
+Hallo {{ b.kunde.name }},
+
+Ihre Reservierung wurde nicht rechtzeitig bezahlt und ist verfallen:
+Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
+
+Der Platz ist wieder frei. Solange er verfügbar ist, können Sie ihn im Portal erneut buchen.
+Mit der Reservierung verrechnetes Guthaben steht Ihnen wieder zur Verfügung.
+
+Viele Grüße
+{{ betreiber }}

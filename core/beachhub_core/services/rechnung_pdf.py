@@ -50,11 +50,20 @@ def erzeuge(db: Session, rechnung: Rechnung) -> Path:
     return pfad
 
 
-def pruefe_integritaet(rechnung: Rechnung) -> bool:
+def lese_geprueft(rechnung: Rechnung) -> bytes | None:
+    """Liest das archivierte PDF genau einmal und gibt die Bytes nur zurück, wenn ihre Prüfsumme
+    zu `pdf_sha256` passt – sonst None. So entsteht zwischen Prüfung und Auslieferung kein
+    zweiter, ungeprüfter Lesevorgang derselben Datei (TOCTOU)."""
     if not rechnung.pdf_pfad or not rechnung.pdf_sha256:
-        return False
+        return None
     try:
         daten = Path(rechnung.pdf_pfad).read_bytes()
     except OSError:
-        return False
-    return hashlib.sha256(daten).hexdigest() == rechnung.pdf_sha256
+        return None
+    if hashlib.sha256(daten).hexdigest() != rechnung.pdf_sha256:
+        return None
+    return daten
+
+
+def pruefe_integritaet(rechnung: Rechnung) -> bool:
+    return lese_geprueft(rechnung) is not None

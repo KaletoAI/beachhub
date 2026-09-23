@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}Konto löschen{% endblock %}
+{% block content %}
+<h1>Konto löschen</h1>
+<div class="karte">
+  <p>Dein Konto wird endgültig gelöscht. Bestehende Buchungen bleiben bei der Halle bestehen;
+  Rechnungen bewahrt die Halle aus gesetzlichen Gründen zehn Jahre auf.</p>
+  <form method="post" action="/konto/loeschen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="gefahr">Konto endgültig löschen</button>
+  </form>
+  <p><a href="/konto">Abbrechen</a></p>
+</div>
+{% endblock %}

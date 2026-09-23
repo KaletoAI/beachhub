@@ -80,7 +80,13 @@ def aendere(db: Session, kunde: Kunde, *, admin_user_id: uuid.UUID | None, **fel
     return kunde
 
 
-def anonymisiere(db: Session, kunde: Kunde, admin_user_id: uuid.UUID | None = None) -> None:
+def anonymisiere(
+    db: Session,
+    kunde: Kunde,
+    admin_user_id: uuid.UUID | None = None,
+    *,
+    quelle: str = "admin",
+) -> None:
     vorher = audit.als_dict(kunde)
     digest = hashlib.sha256(kunde.email.encode()).hexdigest()[:32]
     kunde.name = "Gelöschter Kunde"
@@ -92,7 +98,7 @@ def anonymisiere(db: Session, kunde: Kunde, admin_user_id: uuid.UUID | None = No
     db.flush()
     audit.protokolliere(
         db,
-        quelle="admin",
+        quelle=quelle,
         objekt_typ="kunde",
         objekt_id=kunde.id,
         vorher=vorher,

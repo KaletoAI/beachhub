@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Anmelden{% endblock %}
+{% block content %}
+<h1>Anmelden</h1>
+{% if fehler %}<div class="flash fehler">{{ fehler }}</div>{% endif %}
+{% if meldung %}<div class="flash ok">{{ meldung }}</div>{% endif %}
+{% if dev_code %}<div class="flash warn">Entwicklung ohne Mailserver – Code <strong>{{ dev_code }}</strong> · <a href="{{ dev_link }}">Anmeldelink</a></div>{% endif %}
+<form method="post" action="/anmelden" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>E-Mail-Adresse<input type="email" name="email" value="{{ code_email or '' }}" autocomplete="email" required></label>
+  <button>Link und Code anfordern</button>
+  <p class="hinweis">Du bekommst eine Mail mit einem Anmeldelink und einem sechsstelligen Code. Ein Passwort gibt es nicht.</p>
+</form>
+{% if code_email %}
+<form method="post" action="/anmelden/code" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="email" value="{{ code_email }}">
+  <label>Code aus der Mail<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required></label>
+  <button>Anmelden</button>
+</form>
+{% endif %}
+{% endblock %}

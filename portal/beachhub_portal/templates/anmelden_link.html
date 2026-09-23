@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Anmelden{% endblock %}
+{% block content %}
+<div class="karte">
+  <h1>Anmelden</h1>
+  <p>Tippe auf den Knopf, um dich anzumelden.</p>
+  <form method="post" action="/anmelden/link/{{ token }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button>Jetzt anmelden</button>
+  </form>
+</div>
+{% endblock %}

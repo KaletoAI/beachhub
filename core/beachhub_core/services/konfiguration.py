@@ -26,6 +26,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "grund_temperatur": (Decimal, Decimal("8.0")),
     "antwort_hinweis_sekunden": (int, 120),
     "pin_laenge": (int, 6),
+    "portal_kundengruppe": (str, ""),
 }
 
 _TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool"}
@@ -109,6 +110,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "um Geduld bittet.",
     ),
     "pin_laenge": Beschreibung("Portal und Zugang", "Länge des Zahlencodes", "Stellen"),
+    "portal_kundengruppe": Beschreibung(
+        "Portal und Zugang",
+        "Kundengruppe neuer Portalkunden",
+        "",
+        "Name der Kundengruppe, die ein im Portal angelegter Kunde bekommt. Leer: die erste "
+        "Gruppe in alphabetischer Reihenfolge.",
+    ),
 }
 
 # Reihenfolge der Gruppen auf der Konfigurationsseite.
@@ -163,7 +171,12 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         nachher={"wert": neu, "schluessel": schluessel},
         admin_user_id=admin_user_id,
     )
-    if schluessel in ("fenster_tage", "mindestvorlauf_minuten"):
+    if schluessel in (
+        "fenster_tage",
+        "mindestvorlauf_minuten",
+        "storno_frist_stunden",
+        "antwort_hinweis_sekunden",
+    ):
         from beachhub_core.services import lesestand
 
         lesestand.markiere_geaendert(db, "belegung")

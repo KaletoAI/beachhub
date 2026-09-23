@@ -35,6 +35,10 @@ def storno(db: Session, s: Storno) -> None:
     )
 
 
+def zahlungsfrist_abgelaufen(db: Session, b: Buchung) -> None:
+    mail.sende(b.kunde.email, "Reservierung verfallen", _text("zahlungsfrist_abgelaufen", b=b))
+
+
 def dauerbuchung_angelegt(db: Session, d: Dauerbuchung) -> None:
     vorlauf = konfiguration.hole(db, "zutritt_vorlauf_minuten")
     mail.sende(

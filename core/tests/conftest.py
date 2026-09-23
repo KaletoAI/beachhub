@@ -22,6 +22,10 @@ os.environ["APP_ENV"] = "dev"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["SMTP_HOST"] = ""
 os.environ["ENABLE_SCHEDULER"] = "false"
+# Eine lokale .env mit PORTAL_URL darf in Tests keinen Kanal starten (der lifespan würde sonst
+# gegen ein echtes/nicht existierendes Portal laufen).
+os.environ["ENABLE_KANAL"] = "false"
+os.environ["PORTAL_URL"] = ""
 
 import pyotp  # noqa: E402
 import pytest  # noqa: E402

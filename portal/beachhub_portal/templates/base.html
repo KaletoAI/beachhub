@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Buchung{% endblock %} · {{ betreiber }}</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+{% block kopf %}{% endblock %}
+</head>
+<body>
+<header class="top">
+  <div class="topzeile">
+    <a class="brand" href="/">{{ betreiber }}</a>
+    <nav class="hauptnav" aria-label="Hauptmenü">
+      {% set pfad = request.url.path %}
+      <a href="/"{% if pfad == "/" %} aria-current="page"{% endif %}>Belegung</a>
+      {% if konto %}
+      <a href="/buchungen"{% if pfad.startswith("/buchungen") %} aria-current="page"{% endif %}>Meine Buchungen</a>
+      <a href="/rechnungen"{% if pfad.startswith("/rechnungen") %} aria-current="page"{% endif %}>Rechnungen</a>
+      <a href="/konto"{% if pfad.startswith("/konto") %} aria-current="page"{% endif %}>Konto</a>
+      {% else %}
+      <a href="/anmelden"{% if pfad.startswith("/anmelden") %} aria-current="page"{% endif %}>Anmelden</a>
+      {% endif %}
+    </nav>
+  </div>
+</header>
+<main>
+  {% if flash %}<div class="flash {{ flash.art }}">{{ flash.text }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

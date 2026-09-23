@@ -1,0 +1,16 @@
+{% extends "base.html" %}{% block title %}Anfrage{% endblock %}
+{% block kopf %}{% if stand.zustand in ("wartet", "zahlung") %}
+<noscript><meta http-equiv="refresh" content="3"></noscript>
+<script src="/static/warten.js" defer></script>
+{% endif %}{% endblock %}
+{% block content %}
+<div class="karte warten" id="warten" data-stand="{{ stand_url }}" data-zustand="{{ stand.zustand }}">
+  {% if stand.zustand == "wartet" %}<h1>Einen Moment …</h1>
+  {% elif stand.zustand == "zahlung" %}<h1>Zahlung</h1>
+  {% elif stand.zustand == "abgelehnt" %}<h1>Das hat nicht geklappt</h1>
+  {% else %}<h1>Fehler</h1>{% endif %}
+  <p id="warten-text">{{ stand.text }}</p>
+  {% if stand.zustand == "zahlung" and stand.zahlung_url %}<p><a class="knopf" href="{{ stand.zahlung_url }}">Zur Zahlung</a></p>{% endif %}
+  {% if stand.zustand in ("abgelehnt", "fehler") %}<p><a href="/">Zurück zur Belegung</a></p>{% endif %}
+</div>
+{% endblock %}

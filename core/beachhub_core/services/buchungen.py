@@ -80,6 +80,7 @@ def lege_an(
     anfrage_id: uuid.UUID | None = None,
     dauerbuchung_id: uuid.UUID | None = None,
     pin_klar: str | None = None,
+    zahlungsart: str | None = None,
 ) -> Buchung:
     feld = db.scalar(select(Feld).where(Feld.id == feld_id).with_for_update())
     if feld is None or not feld.aktiv:
@@ -110,7 +111,7 @@ def lege_an(
         ende=ende,
         status=status,
         preis=preis,
-        zahlungsart=kunde.zahlungsart,
+        zahlungsart=zahlungsart or kunde.zahlungsart,
         pin_hash=pin.hash(pin_klar),
         pin_verschluesselt=pin.verschluessele(pin_klar),
         anfrage_id=anfrage_id,

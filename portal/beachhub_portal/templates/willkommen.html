@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% block title %}Willkommen{% endblock %}
+{% block content %}
+<h1>Willkommen!</h1>
+{% if fehler %}<div class="flash fehler">{{ fehler }}</div>{% endif %}
+<form method="post" action="/willkommen" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Wie heißt du?<input name="anzeigename" maxlength="100" autocomplete="name" required></label>
+  <p class="hinweis">Der Name erscheint auf deinen Buchungen und Rechnungen. Die Halle kann ihn für die Rechnung ergänzen.</p>
+  <button>Weiter</button>
+</form>
+{% endblock %}

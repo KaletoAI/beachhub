@@ -30,6 +30,9 @@ if settings.has_insecure_defaults:
         raise RuntimeError("Start verweigert: SECRET_KEY/PIN_SCHLUESSEL sind Standardwerte.")
     logger.warning("SECRET_KEY/PIN_SCHLUESSEL sind unsichere Standardwerte – nur für Entwicklung.")
 
+if settings.app_env == "production" and settings.produktionsfehler:
+    raise RuntimeError("Start verweigert: " + "; ".join(settings.produktionsfehler))
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -37,7 +40,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         from beachhub_core import jobs
 
         jobs.starte_scheduler()
+    kanal_instanz = None
+    if settings.enable_kanal and settings.portal_url:
+        from beachhub_core import kanal
+
+        kanal_instanz = kanal.Kanal(kanal.baue_client())
+        kanal_instanz.starte()
     yield
+    if kanal_instanz is not None:
+        kanal_instanz.stoppe()
     if settings.enable_scheduler:
         from beachhub_core import jobs
 

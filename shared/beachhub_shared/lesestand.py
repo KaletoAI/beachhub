@@ -56,6 +56,9 @@ class BelegungInhalt(BaseModel):
     fenster_tage: int
     mindestvorlauf_minuten: int
     belegt: dict[str, list[Zeitraum]]
+    # Mit Vorgabe, damit vor Stufe 2 gespeicherte Dokumente gültig bleiben.
+    storno_frist_stunden: int = 24
+    antwort_hinweis_sekunden: int = 120
 
 
 class TarifInfo(BaseModel):
@@ -88,6 +91,10 @@ class KontoBuchung(BaseModel):
     preis: Decimal
     pin: str | None
     storno: StornoInfo | None
+    # Nur bei einer offenen Reservierung: Link zur Bezahlseite und Ende der Zahlungsfrist
+    # (Hauptspec § 8.1). Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
+    checkout_url: str | None = None
+    reserviert_bis: datetime | None = None
 
 
 class KontoRechnung(BaseModel):
