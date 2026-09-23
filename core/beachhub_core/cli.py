@@ -11,6 +11,9 @@ def main() -> None:
     a.add_argument("--name", required=True)
     a.add_argument("--rolle", default="admin", choices=["admin", "lesend"])
     sub.add_parser("keygen")
+    z = sub.add_parser("zertifikate", help="interne CA und Client-Zertifikate für mTLS")
+    z.add_argument("--ziel", default="data/zertifikate")
+    z.add_argument("--name", action="append", help="Zertifikatsname (mehrfach möglich)")
     m = sub.add_parser("monatslauf")
     m.add_argument("monat", help="JJJJ-MM")
     args = p.parse_args()
@@ -29,6 +32,14 @@ def main() -> None:
         from beachhub_core.services import lesestand
 
         print(lesestand.erzeuge_schluessel())
+    elif args.cmd == "zertifikate":
+        from pathlib import Path
+
+        from beachhub_core import zertifikate
+
+        namen = args.name or ["portal-kanal", "halle"]
+        for pfad in zertifikate.erzeuge(Path(args.ziel), namen):
+            print(pfad)
     elif args.cmd == "monatslauf":
         from beachhub_core import jobs
 
