@@ -83,6 +83,13 @@ def _text(wert: Any) -> str | None:
     return str(wert) if wert else None
 
 
+def _zahl(wert: Any, schluessel: str) -> float:
+    try:
+        return float(wert)
+    except (TypeError, ValueError) as e:
+        raise KonfigFehler(f"{schluessel} muss eine Zahl sein") from e
+
+
 def lade_zuordnung(pfad: Path) -> Zuordnung:
     try:
         roh = tomllib.loads(pfad.read_text(encoding="utf-8"))
@@ -122,13 +129,15 @@ def lade_zuordnung(pfad: Path) -> Zuordnung:
         ),
         tuer=TuerKonfig(
             entity=tuer_entity,
-            impuls_sekunden=float(tuer.get("impuls_sekunden", 5)),
+            impuls_sekunden=_zahl(tuer.get("impuls_sekunden", 5), "tuer.impuls_sekunden"),
             kontakt=_text(tuer.get("kontakt")),
         ),
         tastenfeld=TastenfeldKonfig(
             ereignis=str(tasten.get("ereignis", "esphome.beachhub_pin")),
             feld=str(tasten.get("feld", "code")),
-            verzoegerung_sekunden=float(tasten.get("verzoegerung_sekunden", 3)),
+            verzoegerung_sekunden=_zahl(
+                tasten.get("verzoegerung_sekunden", 3), "tastenfeld.verzoegerung_sekunden"
+            ),
         ),
         handbetrieb=_text(hand.get("entity", "input_boolean.beachhub_handbetrieb")),
     )

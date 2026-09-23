@@ -52,6 +52,25 @@ def test_fehlende_oder_kaputte_datei(tmp_path: Path) -> None:
         lade_zuordnung(p)
 
 
+def test_nicht_numerische_zeiten_werden_abgelehnt(tmp_path: Path) -> None:
+    p = tmp_path / "hall.toml"
+    p.write_text(
+        TOML_BEISPIEL.replace(
+            '[tuer]\nentity = "lock.eingang"',
+            '[tuer]\nentity = "lock.eingang"\nimpuls_sekunden = "abc"',
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(KonfigFehler, match="tuer.impuls_sekunden"):
+        lade_zuordnung(p)
+    p.write_text(
+        TOML_BEISPIEL.replace("verzoegerung_sekunden = 3", 'verzoegerung_sekunden = "abc"'),
+        encoding="utf-8",
+    )
+    with pytest.raises(KonfigFehler, match="tastenfeld.verzoegerung_sekunden"):
+        lade_zuordnung(p)
+
+
 def test_zeiten_kommen_mit_zeitzone_zurueck(sitzungen: sessionmaker[Session]) -> None:
     zeitpunkt = datetime(2027, 12, 1, 18, 0, tzinfo=UTC)
     with sitzungen() as db:
