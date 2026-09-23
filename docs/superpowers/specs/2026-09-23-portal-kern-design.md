@@ -27,8 +27,10 @@ Entscheidung: **Long-Polling statt WebSocket.** Es gibt nur einen Transportweg. 
 Normalbetrieb sind derselbe Code, neue Anfragen kommen trotzdem sofort an, und Caddy kann mTLS pro
 Pfad einfach erzwingen. Die Hauptspec § 8.1 wird entsprechend angepasst.
 
-Alle Aufrufe gehen vom Hauptsystem aus. Caddy erzwingt auf `/core/*` ein Client-Zertifikat der
-internen CA. Das Portal prüft zusätzlich den Header `Authorization: Bearer <KANAL_TOKEN>`
+Alle Aufrufe gehen vom Hauptsystem aus. Caddy verlangt das Client-Zertifikat im TLS-Handshake, also
+bevor der Pfad bekannt ist; mTLS „nur auf `/core/*`“ geht deshalb nicht. Stattdessen gibt es einen
+zweiten Site-Block auf Port 8443 mit Pflicht-Zertifikat der internen CA, der nur `/core/*` durchreicht.
+Auf der öffentlichen Site liefert `/core/*` 404. Das Portal prüft zusätzlich den Header `Authorization: Bearer <KANAL_TOKEN>`
 (Vergleich mit `hmac.compare_digest`). Ohne gültigen Token antwortet es mit 401.
 
 | Aufruf | Anfrage | Antwort |
@@ -353,8 +355,8 @@ Rechnungslinks und den Lesestand `konto:<kunde_id>` sofort und meldet ab. Die An
 
 - `portal/Dockerfile`, `portal/docker-compose.yml` (Portal und PostgreSQL), `.env.example`, README
   mit Kurzstart.
-- `portal/deploy/Caddyfile`: öffentliche Domain mit automatischem TLS; `/core/*` nur mit
-  Client-Zertifikat der internen CA (`client_auth { mode require_and_verify; trust_pool file … }`).
+- `portal/deploy/Caddyfile`: öffentliche Domain mit automatischem TLS (dort `/core/*` → 404) und eine
+  zweite Site auf Port 8443 mit `client_auth { mode require_and_verify; trust_pool file … }`, die nur `/core/*` durchreicht.
 - `core`-CLI `beachhub-core zertifikate` erzeugt die interne CA und ein Client-Zertifikat für das
   Hauptsystem (Portal) sowie eines für die Halle (siehe Hallendienst-Spec), mit `cryptography`.
 - `docs/betrieb/portal.md`: Inbetriebnahme, Zertifikate, Token, öffentlicher Schlüssel, Backup

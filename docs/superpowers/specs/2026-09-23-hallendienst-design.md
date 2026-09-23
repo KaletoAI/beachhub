@@ -33,8 +33,8 @@ nächste Runde aufgenommen (Hauptspec § 12.2).
 
 ## 2. Hauptsystem: Schnittstelle `/hall`
 
-Router `core/beachhub_core/routes/hall.py`, ohne CSRF und ohne Admin-Session. Caddy erzwingt auf
-`/hall/*` ein Client-Zertifikat der internen CA. Das Hauptsystem prüft zusätzlich
+Router `core/beachhub_core/routes/hall.py`, ohne CSRF und ohne Admin-Session. Caddy erzwingt auf einer
+eigenen Site (Port 8444) ein Client-Zertifikat der internen CA und reicht dort nur `/hall/*` durch. Das Hauptsystem prüft zusätzlich
 `Authorization: Bearer <HALL_TOKEN>` (`hmac.compare_digest`). Ist `HALL_TOKEN` leer, antwortet der
 Router mit 404 (Halle nicht eingerichtet).
 
@@ -326,7 +326,7 @@ Die Dokumentation `docs/betrieb/hallendienst.md` beschreibt:
 - `hall/docker-compose.yml` für den Betrieb neben HA (Docker oder HA OS mit Container-Unterstützung).
 - WireGuard: Der Hallendienst ist Client mit `PersistentKeepalive`, und das Hauptsystem lauscht nur
   auf dem WireGuard-Interface. Das Beispiel steht bereits in `core/deploy`.
-- Caddy des Hauptsystems: zusätzlicher Block für `/hall/*` mit `client_auth` (interne CA). Die
+- Caddy des Hauptsystems: eigene Site auf Port 8444 mit `client_auth { mode require_and_verify }` (interne CA), die nur `/hall/*` durchreicht; auf der Admin-Site liefert `/hall/*` 404 (Client-Zertifikate lassen sich nicht pro Pfad erzwingen). Die
   Zertifikate erzeugt `beachhub-core zertifikate` (siehe Portal-Spec § 12).
 - Lokale Entwicklung: `CORE_URL=http://127.0.0.1:8000` ohne mTLS, `HA_URL` auf das Homelab-HA oder
   den Simulator (`python -m tests.ha_simulator`).
