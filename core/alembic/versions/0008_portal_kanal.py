@@ -1,7 +1,9 @@
 """portal kanal
 
 Tabellen für den Kanal zum Portal: verarbeitete Anfragen (Idempotenz) und Zahlungen des
-Online-Zahlungsdienstes.
+Online-Zahlungsdienstes. lesestand_version.version wird zu BIGINT: Die Version ist
+max(bisherige Version + 1, Unixzeit in Millisekunden) (Ruling Lesestand-Versionen) und
+übersteigt damit einen 32-Bit-INTEGER.
 
 Revision ID: 0008
 Revises: 0007
@@ -51,9 +53,23 @@ def upgrade() -> None:
         sa.UniqueConstraint("provider_ref"),
     )
     op.create_index("ix_zahlung_buchung_id", "zahlung", ["buchung_id"])
+    op.alter_column(
+        "lesestand_version",
+        "version",
+        existing_type=sa.Integer(),
+        type_=sa.BigInteger(),
+        existing_nullable=False,
+    )
 
 
 def downgrade() -> None:
+    op.alter_column(
+        "lesestand_version",
+        "version",
+        existing_type=sa.BigInteger(),
+        type_=sa.Integer(),
+        existing_nullable=False,
+    )
     op.drop_index("ix_zahlung_buchung_id", table_name="zahlung")
     op.drop_table("zahlung")
     op.drop_table("anfrage_verarbeitet")

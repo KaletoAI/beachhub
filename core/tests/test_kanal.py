@@ -224,6 +224,38 @@ def test_lesestand_abgelehnt_alarmiert(
     assert mail_ausgang[-1]["betreff"] == "[Beachhub] Lesestand vom Portal abgelehnt"
 
 
+def test_lesestand_abgelehnt_alarm_gedrosselt_pro_dokument_version(
+    db: Session, welt, portal: FakePortal, k, mail_ausgang
+) -> None:
+    # Zwei aufeinanderfolgende 422 für dasselbe Dokument/dieselbe Version -> eine Alarm-Mail.
+    portal.lesestand_status = 422
+    lesestand.markiere_geaendert(db, "belegung")
+    db.commit()
+    k.verteilen()
+    k.verteilen()
+    assert len(mail_ausgang) == 1
+
+
+def test_lesestand_abgelehnt_alarm_gedrosselt_pro_stunde(
+    db: Session, welt, portal: FakePortal, k, uhr: Uhr, mail_ausgang
+) -> None:
+    portal.lesestand_status = 422
+    lesestand.markiere_geaendert(db, "belegung")
+    db.commit()
+    k.verteilen()
+    assert len(mail_ausgang) == 1
+    # Neues Dokument, aber innerhalb einer Stunde seit dem letzten Alarm -> kein weiterer Alarm.
+    lesestand.markiere_geaendert(db, "tarife")
+    db.commit()
+    k.verteilen()
+    assert len(mail_ausgang) == 1
+    # Über eine Stunde seit dem letzten Alarm -> die immer noch abgelehnte Sendung alarmiert
+    # wieder.
+    uhr.t += 3601
+    k.verteilen()
+    assert len(mail_ausgang) == 2
+
+
 def test_portal_ausfall_alarm_nach_30_minuten(
     welt, portal: FakePortal, k, uhr: Uhr, mail_ausgang
 ) -> None:

@@ -32,6 +32,11 @@ AUSFALL_ALARM_SEKUNDEN = 30 * 60
 ABGLEICH_SEKUNDEN = 60 * 60
 VERTEIL_TAKT_SEKUNDEN = 2.0
 MAX_BACKOFF_SEKUNDEN = 60.0
+# Drosselung des Alarms bei einer vom Portal abgelehnten Sendung (422): höchstens einmal je
+# (Dokument, Version) und insgesamt höchstens einmal pro Stunde, sonst würde eine dauerhaft
+# falsche Portal-Konfiguration eine Mailflut auslösen (jede Runde versucht dieselbe, abgelehnte
+# Version erneut, bis eine neue Version veröffentlicht wird).
+LESESTAND_ALARM_DROSSEL_SEKUNDEN = 60 * 60
 
 # Schlüsselpräfix in app_setting für die zuletzt erfolgreich ans Portal gesendete Version je
 # Dokument (K1): Der Kanal merkt sich das dauerhaft, unabhängig davon, ob er selbst, der
@@ -75,6 +80,8 @@ class Kanal:
         self._ausfall_gemeldet = False
         self._abgleich_noetig = True
         self._letzter_abgleich = float("-inf")
+        self._422_gemeldet: set[tuple[str, int]] = set()
+        self._letzter_422_alarm = float("-inf")
         self._sende_sperre = threading.Lock()
         self._stop = threading.Event()
         self._threads: list[threading.Thread] = []
@@ -268,16 +275,31 @@ class Kanal:
             r = self.client.post("/core/lesestand", json=body)
         if r.status_code == 422:
             logger.error("Portal hat Lesestand abgelehnt: %s", r.text[:500])
-            benachrichtigung.betreiber_alarm(
-                "Lesestand vom Portal abgelehnt",
-                "Das Portal hat mindestens ein Lesestand-Dokument wegen einer ungültigen Signatur "
-                "verworfen. Prüfen Sie, ob im Portal der aktuelle öffentliche Schlüssel des "
-                "Hauptsystems hinterlegt ist (beachhub-core keygen gibt ihn nicht erneut aus; "
-                "er steht auf der System-Seite).\n\n" + r.text[:2000],
-            )
+            self._alarm_bei_ablehnung(dokumente, r.text)
             return False
         r.raise_for_status()
         return True
+
+    def _alarm_bei_ablehnung(self, dokumente: list[Dokument], antwort_text: str) -> None:
+        """Drosselt den Alarm bei einer vom Portal abgelehnten Sendung: höchstens einmal je
+        (Dokument, Version) und insgesamt höchstens einmal pro Stunde. Eine (Dokument, Version)
+        gilt erst als gemeldet, wenn tatsächlich eine Mail rausging – sonst bliebe eine Ablehnung,
+        die nur an der Stunden-Drosselung scheiterte, für immer unbemerkt."""
+        schluessel = {(d.dokument, d.version) for d in dokumente}
+        neu = schluessel - self._422_gemeldet
+        if not neu:
+            return
+        if self.uhr() - self._letzter_422_alarm < LESESTAND_ALARM_DROSSEL_SEKUNDEN:
+            return
+        self._422_gemeldet |= neu
+        self._letzter_422_alarm = self.uhr()
+        benachrichtigung.betreiber_alarm(
+            "Lesestand vom Portal abgelehnt",
+            "Das Portal hat mindestens ein Lesestand-Dokument wegen einer ungültigen Signatur "
+            "verworfen. Prüfen Sie, ob im Portal der aktuelle öffentliche Schlüssel des "
+            "Hauptsystems hinterlegt ist (beachhub-core keygen gibt ihn nicht erneut aus; "
+            "er steht auf der System-Seite).\n\n" + antwort_text[:2000],
+        )
 
     def _nachlauf(self, schritte: list[Nachlauf]) -> None:
         if not schritte:
