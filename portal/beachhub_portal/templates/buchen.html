@@ -1,0 +1,29 @@
+{% extends "base.html" %}{% block title %}Buchen{% endblock %}
+{% block content %}
+<h1>Buchen</h1>
+{% if nicht_frei %}
+<div class="karte">
+  <p>Dieser Termin ist nicht mehr frei oder nicht mehr buchbar.</p>
+  <p><a href="/">Zurück zur Belegung</a></p>
+</div>
+{% else %}
+<div class="karte">
+  <h2>{{ feld.name }} · {{ beginn|lokal }} Uhr</h2>
+  {% if konto %}
+  <form method="post" action="/buchen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="feld" value="{{ feld.id }}">
+    <input type="hidden" name="beginn" value="{{ beginn.isoformat() }}">
+    <p>Bis wann?</p>
+    {% for o in optionen %}
+    <label><input type="radio" name="ende" value="{{ o.ende.isoformat() }}"{% if loop.first %} checked{% endif %}>bis {{ o.ende|uhrzeit }} Uhr{% if o.preis is not none %} – {{ o.preis|euro }}{% endif %}</label>
+    {% endfor %}
+    <p class="hinweis">Bis {{ storno_frist }} Stunden vor Beginn kannst du kostenfrei stornieren, danach bleibt der Betrag fällig. Bezahlt wird direkt online.</p>
+    <button>Verbindlich buchen</button>
+  </form>
+  {% else %}
+  <p><a href="/anmelden">Melde dich an</a>, um diesen Termin zu buchen.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

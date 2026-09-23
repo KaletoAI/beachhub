@@ -4,8 +4,9 @@ Das Portal entscheidet nichts. Es legt Anfragen ab, liefert sie aus und merkt si
 """
 
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from beachhub_shared import kanal
 from sqlalchemy import and_, or_, select
@@ -13,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from beachhub_portal import uhr
 from beachhub_portal.models import Anfrage, KanalKontakt, Konto
-from beachhub_portal.services import wecker
+from beachhub_portal.services import lesestand, wecker
 
 ERNEUT_NACH = timedelta(seconds=60)
 HOECHSTENS = 50
@@ -121,3 +122,105 @@ def beantworte(db: Session, anfrage_id: uuid.UUID, antwort: kanal.Antwort, jetzt
     a.antwort_json = daten
     a.beantwortet_am = jetzt
     return True
+
+
+WARTET = "Deine Anfrage wird bearbeitet …"
+HINWEIS = (
+    "Deine Anfrage ist gespeichert. Das Buchungssystem ist gerade nicht erreichbar; "
+    "du bekommst die Bestätigung per E-Mail."
+)
+GRUENDE: dict[str, str] = {
+    "belegt": "Der Termin ist inzwischen vergeben. Bitte wähle einen anderen.",
+    "ausserhalb_fenster": "Der Termin liegt außerhalb des Buchungsfensters.",
+    "ausserhalb_betriebszeit": "Zu dieser Zeit ist die Halle nicht geöffnet.",
+    "kein_tarif": "Für diesen Termin gibt es keinen Preis. Bitte wende dich an die Halle.",
+    "feld_inaktiv": "Dieses Feld ist derzeit nicht buchbar.",
+    "konto_gesperrt": "Dein Konto ist für Buchungen gesperrt. Bitte wende dich an die Halle.",
+    "konto_unbekannt": "Dein Konto wird noch eingerichtet. Bitte versuche es gleich noch einmal.",
+    "nicht_gefunden": "Das haben wir nicht gefunden.",
+    "zu_spaet": "Der Termin hat schon begonnen und kann nicht mehr storniert werden.",
+    # Controller-Hinweis Task 12: core/services/anfragen.py meldet ungültige/unvollständige
+    # Anfragen (z. B. fehlende konto_id) mit diesem Grund; der Fallbacktext wäre sonst zu
+    # unspezifisch für einen tatsächlich vom Hauptsystem gesendeten Ablehnungsgrund.
+    "ungueltig": "Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut.",
+}
+MELDUNGEN: dict[str, str] = {
+    "bestaetigt": "Deine Buchung ist bestätigt.",
+    "storniert_kostenfrei": "Deine Buchung ist storniert. Die Stornierung ist kostenfrei.",
+    "storniert_kostenpflichtig": (
+        "Deine Buchung ist storniert. Da die Stornofrist abgelaufen war, bleibt der Betrag fällig."
+    ),
+}
+
+
+@dataclass(frozen=True)
+class Stand:
+    zustand: Literal["wartet", "zahlung", "fertig", "abgelehnt", "fehler"]
+    text: str
+    ziel: str | None = None
+    zahlung_url: str | None = None
+
+
+def _nach_zahlung(
+    db: Session, antwort: dict[str, Any], kunde_id: uuid.UUID | None, weiter: bool
+) -> Stand:
+    inhalt = lesestand.konto(db, kunde_id)
+    buchung_id = antwort.get("buchung_id")
+    kb = next((b for b in inhalt.buchungen if b.id == buchung_id), None) if inhalt else None
+    if kb is not None and kb.status == "bestaetigt":
+        return Stand("fertig", MELDUNGEN["bestaetigt"], ziel="/buchungen?meldung=bestaetigt")
+    if kb is not None and kb.status in ("verfallen", "storniert"):
+        return Stand(
+            "abgelehnt", "Die Zahlungsfrist ist abgelaufen; der Termin wurde wieder freigegeben."
+        )
+    url = antwort.get("checkout_url")
+    return Stand(
+        "zahlung",
+        "Bitte schließe die Zahlung ab. Sobald sie bestätigt ist, geht es hier automatisch weiter.",
+        ziel=url if weiter else None,
+        zahlung_url=url,
+    )
+
+
+def stand(
+    db: Session,
+    a: Anfrage,
+    kunde_id: uuid.UUID | None,
+    jetzt: datetime,
+    *,
+    weiter: bool,
+    hinweis_sekunden: int,
+) -> Stand:
+    if a.status != Anfrage.BEANTWORTET:
+        alter = (jetzt - a.erstellt_am).total_seconds()
+        kontakt = db.get(KanalKontakt, 1)
+        still = (
+            kontakt is not None
+            and (jetzt - kontakt.letzter_abruf).total_seconds() > hinweis_sekunden
+        )
+        return Stand("wartet", HINWEIS if alter > hinweis_sekunden or still else WARTET)
+    antwort = a.antwort_json or {}
+    status = antwort.get("status")
+    if status == "fehler":
+        return Stand(
+            "fehler",
+            "Bei der Verarbeitung ist ein Fehler aufgetreten. "
+            "Bitte versuche es später noch einmal.",
+        )
+    if status in ("abgelehnt", "ignoriert"):
+        return Stand(
+            "abgelehnt", GRUENDE.get(str(antwort.get("grund")), "Die Anfrage wurde abgelehnt.")
+        )
+    if a.typ == "buchung_anfragen":
+        if status == "bestaetigt":
+            return Stand("fertig", MELDUNGEN["bestaetigt"], ziel="/buchungen?meldung=bestaetigt")
+        return _nach_zahlung(db, antwort, kunde_id, weiter)
+    if a.typ == "buchung_stornieren":
+        art = "storniert_kostenfrei" if antwort.get("kostenfrei") else "storniert_kostenpflichtig"
+        return Stand("fertig", MELDUNGEN[art], ziel=f"/buchungen?meldung={art}")
+    if a.typ == "rechnung_anfordern":
+        token = antwort.get("link_token")
+        if token:
+            return Stand("fertig", "Deine Rechnung steht bereit.", ziel=f"/rechnung/{token}")
+        return Stand("abgelehnt", "Die Rechnung konnte nicht bereitgestellt werden.")
+    return Stand("fertig", "Erledigt.", ziel="/konto")
