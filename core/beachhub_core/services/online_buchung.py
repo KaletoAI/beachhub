@@ -25,7 +25,6 @@ from beachhub_core.services import (
     storno,
 )
 from beachhub_core.services.ergebnis import Ergebnis, Nachlauf, abgelehnt, ignoriert, ok
-from beachhub_core.services.rechnungen import RechnungsFehler
 
 logger = logging.getLogger(__name__)
 NULL = Decimal("0.00")
@@ -49,12 +48,21 @@ def _bestaetigung_versenden(buchung_id: uuid.UUID, rechnung_id: uuid.UUID) -> Na
         if b is None or r is None:
             return
         benachrichtigung.buchung_bestaetigt(db, b)
+        nummer = r.nummer
         try:
             rechnung_pdf.erzeuge(db, r)
             db.commit()
-        except RechnungsFehler:
-            logger.exception("PDF-Erzeugung für Rechnung %s fehlgeschlagen", r.nummer)
+        except Exception:
+            # Jeder Fehler beim PDF (auch aus WeasyPrint oder dem Dateisystem): Die Buchung ist
+            # bestätigt, der Kunde bekommt aber keine Rechnung – der Betreiber muss nachfassen.
+            logger.exception("PDF-Erzeugung für Rechnung %s fehlgeschlagen", nummer)
             db.rollback()
+            benachrichtigung.betreiber_alarm(
+                "Rechnungs-PDF nicht erzeugt",
+                f"Das PDF der Rechnung {nummer} zur Portal-Buchung {buchung_id} konnte nicht "
+                "erzeugt werden; der Kunde hat keine Rechnung per Mail bekommen. Details im Log "
+                "des Hauptsystems.",
+            )
             return
         benachrichtigung.rechnung(db, r)
 
@@ -195,8 +203,11 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         return ignoriert("anbieter_unbekannt")
     ref = anbieter.verifiziere(n.rohdaten, n.signatur_header)
     if ref is None:
+        # Nur Anbieter und Länge: Die Rohdaten können Zahlungsdaten des Kunden enthalten.
         logger.warning(
-            "Zahlungsrückmeldung (%s) nicht verifizierbar: %.200s", n.provider, n.rohdaten
+            "Zahlungsrückmeldung (%s) nicht verifizierbar, %d Zeichen",
+            n.provider,
+            len(n.rohdaten),
         )
         return ignoriert("nicht_verifiziert")
     z = db.scalar(select(Zahlung).where(Zahlung.provider_ref == ref).with_for_update())
@@ -291,6 +302,10 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
         return abgelehnt("nicht_gefunden")
     if clock.now(db) >= b.beginn:
         return abgelehnt("zu_spaet")
+    if not b.im_portal_stornierbar:
+        # Sonst schriebe storno._gutschrift den Preis als Guthaben gut, obwohl nie online
+        # bezahlt wurde (etwa ein Dauerbuchungstermin eines Online-Kunden).
+        return abgelehnt("nicht_stornierbar")
     war_reserviert = b.status == Buchung.RESERVIERT
     s = storno.storniere(
         db,

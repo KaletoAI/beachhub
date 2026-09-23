@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Stornieren{% endblock %}
+{% block content %}
+<h1>Buchung stornieren</h1>
+<div class="karte">
+  <p><strong>{{ b.feld_name }}</strong> · {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr · {{ b.preis|euro }}</p>
+  {% if kostenfrei %}
+  <p>Die Stornierung ist <strong>kostenfrei</strong>.{% if b.status == "bestaetigt" %} Der Betrag wird deinem Guthaben gutgeschrieben und mit der nächsten Buchung verrechnet.{% endif %}</p>
+  {% else %}
+  <p>Die Stornofrist von {{ frist }} Stunden ist abgelaufen. Der Termin wird freigegeben, <strong>der Betrag bleibt aber fällig</strong>.</p>
+  {% endif %}
+  <form method="post" action="/buchungen/{{ b.id }}/stornieren">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="gefahr">Verbindlich stornieren</button>
+  </form>
+  <p><a href="/buchungen">Abbrechen</a></p>
+</div>
+{% endblock %}

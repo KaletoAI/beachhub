@@ -86,6 +86,7 @@ def buchung(
     id: str | None = None,  # noqa: A002 – Feldname des Lesestands
     checkout_url: str | None = None,
     reserviert_bis: datetime | None = None,
+    stornierbar: bool = True,
 ) -> dict[str, Any]:
     return {
         "id": id or str(uuid.uuid4()),
@@ -99,6 +100,7 @@ def buchung(
         "storno": storno,
         "checkout_url": checkout_url,
         "reserviert_bis": reserviert_bis.isoformat() if reserviert_bis else None,
+        "stornierbar": stornierbar,
     }
 
 

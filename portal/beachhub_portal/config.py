@@ -47,8 +47,20 @@ class Settings(BaseSettings):
             fehler.append("PORTAL_KANAL_TOKEN fehlt")
         if not self.core_public_key:
             fehler.append("PORTAL_CORE_PUBLIC_KEY fehlt")
+        # Ohne Mailserver kommt kein Anmeldecode an; im Produktivbetrieb gibt es keine
+        # Code-Anzeige auf der Seite als Ersatz.
+        if not self.smtp_host:
+            fehler.append("PORTAL_SMTP_HOST fehlt")
         if not self.cookie_secure:
             fehler.append("PORTAL_COOKIE_SECURE muss im Produktivbetrieb true sein")
+        # base_url geht ohne mTLS in den Kunden-Browser (Rückkehr nach Zahlung, Links in Mails)
+        # und muss deshalb öffentlich per https erreichbar sein, nicht nur lokal.
+        if not self.base_url.startswith("https://"):
+            fehler.append("PORTAL_BASE_URL muss im Produktivbetrieb mit https:// beginnen")
+        elif "localhost" in self.base_url or "127.0.0.1" in self.base_url:
+            fehler.append(
+                "PORTAL_BASE_URL darf im Produktivbetrieb nicht auf localhost/127.0.0.1 zeigen"
+            )
         return fehler
 
 

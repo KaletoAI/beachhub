@@ -308,6 +308,25 @@ def test_checkout_url_offene_weiterleitung_wird_abgelehnt(
     assert stand["zustand"] == "fehler" and stand["ziel"] is None
 
 
+@pytest.mark.parametrize(
+    ("url", "erwartet"),
+    [
+        ("//evil", False),  # protokollrelativ – Browser lesen das als fremden Host
+        ("/\\evil", False),  # Backslash direkt nach "/" – Browser lesen \ wie / bei http(s)
+        ("/\\/evil", False),  # dito, zweites Zeichen ist der Backslash
+        ("https:evil", False),  # kein "//", also kein Host (urlparse: netloc == "")
+        ("HTTPS://x", True),  # Schema ist laut RFC 3986 case-insensitiv, wie im Browser
+        (" /x", False),  # führender Leerraum
+        ("/x\ny", False),  # eingebettetes Steuerzeichen (Zeilenumbruch)
+        ("javascript:alert(1)", False),  # kein https, kein relativer Pfad
+        ("/test-zahlung/abc?betrag=1", True),  # gültiger relativer Pfad (Fake-Zahlung)
+        ("https://zahlung.example/x", True),  # gültige absolute https-URL
+    ],
+)
+def test_gueltige_checkout_url(url: str, erwartet: bool) -> None:
+    assert anfragen.gueltige_checkout_url(url) is erwartet
+
+
 def test_nach_zahlung_bestaetigt(angemeldet: TestClient, welt, db: Session) -> None:
     a = _anfrage(db, angemeldet.konto_id)
     bid = uuid.uuid4()
@@ -324,6 +343,45 @@ def test_verfallene_reservierung(angemeldet: TestClient, welt, db: Session) -> N
     verfallen = buchung(B17, B18, status="verfallen", id=str(bid))
     speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[verfallen]), version=2)
     assert "Zahlungsfrist ist abgelaufen" in angemeldet.get(f"/anfrage/{a.id}").text
+
+
+def test_stornierte_reservierung_eigener_text(angemeldet: TestClient, welt, db: Session) -> None:
+    a = _anfrage(db, angemeldet.konto_id)
+    bid = uuid.uuid4()
+    _antworte(db, a, status="reserviert", buchung_id=bid, checkout_url="/x")
+    storniert = buchung(B17, B18, status="storniert", id=str(bid), storno={"kostenfrei": True})
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[storniert]), version=2)
+    seite = angemeldet.get(f"/anfrage/{a.id}").text
+    assert "Die Reservierung wurde storniert" in seite
+    assert "Zahlungsfrist ist abgelaufen" not in seite
+
+
+def test_nach_unterzahlung_kein_zahlungslink(angemeldet: TestClient, welt, db: Session) -> None:
+    # Zahlung eingegangen, aber unter dem offenen Betrag: Die Buchung bleibt reserviert, das
+    # Konto-Dokument führt keinen Zahlungslink mehr – die Warteseite darf nicht zur Zahlung
+    # schicken und nicht weiter warten.
+    a = _anfrage(db, angemeldet.konto_id)
+    bid = uuid.uuid4()
+    _antworte(db, a, status="reserviert", buchung_id=bid, checkout_url="/test-zahlung/fake_x")
+    unterzahlt = buchung(B17, B18, status="reserviert", id=str(bid))
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[unterzahlt]), version=2)
+    r = angemeldet.get(f"/anfrage/{a.id}?weiter=1", follow_redirects=False)
+    assert r.status_code == 200
+    assert "Zahlung unvollständig – der Betreiber meldet sich" in r.text
+    assert "Zur Zahlung" not in r.text and "fake_x" not in r.text
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand?weiter=1").json()
+    assert stand["zustand"] == "abgelehnt" and stand["ziel"] is None
+
+
+def test_ablehnungsgrund_nicht_stornierbar_text(angemeldet: TestClient, welt, db: Session) -> None:
+    a = anfragen.stelle(
+        db,
+        typ="buchung_stornieren",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"buchung_id": str(uuid.uuid4())},
+    )
+    _antworte(db, a, status="abgelehnt", grund="nicht_stornierbar")
+    assert "nicht im Portal storniert werden" in angemeldet.get(f"/anfrage/{a.id}").text
 
 
 def test_bestaetigt_abgelehnt_fehler(angemeldet: TestClient, welt, db: Session) -> None:

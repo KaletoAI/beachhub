@@ -1,0 +1,16 @@
+# Build-Kontext für core/Dockerfile, hall/Dockerfile, portal/Dockerfile (context: ..). Ohne diese
+# Datei landen .env-Dateien mit echten Geheimnissen, lokale Datenverzeichnisse (Zertifikate,
+# Rechnungs-PDFs, Signaturschlüssel) und das Host-.venv im Image (COPY core|hall|portal /app/…
+# kopiert sonst alles darunter mit). Betrifft alle drei Teilsysteme gleichermaßen.
+**/.env
+**/data/
+**/.venv
+**/__pycache__
+.git
+**/tests
+.claude
+.superpowers
+**/*.egg-info/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.mypy_cache/

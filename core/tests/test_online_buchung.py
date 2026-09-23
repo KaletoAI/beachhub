@@ -17,7 +17,15 @@ from beachhub_core.models import (
     Tarif,
     Zahlung,
 )
-from beachhub_core.services import buchungen, guthaben, kunden, online_buchung
+from beachhub_core.services import (
+    buchungen,
+    dauerbuchungen,
+    guthaben,
+    kunden,
+    lesestand,
+    online_buchung,
+)
+from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_shared import kanal
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy import select
@@ -98,6 +106,25 @@ def test_guthaben_deckt_alles(db: Session, welt, mail_ausgang) -> None:
     betreffe = [m["betreff"] for m in mail_ausgang]
     assert any(b.startswith("Buchung bestätigt") for b in betreffe)
     assert any(b.startswith("Rechnung ") for b in betreffe)
+
+
+def test_pdf_fehler_im_nachlauf_alarmiert_betreiber(
+    db: Session, welt, mail_ausgang, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    f, k, _ = welt
+    guthaben.buche(db, kunde=k, betrag=Decimal("30.00"), art="manuell")
+
+    def kaputt(*_a, **_k):
+        raise RechnungsFehler("weasyprint")
+
+    monkeypatch.setattr(online_buchung.rechnung_pdf, "erzeuge", kaputt)
+    erg = _anfragen(db, f, k)
+    _nachlauf(db, erg)
+    assert erg.antwort.status == "bestaetigt"
+    alarme = [m for m in mail_ausgang if m["an"] == settings.email_from]
+    assert [m["betreff"] for m in alarme] == ["[Beachhub] Rechnungs-PDF nicht erzeugt"]
+    assert db.scalar(select(Rechnung)).nummer in alarme[0]["text"]
+    assert not any(m["betreff"].startswith("Rechnung ") for m in mail_ausgang)
 
 
 def test_guthaben_teilweise(db: Session, welt) -> None:
@@ -197,6 +224,10 @@ def test_zu_geringer_betrag_bestaetigt_nicht(db: Session, welt) -> None:
     _nachlauf(db, erg)
     assert db.get(Buchung, a.buchung_id).status == "reserviert"
     assert k.guthaben == Decimal("10.00")
+    # Keine offene Zahlung mehr: Das Konto-Dokument führt keinen Zahlungslink (das Portal zeigt
+    # daraufhin „Zahlung unvollständig“ statt eines Links).
+    kb = next(b for b in lesestand.baue_konto(db, k).buchungen if b.id == str(a.buchung_id))
+    assert kb.status == "reserviert" and kb.checkout_url is None and kb.reserviert_bis is None
 
 
 def test_negativer_betrag_bestaetigt_nicht_und_bucht_kein_guthaben(db: Session, welt) -> None:
@@ -243,6 +274,21 @@ def test_unbrauchbare_rueckmeldungen_werden_ignoriert(db: Session, welt) -> None
     assert online_buchung.zahlung_eingegangen(db, kaputt).antwort.grund == "nicht_verifiziert"
     unbekannt = _rueckmeldung("fake_gibtsnicht")
     assert online_buchung.zahlung_eingegangen(db, unbekannt).antwort.grund == "zahlung_unbekannt"
+
+
+def test_nicht_verifizierbare_rueckmeldung_loggt_keine_rohdaten(
+    db: Session, welt, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # alembic.fileConfig (test_migrationen) schaltet bestehende Logger ab; hier wieder an.
+    monkeypatch.setattr(online_buchung.logger, "disabled", False)
+    roh = "kein json, aber vielleicht Zahlungsdaten: IBAN DE02120300000000202051"
+    with caplog.at_level("WARNING", logger=online_buchung.logger.name):
+        erg = online_buchung.zahlung_eingegangen(
+            db, kanal.ZahlungEingegangen(provider="fake", rohdaten=roh)
+        )
+    assert erg.antwort.grund == "nicht_verifiziert"
+    assert "fake" in caplog.text and f"{len(roh)} Zeichen" in caplog.text
+    assert "IBAN" not in caplog.text and "kein json" not in caplog.text
 
 
 def test_unbekannte_referenz_alarmiert_betreiber(db: Session, welt, mail_ausgang) -> None:
@@ -301,6 +347,53 @@ def test_storno_bestaetigt_vor_frist_mit_gutschrift(db: Session, welt, mail_ausg
     assert erg.antwort.kostenfrei is True
     assert k.guthaben == Decimal("30.00")
     assert any(m["betreff"] == "Stornierung Ihrer Buchung" for m in mail_ausgang)
+
+
+def test_storno_dauerbuchungstermin_nicht_stornierbar(db: Session, welt) -> None:
+    # Ein Dauerbuchungstermin ist nie online bezahlt worden: kein Storno im Portal, kein Guthaben.
+    f, k, _ = welt
+    dauer = dauerbuchungen.lege_an(
+        db,
+        kunde_id=k.id,
+        feld_id=f.id,
+        wochentag=1,
+        start=time(19),
+        ende=time(20),
+        gueltig_von=date(2027, 12, 1),
+        gueltig_bis=date(2027, 12, 10),
+        admin_user_id=None,
+        auslassen=set(),
+        entscheidungen={},
+    )
+    db.commit()
+    termin = dauer.buchungen[0]
+    assert termin.zahlungsart == "online"
+    erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=termin.id)
+    db.commit()
+    assert erg.antwort.status == "abgelehnt" and erg.antwort.grund == "nicht_stornierbar"
+    assert erg.nach_commit == []
+    assert db.get(Buchung, termin.id).status == "bestaetigt"
+    assert k.guthaben == Decimal("0.00")
+    assert db.scalars(select(GuthabenBuchung)).all() == []
+
+
+def test_storno_betreiberbuchung_nicht_stornierbar(db: Session, welt) -> None:
+    # Eine vom Betreiber angelegte Buchung wird außerhalb des Systems bezahlt; ob und wie viel
+    # Geld zurückgeht, entscheidet der Betreiber – das Portal storniert nur Portal-Buchungen.
+    f, k, _ = welt
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(D, time(19)),
+        ende=kombiniere(D, time(20)),
+    )
+    db.commit()
+    erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=b.id)
+    db.commit()
+    assert erg.antwort.status == "abgelehnt" and erg.antwort.grund == "nicht_stornierbar"
+    assert db.get(Buchung, b.id).status == "bestaetigt"
+    assert k.guthaben == Decimal("0.00")
 
 
 def test_storno_fremder_buchung(db: Session, welt) -> None:

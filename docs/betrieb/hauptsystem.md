@@ -144,6 +144,27 @@ Logs der laufenden Anwendung:
 docker compose logs -f app
 ```
 
+## 5a. Kanal zum Portal
+
+Das Hauptsystem holt Anfragen des Portals per Long-Polling ab und liefert Antworten und Lesestände
+aus; das Portal kann das Hauptsystem nicht erreichen. Der Kanal startet mit der Anwendung, sobald
+`PORTAL_URL` gesetzt ist (`ENABLE_KANAL=false` schaltet ihn ab). Einrichtung von Zertifikaten und
+Token: `docs/betrieb/portal.md`, Abschnitt 2.
+
+`PORTAL_URL` (mit `:8443`) ist ausschließlich die mTLS-Kanaladresse für das Hauptsystem selbst;
+`PORTAL_OEFFENTLICHE_URL` ist die Adresse, auf die der Kunden-Browser nach der Zahlung
+zurückgeschickt wird. Im Produktivbetrieb sind `PORTAL_CLIENT_CERT` und `PORTAL_CLIENT_KEY`
+Pflicht, sobald `PORTAL_URL` gesetzt ist; `PORTAL_CA` bleibt dabei in aller Regel leer – sie ist
+der Vertrauensanker für das *Server*-Zertifikat des Portals, das Portal hat aber ein öffentliches
+Let's-Encrypt-Zertifikat (ACME) und **nicht** eines aus der internen CA. `PORTAL_CA` **nicht** auf
+die interne `ca.crt` setzen.
+
+- Ist das Portal 30 Minuten nicht erreichbar, kommt eine Mail „Portal nicht erreichbar“, bei
+  Rückkehr „Portal wieder erreichbar“.
+- Reservierungen ohne Zahlung verfallen nach `zahlungsfrist_minuten`; der Kunde bekommt eine Mail.
+- Bis zur Entscheidung über den Zahlungsanbieter (Ⓞ-13) gibt es nur die Testzahlung. Mit gesetzter
+  `PORTAL_URL` und `APP_ENV=production` startet das Hauptsystem deshalb bewusst nicht.
+
 ## 6. Backup und Wiederherstellung
 
 Das Skript `core/deploy/backup.sh` erstellt ein verschlüsseltes Backup aus Datenbank-Dump und dem

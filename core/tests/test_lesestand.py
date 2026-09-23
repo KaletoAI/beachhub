@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from beachhub_core import clock
 from beachhub_core.config import settings
+from beachhub_core.database import SessionLocal
 from beachhub_core.models import (
     Betriebszeit,
     Feld,
@@ -18,6 +19,8 @@ from beachhub_core.models import (
 from beachhub_core.services import buchungen, kunden, lesestand, storno
 from beachhub_shared.signatur import pruefe
 from beachhub_shared.zeit import kombiniere
+from sqlalchemy import select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 
@@ -132,6 +135,37 @@ def test_aenderungen_markieren_und_verarbeiten(db: Session, welt) -> None:
     storno.storniere(db, bu, durch="kunde")
     db.commit()
     assert db.query(LesestandVersion).filter_by(geaendert=True).count() == 2
+
+
+def test_publiziere_sperrt_die_zeile_vor_dem_inhalt(
+    db: Session, welt, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Zwei gleichzeitige Läufe: Baute einer den Inhalt vor der Sperre, bekäme sein älterer
+    Stand nach dem Warten die höhere Version. Deshalb muss die Zeile beim Bauen schon gesperrt
+    sein."""
+    lesestand.publiziere(db, "belegung")
+    db.commit()
+    gesehen: list[str] = []
+    original = lesestand._inhalt
+
+    def pruefend(sitzung: Session, name: str) -> dict:
+        with SessionLocal() as andere:
+            try:
+                andere.execute(
+                    select(LesestandVersion)
+                    .where(LesestandVersion.dokument == name)
+                    .with_for_update(nowait=True)
+                ).all()
+                gesehen.append("frei")
+            except OperationalError:
+                gesehen.append("gesperrt")
+            andere.rollback()
+        return original(sitzung, name)
+
+    monkeypatch.setattr(lesestand, "_inhalt", pruefend)
+    lesestand.publiziere(db, "belegung")
+    db.commit()
+    assert gesehen == ["gesperrt"]
 
 
 def test_lade_und_pruefe_roundtrip(db: Session, welt) -> None:

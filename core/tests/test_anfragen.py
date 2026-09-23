@@ -103,11 +103,12 @@ def test_konto_angelegt_verknuepft_bestehenden_kunden(db: Session, welt) -> None
 def test_konto_angelegt_ignoriert_anonymisierten_kunden_mit_gleicher_email(
     db: Session, welt
 ) -> None:
-    # kunden.anonymisiere überschreibt die E-Mail zwar immer mit einem Hash – der Ausschluss in
-    # anfragen._konto_angelegt bleibt trotzdem bestehen, falls sich das je ändert: Ein gelöschtes
-    # Konto darf nie über eine (zufällig) passende E-Mail mit einem neuen Portal-Konto verknüpft
-    # werden. Ohne den Ausschluss würde die folgende Anfrage `alt.portal_konto_id` setzen und
-    # einen Audit-Eintrag mit quelle="portal" auf den bereits gelöschten Kunden schreiben.
+    # kunden.anonymisiere überschreibt die E-Mail zwar immer mit einer Ersatzadresse – der
+    # Ausschluss in anfragen._konto_angelegt bleibt trotzdem bestehen, falls sich das je ändert:
+    # Ein gelöschtes Konto darf nie über eine (zufällig) passende E-Mail mit einem neuen
+    # Portal-Konto verknüpft werden. Ohne den Ausschluss würde die folgende Anfrage
+    # `alt.portal_konto_id` setzen und einen Audit-Eintrag mit quelle="portal" auf den bereits
+    # gelöschten Kunden schreiben.
     _, p, _ = welt
     alt = kunden.lege_an(db, name="Anna Alt", email="anna@x.de", kundengruppe_id=p.id)
     alt.anonymisiert_am = utcnow()
@@ -193,6 +194,22 @@ def test_konto_loeschen_anonymisiert(db: Session, welt) -> None:
     assert loesch_audit.quelle == "portal"
 
 
+def test_konto_zweimal_anlegen_und_loeschen_mit_gleicher_email(db: Session, welt) -> None:
+    # Die Ersatz-E-Mail hing an der alten Adresse: Das zweite Löschen derselben Adresse
+    # kollidierte am Unique-Constraint, der Kunde blieb mit Daten und Verknüpfung erhalten.
+    for _ in range(2):
+        konto = uuid.uuid4()
+        k = _angelegt(db, konto)
+        antwort, _ = anfragen.bearbeite(db, anfrage("konto_loeschen", konto))
+        assert antwort.status == "ok"
+        db.expire_all()
+        k = db.get(Kunde, k.id)
+        assert k.anonymisiert_am is not None and k.portal_konto_id is None
+    alle = db.scalars(select(Kunde)).all()
+    assert len(alle) == 2
+    assert all(k.email == f"geloescht-{k.id.hex}" for k in alle)
+
+
 def test_konto_loeschen_markiert_lesestand_nicht_neu(db: Session, welt) -> None:
     # Das Portal hat das Konto-Dokument bereits gelöscht; es darf nicht wieder erscheinen.
     konto = uuid.uuid4()
@@ -275,8 +292,12 @@ def test_rechnung_ohne_intaktes_pdf(db: Session, welt, mail_ausgang) -> None:
     )
     r = rechnungen.erzeuge_einzelrechnung(db, b)
     db.commit()
-    antwort, _ = anfragen.bearbeite(db, anfrage("rechnung_anfordern", konto, rechnung_nr=r.nummer))
-    assert antwort.grund == "nicht_gefunden"  # noch kein PDF
+    antwort, nachlauf = anfragen.bearbeite(
+        db, anfrage("rechnung_anfordern", konto, rechnung_nr=r.nummer)
+    )
+    assert antwort.grund == "nicht_gefunden" and len(nachlauf) == 1  # noch kein PDF
+    nachlauf[0](db)
+    assert mail_ausgang[-1]["betreff"] == "[Beachhub] Rechnungs-PDF fehlt"
     rechnung_pdf.erzeuge(db, r)
     db.commit()
     Path(r.pdf_pfad).write_bytes(b"manipuliert")

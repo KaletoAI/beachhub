@@ -107,6 +107,8 @@ def test_konto_buchung_zahlungslink_optional() -> None:
     }
     b = KontoBuchung.model_validate(alt)  # Dokument aus der Zeit vor Stufe 2
     assert b.checkout_url is None and b.reserviert_bis is None
+    assert b.stornierbar is True
+    assert KontoBuchung.model_validate({**alt, "stornierbar": False}).stornierbar is False
     neu = KontoBuchung.model_validate(
         {**alt, "checkout_url": "/test-zahlung/fake_x", "reserviert_bis": "2027-11-25T09:15:00Z"}
     )

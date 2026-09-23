@@ -1,4 +1,3 @@
-import hashlib
 import uuid
 from typing import Any
 
@@ -88,9 +87,11 @@ def anonymisiere(
     quelle: str = "admin",
 ) -> None:
     vorher = audit.als_dict(kunde)
-    digest = hashlib.sha256(kunde.email.encode()).hexdigest()[:32]
     kunde.name = "Gelöschter Kunde"
-    kunde.email = f"geloescht-{digest}"
+    # Aus der Kunden-ID, nicht aus der alten Adresse: Wer sich mit derselben Adresse erneut
+    # registriert und wieder löscht, bekäme sonst dieselbe Ersatzadresse und kollidierte am
+    # Unique-Constraint auf kunde.email.
+    kunde.email = f"geloescht-{kunde.id.hex}"
     kunde.adresse_strasse = kunde.adresse_plz = kunde.adresse_ort = ""
     kunde.portal_konto_id = None
     kunde.stripe_customer_id = None

@@ -24,10 +24,16 @@ Auf dem Hauptsystem:
    /app/data/zertifikate` ausführen (siehe `docs/betrieb/portal.md`). Der Befehl legt Ergebnisse
    **auf dem Datenvolume** ab (`/app/data/…`), nicht im beschreibbaren Container-Dateisystem –
    sonst gingen sie beim nächsten `docker compose build`/Neuanlegen des Containers verloren. Es
-   entstehen dort u. a. `ca.crt`/`ca.key` (interne CA; dient ausschließlich core-seitig als
-   `client_auth`-`trust_pool` für Caddy, siehe `docs/betrieb/hauptsystem.md` „Hallendienst
-   anbinden“ – **nicht** auf den Hallenrechner kopieren) sowie `halle.crt`/`halle.key`
-   (Client-Zertifikat, mit dem sich die Halle bei Caddy ausweist).
+   entstehen dort u. a. `ca.crt`/`ca.key` (interne CA, gemeinsamer Vertrauensanker für beide
+   mTLS-Kanäle des Hauptsystems: `client_auth`-`trust_pool` sowohl für Caddy des Portals auf
+   `:8443` (`docs/betrieb/portal.md`, Abschnitt 2) als auch für Caddy des Hauptsystems auf der
+   Hallenschnittstelle `:8444` (siehe `docs/betrieb/hauptsystem.md` „Hallendienst anbinden“) –
+   `ca.crt` kommt deshalb nie auf den Hallenrechner, sie ist trust_pool der Caddy-Sites, nicht
+   Ausweis eines Teilnehmers; `ca.key` verlässt das Hauptsystem ohnehin nie) sowie
+   `halle.crt`/`halle.key` (Client-Zertifikat, mit dem sich die Halle bei Caddy ausweist – von
+   derselben CA signiert wie `portal-kanal.crt`; die Trennung zwischen den Kanälen `:8443`
+   (Portal) und `:8444` (Halle) übernehmen die unterschiedlichen Ports und die je Kanal eigenen
+   Token, nicht die Zertifikate selbst).
 2. **Root-Zertifikat von Caddy exportieren.** Die Hallenschnittstelle (Port 8444) nutzt
    `tls internal`, also Caddys **eigene**, interne Root-CA – eine andere CA als die `ca.crt` aus
    Schritt 1. Nur mit dieser Root-CA kann der Hallendienst das Server-Zertifikat von Caddy prüfen

@@ -39,7 +39,10 @@ def test_produktionsfehler() -> None:
         core_public_key="",
         cookie_secure=False,
     )
-    assert len(schlecht.produktionsfehler) == 5
+    # base_url bleibt beim unsicheren Vorgabewert (http://127.0.0.1:8001) -> ein Fehler mehr,
+    # smtp_host bleibt leer (conftest) -> noch einer.
+    assert len(schlecht.produktionsfehler) == 7
+    assert "PORTAL_SMTP_HOST fehlt" in schlecht.produktionsfehler
     gut = Settings(
         app_env="production",
         secret_key="x" * 32,
@@ -47,8 +50,35 @@ def test_produktionsfehler() -> None:
         kanal_token="t",
         core_public_key="ab",
         cookie_secure=True,
+        base_url="https://buchung.example.org",
+        smtp_host="mail.example.org",
     )
     assert gut.produktionsfehler == []
+
+
+def test_produktionsfehler_base_url() -> None:
+    """PORTAL_BASE_URL geht ohne mTLS in den Kunden-Browser (Rückkehr nach Zahlung, Links in
+    Mails) und muss deshalb öffentlich per https erreichbar sein, nicht nur lokal."""
+    basis: dict[str, Any] = dict(
+        app_env="production",
+        secret_key="x" * 32,
+        fake_zahlung=False,
+        kanal_token="t",
+        core_public_key="ab",
+        cookie_secure=True,
+        smtp_host="mail.example.org",
+    )
+    kein_https = Settings(**basis, base_url="http://buchung.example.org")
+    assert any("https" in f for f in kein_https.produktionsfehler)
+
+    lokal = Settings(**basis, base_url="https://127.0.0.1:8001")
+    assert any("127.0.0.1" in f for f in lokal.produktionsfehler)
+
+    lokal_name = Settings(**basis, base_url="https://localhost:8001")
+    assert any("localhost" in f for f in lokal_name.produktionsfehler)
+
+    oeffentlich = Settings(**basis, base_url="https://buchung.example.org")
+    assert oeffentlich.produktionsfehler == []
 
 
 def test_pruefe_produktionsstart_verweigert_bei_produktionsfehlern() -> None:
@@ -70,6 +100,8 @@ def test_pruefe_produktionsstart_verweigert_bei_produktionsfehlern() -> None:
         kanal_token="t",
         core_public_key="ab",
         cookie_secure=True,
+        base_url="https://buchung.example.org",
+        smtp_host="mail.example.org",
     )
     pruefe_produktionsstart(gut)  # kein Fehler
 

@@ -177,6 +177,30 @@ def test_zahlungslink_nur_bei_offener_reservierung(db: Session, welt) -> None:
     assert je_id[str(bezahlt.id)].reserviert_bis is None
 
 
+def test_stornierbar_nur_fuer_portal_buchungen(db: Session, welt) -> None:
+    f, k = welt
+    portal = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(D, time(19)),
+        ende=kombiniere(D, time(20)),
+        quelle="portal",
+        zahlungsart="online",
+    )
+    betreiber = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(D, time(20)),
+        ende=kombiniere(D, time(21)),
+    )
+    db.commit()
+    je_id = {b.id: b for b in lesestand.baue_konto(db, k).buchungen}
+    assert je_id[str(portal.id)].stornierbar is True
+    assert je_id[str(betreiber.id)].stornierbar is False
+
+
 def test_tarife_aelteste_zuerst(db: Session, welt) -> None:
     db.add(Tarif(name="Neu", preis=Decimal("40.00")))
     db.commit()
