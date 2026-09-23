@@ -14,10 +14,11 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.12" }
       - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 fonts-dejavu-core
-      - run: pip install -e shared[dev] -e core[dev]
+      - run: pip install -e shared[dev] -e core[dev] -e hall[dev]
       - run: ruff check . && ruff format --check .
       - run: mypy
       - run: cd shared && pytest -q
+      - run: cd hall && pytest -q
       - run: cd core && pytest -q
         env:
           TEST_DATABASE_URL: postgresql+psycopg://beachhub:beachhub@localhost:5432/beachhub_test
