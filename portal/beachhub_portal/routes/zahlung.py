@@ -48,12 +48,18 @@ def _speichere(provider: str, rohdaten: str, kopf: str | None) -> None:
 async def rueckmeldung(provider: str, request: Request) -> JSONResponse:
     if not _PROVIDER.fullmatch(provider):
         raise HTTPException(status_code=404)
-    laenge = request.headers.get("content-length", "")
-    if laenge.isdigit() and int(laenge) > briefkasten.MAX_BYTES:
-        raise HTTPException(status_code=413, detail="Rückmeldung zu groß")
-    roh = await request.body()
-    if len(roh) > briefkasten.MAX_BYTES:
-        raise HTTPException(status_code=413, detail="Rückmeldung zu groß")
+    # Fix-Runde 1: Nicht auf den Content-Length-Header verlassen (fehlt bei Chunked Transfer
+    # Encoding oder kann falsch gesetzt sein) und nicht `request.body()` unbegrenzt puffern –
+    # stattdessen den Strom stückweise lesen und beim Überschreiten der Grenze sofort abbrechen,
+    # ohne mehr als MAX_BYTES im Speicher zu halten.
+    stuecke: list[bytes] = []
+    groesse = 0
+    async for teil in request.stream():
+        groesse += len(teil)
+        if groesse > briefkasten.MAX_BYTES:
+            raise HTTPException(status_code=413, detail="Rückmeldung zu groß")
+        stuecke.append(teil)
+    roh = b"".join(stuecke)
     await run_in_threadpool(
         _speichere, provider, roh.decode("utf-8", errors="replace"), _signatur_header(request)
     )
@@ -62,7 +68,13 @@ async def rueckmeldung(provider: str, request: Request) -> JSONResponse:
 
 def _sicheres_ziel(zurueck: str) -> str:
     """Nur auf die eigene Rückkehrseite weiterleiten, nie auf einen fremden Host."""
-    teile = urlsplit(zurueck)
+    try:
+        teile = urlsplit(zurueck)
+    except ValueError:
+        # Fix-Runde 1: urlsplit wirft bei kaputten IPv6-Literalen (z. B. "http://[::1/evil")
+        # ValueError statt einen unbrauchbaren Wert zu liefern – als ungültiges Ziel behandeln
+        # statt mit 500 abzubrechen.
+        return "/buchungen"
     if teile.path == "/zahlung/zurueck":
         return "/zahlung/zurueck" + (f"?{teile.query}" if teile.query else "")
     return "/buchungen"

@@ -1,5 +1,6 @@
 import json
 import uuid
+from collections.abc import Iterator
 
 import pytest
 from beachhub_portal.config import settings
@@ -34,6 +35,37 @@ def test_briefkasten_braucht_kein_csrf(angemeldet: TestClient) -> None:
 def test_briefkasten_zu_gross(client: TestClient, db: Session) -> None:
     r = client.post("/zahlung/rueckmeldung/stripe", content=b"x" * (64 * 1024 + 1))
     assert r.status_code == 413
+    assert db.scalar(select(Anfrage)) is None
+
+
+def test_briefkasten_zu_gross_ohne_content_length(client: TestClient, db: Session) -> None:
+    """Fix-Runde 1: Ohne (oder mit falschem) Content-Length-Header darf die 64-KB-Grenze nicht
+    umgangen werden – ein Generator-Body erzeugt bei httpx Chunked Transfer Encoding, also ohne
+    Content-Length-Header."""
+
+    def strom() -> Iterator[bytes]:
+        for _ in range(65):
+            yield b"x" * 1024
+
+    r = client.post("/zahlung/rueckmeldung/stripe", content=strom())
+    assert r.status_code == 413
+    assert db.scalar(select(Anfrage)) is None
+    assert db.scalar(select(WebhookEingang)) is None
+
+
+def test_briefkasten_ungueltige_nutzlast_wird_nur_geloggt(client: TestClient, db: Session) -> None:
+    """Fix-Runde 1: Ein Signatur-Header über 2000 Zeichen verletzt kanal.ZahlungEingegangen;
+    das darf nicht mit 500 enden, sondern nur ohne Anfrage gespeichert werden – gekürzt wird
+    nichts."""
+    zu_lang = "a" * 2001
+    r = client.post(
+        "/zahlung/rueckmeldung/stripe", content=b"{}", headers={"Stripe-Signature": zu_lang}
+    )
+    assert r.status_code == 200 and r.json() == {"ok": True}
+    e = db.scalar(select(WebhookEingang))
+    assert e is not None
+    assert e.anfrage_id is None
+    assert e.signatur_header == zu_lang
     assert db.scalar(select(Anfrage)) is None
 
 
@@ -82,6 +114,24 @@ def test_fake_zahlung_leitet_nie_nach_draussen(client: TestClient) -> None:
     )
     assert r.headers["location"] == "/buchungen"
     assert client.post("/test-zahlung/fake_abc", data={"ergebnis": "gestohlen"}).status_code == 400
+
+
+def test_test_zahlung_seite_mit_kaputtem_ziel(client: TestClient) -> None:
+    """Fix-Runde 1: urlsplit wirft bei einem kaputten IPv6-Literal ValueError – das darf die
+    Fake-Zahlungsseite nicht mit 500 abbrechen lassen, sondern nur auf /buchungen zurückfallen."""
+    r = client.get("/test-zahlung/fake_abc", params={"zurueck": "http://[::1/evil"})
+    assert r.status_code == 200
+    assert 'value="/buchungen"' in r.text
+
+
+def test_fake_zahlung_mit_kaputtem_ziel_leitet_sicher(client: TestClient) -> None:
+    r = client.post(
+        "/test-zahlung/fake_abc",
+        data={"ergebnis": "bezahlt", "betrag": "1.00", "zurueck": "http://[::1/evil"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert r.headers["location"] == "/buchungen"
 
 
 def test_zurueck_fuehrt_zur_warteseite(client: TestClient) -> None:
