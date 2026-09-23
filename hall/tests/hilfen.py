@@ -16,6 +16,8 @@ from beachhub_shared.hallenplan import (
     PlanSperre,
     pin_hash,
 )
+from beachhub_shared.lesestand import Dokument
+from beachhub_shared.signatur import signiere
 from beachhub_shared.zeit import kombiniere
 
 F1 = "11111111-1111-1111-1111-111111111111"
@@ -118,3 +120,18 @@ def baue_plan(
         konfig=konfig,
         pin=PIN_PARAMETER,
     )
+
+
+def signiertes_dokument(
+    inhalt: HallenplanInhalt, version: int, privat_hex: str, dokument: str = "hallenplan"
+) -> Dokument:
+    """Signiert genau wie das Hauptsystem (core/services/lesestand.publiziere)."""
+    entwurf = Dokument(
+        dokument=dokument,
+        version=version,
+        erzeugt_am=inhalt.gueltig_ab,
+        inhalt=inhalt.model_dump(mode="json"),
+        signatur="",
+    )
+    sig = signiere(entwurf.model_dump(mode="json", exclude={"signatur"}), privat_hex)
+    return entwurf.model_copy(update={"signatur": sig})
