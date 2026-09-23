@@ -11,7 +11,10 @@ from typing import Any
 from beachhub_hall.config import HeizungKonfig
 
 
-def _dezimal(wert: object) -> Decimal | None:
+def dezimal(wert: object) -> Decimal | None:
+    """Wandelt einen HA-Attributwert sicher in eine Decimal um. HA liefert Zahlen manchmal als
+    Text oder mit unerwartetem Inhalt; eine ungültige oder unendliche Zahl ergibt None statt
+    einer Ausnahme."""
     if wert is None:
         return None
     try:
@@ -39,8 +42,8 @@ class Lage:
 
     def temperatur(self, heizung: HeizungKonfig) -> Decimal | None:
         if heizung.ist_sensor:
-            return _dezimal(self.state(heizung.ist_sensor))
+            return dezimal(self.state(heizung.ist_sensor))
         if heizung.entity and heizung.entity in self.ist:
             attribute = self.ist[heizung.entity].get("attributes") or {}
-            return _dezimal(attribute.get("current_temperature"))
+            return dezimal(attribute.get("current_temperature"))
         return None

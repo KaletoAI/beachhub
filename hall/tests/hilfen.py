@@ -8,10 +8,18 @@ from decimal import Decimal
 
 from argon2 import PasswordHasher
 from beachhub_hall import plan
+from beachhub_hall.aufgaben.steuerung import Steuerung
 from beachhub_hall.clock import SimulierteUhr
-from beachhub_hall.config import TastenfeldKonfig, TuerKonfig, Zuordnung
+from beachhub_hall.config import (
+    FeldZuordnung,
+    HeizungKonfig,
+    TastenfeldKonfig,
+    TuerKonfig,
+    Zuordnung,
+)
 from beachhub_hall.ereignisse import Ereignisse
 from beachhub_hall.ha import HaClient
+from beachhub_hall.lage import Lage
 from beachhub_hall.pin import PinPruefer
 from beachhub_hall.tuer import Tuer
 from beachhub_shared.hallenplan import (
@@ -150,6 +158,17 @@ def signiertes_dokument(
 PRIV, _ = erzeuge_schluesselpaar()
 
 
+def speichere_plan(
+    sitzungen: sessionmaker[Session], *buchungen: PlanBuchung, sperren: Iterable[PlanSperre] = ()
+) -> None:
+    """Baut, signiert und speichert einen Plan wie `plan.speichere()` ihn erwartet. Gemeinsame
+    Grundlage der `Aufbau`-Testhelfer, damit die Boilerplate nicht in jedem von ihnen erneut
+    steht."""
+    inhalt = baue_plan(buchungen, sperren=sperren)
+    with sitzungen() as db:
+        plan.speichere(db, signiertes_dokument(inhalt, plan.version(db) + 1, PRIV), inhalt, t(0))
+
+
 class Aufbau:
     """Verdrahtet Tür und PIN-Prüfung gegen eine simulierte Uhr und ein simuliertes HA.
     Gemeinsame Testinfrastruktur ab Task 8, von mehreren Testdateien wiederverwendet."""
@@ -174,11 +193,7 @@ class Aufbau:
         self.pruefer = PinPruefer(sitzungen, uhr, z, self.ereignisse, self.tuer, self.schlaf)
 
     def plan(self, *buchungen: PlanBuchung) -> None:
-        inhalt = baue_plan(buchungen)
-        with self.sitzungen() as db:
-            plan.speichere(
-                db, signiertes_dokument(inhalt, plan.version(db) + 1, PRIV), inhalt, t(0)
-            )
+        speichere_plan(self.sitzungen, *buchungen)
 
     def typen(self) -> list[str]:
         return [e.typ for e in self.ereignisse.unbestaetigt(1000)]
@@ -187,3 +202,51 @@ class Aufbau:
         return sum(
             1 for a in self.sim.aufrufe if a[:2] in (("lock", "unlock"), ("switch", "turn_on"))
         )
+
+
+STEUERUNGS_ZUORDNUNG = Zuordnung(
+    master_pin_hash=MASTER_HASH,
+    felder={
+        F1: FeldZuordnung("light.feld_1", "binary_sensor.praesenz_feld_1"),
+        F2: FeldZuordnung("light.feld_2", "binary_sensor.praesenz_feld_2"),
+    },
+    heizung=HeizungKonfig("climate.halle"),
+)
+
+
+class SteuerungsAufbau:
+    """Verdrahtet die Steuerung gegen eine simulierte Uhr und ein simuliertes HA. Gemeinsame
+    Testinfrastruktur ab Task 9, von mehreren Testdateien wiederverwendet."""
+
+    def __init__(
+        self,
+        sitzungen: sessionmaker[Session],
+        uhr: SimulierteUhr,
+        ha: HaSimulator,
+        zuordnung: Zuordnung = STEUERUNGS_ZUORDNUNG,
+        url: str | None = None,
+    ) -> None:
+        self.sitzungen, self.uhr, self.sim = sitzungen, uhr, ha
+        self.client = HaClient(url or ha.url, HaSimulator.TOKEN)
+        self.ereignisse = Ereignisse(sitzungen, uhr)
+        self.lage = Lage()
+        self.steuerung = Steuerung(
+            sitzungen, uhr, zuordnung, self.client, self.ereignisse, self.lage
+        )
+
+    def plan(self, *buchungen: PlanBuchung, sperren: Iterable[PlanSperre] = ()) -> None:
+        speichere_plan(self.sitzungen, *buchungen, sperren=sperren)
+
+    def ereignis(self, typ: str) -> list[dict[str, object]]:
+        return [
+            {"feld_id": e.feld_id, **e.daten}
+            for e in self.ereignisse.unbestaetigt(1000)
+            if e.typ == typ
+        ]
+
+    def dienste(self) -> list[tuple[str, str]]:
+        return [a[:2] for a in self.sim.aufrufe]
+
+    async def um(self, stunde: int, minute: int = 0) -> None:
+        self.uhr.stelle(t(stunde, minute))
+        await self.steuerung.einmal()
