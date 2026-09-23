@@ -71,8 +71,14 @@ def test_belegung_ohne_kundenbezug_und_signiert(db: Session, welt) -> None:
         lesestand.oeffentlicher_schluessel(),
     )
     belegt = dok.inhalt["belegt"][str(f.id)]
+    inhalt_json = json.dumps(dok.inhalt)
     assert (
-        len(belegt) == 2 and "kunde" not in json.dumps(dok.inhalt) and "A" not in json.dumps(belegt)
+        len(belegt) == 2
+        and '"kunde_id"' not in inhalt_json
+        and '"kunde"' not in inhalt_json
+        and a.name not in inhalt_json
+        and a.email not in inhalt_json
+        and "A" not in json.dumps(belegt)
     )
     assert (
         dok.inhalt["fenster_tage"] == 14
