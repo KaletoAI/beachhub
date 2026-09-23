@@ -72,6 +72,15 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _tmp_verzeichnis_aufraeumen() -> Iterator[None]:
+    """Review-Fix 6: das mit `tempfile.mkdtemp` angelegte Verzeichnis (Signaturschlüssel,
+    Lesestand, Rechnungs-PDFs) gehört nicht ins System-Temp-Verzeichnis über das Testende hinaus;
+    session-scoped, weil `_tmp` ein Modul-Global ist, das schon beim Import entsteht."""
+    yield
+    shutil.rmtree(_tmp, ignore_errors=True)
+
+
 @pytest.fixture(autouse=True)
 def frische_datenbanken() -> Iterator[None]:
     for ordner in ("core/lesestand", "core/rechnungen", "portal/rechnungen_tmp"):

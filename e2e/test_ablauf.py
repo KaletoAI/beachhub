@@ -32,6 +32,7 @@ from beachhub_shared import kanal as vertrag
 from beachhub_shared.zeit import kombiniere, lokal, lokales_datum
 from fastapi.testclient import TestClient
 from sqlalchemy import select
+from sqlalchemy.orm import Session
 
 EMAIL = "anna@example.org"
 
@@ -77,8 +78,9 @@ def _termin() -> tuple[datetime, datetime]:
     return kombiniere(tag, time(19)), kombiniere(tag, time(20))
 
 
-def _buchen(browser: TestClient, csrf: str, feld_id: uuid.UUID) -> str:
-    beginn, ende = _termin()
+def _buchen(
+    browser: TestClient, csrf: str, feld_id: uuid.UUID, beginn: datetime, ende: datetime
+) -> str:
     r = browser.post(
         "/buchen",
         data={
@@ -100,11 +102,11 @@ def test_buchen_bezahlen_rechnung_stornieren(
     with CoreSession() as db:
         kunde = db.scalar(select(Kunde))
         assert kunde.name == "Anna" and kunde.email == EMAIL and kunde.portal_konto_id
-    beginn, _ = _termin()
+    beginn, ende = _termin()
     assert "30,00 €" in browser.get("/", params={"tag": lokales_datum(beginn).isoformat()}).text
 
     # Buchen: Hauptsystem reserviert und schickt zur (Fake-)Zahlung
-    warteseite = _buchen(browser, csrf, feld_id)
+    warteseite = _buchen(browser, csrf, feld_id, beginn, ende)
     assert hauptsystem.abholen() == 1
     zahlseite = browser.get(warteseite, follow_redirects=False).headers["location"]
     assert zahlseite.startswith("/test-zahlung/fake_")
@@ -129,13 +131,18 @@ def test_buchen_bezahlen_rechnung_stornieren(
     # Bestätigt: PIN im Portal ist die PIN des Hauptsystems
     r = browser.get(anfrage_url, follow_redirects=False)
     assert r.headers["location"] == "/buchungen?meldung=bestaetigt"
-    pin_im_portal = re.search(r'class="pin">(\d{6})<', browser.get("/buchungen").text).group(1)
+    buchungen_seite = browser.get("/buchungen").text
+    pin_im_portal = re.search(r'class="pin">(\d{6})<', buchungen_seite).group(1)
+    # Buchungs-ID und Rechnungsnummer aus dem Portal-HTML lesen, nicht aus der Hauptsystem-DB:
+    # Das ist das, was der Kunde im Browser tatsächlich als Link/Formularziel bekommt.
+    buchung_id = re.search(r"/buchungen/([0-9a-f-]+)/stornieren", buchungen_seite).group(1)
+    rechnung_nr = re.search(r"<strong>([^<]+)</strong>", browser.get("/rechnungen").text).group(1)
     with CoreSession() as db:
         b = db.scalar(select(Buchung))
         assert b.status == "bestaetigt"
+        assert str(b.id) == buchung_id
         assert pin.entschluessele(b.pin_verschluesselt) == pin_im_portal
-        rechnung_nr = db.scalar(select(Rechnung)).nummer
-        buchung_id = b.id
+        assert db.scalar(select(Rechnung)).nummer == rechnung_nr
     assert any(m["betreff"].startswith("Buchung bestätigt") for m in mails["core"])
 
     # Rechnung über den Einmal-Link
@@ -146,6 +153,7 @@ def test_buchen_bezahlen_rechnung_stornieren(
     assert hauptsystem.abholen() == 1
     link = browser.get(anfrage_url, follow_redirects=False).headers["location"]
     assert browser.get(link).content.startswith(b"%PDF")
+    assert "Heruntergeladen" in browser.get(anfrage_url).text
     assert browser.get(link).status_code == 404
 
     # Storno mehr als 24 h vorher: kostenfrei, der Betrag wird Guthaben
@@ -169,7 +177,8 @@ def test_verlorene_antwort_wird_folgenlos_erneut_zugestellt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     csrf = _anmelden(browser, mails, hauptsystem)
-    warteseite = _buchen(browser, csrf, feld_id)
+    beginn, ende = _termin()
+    warteseite = _buchen(browser, csrf, feld_id, beginn, ende)
 
     original = hauptsystem.client.post
 
@@ -203,6 +212,19 @@ def _euro(betrag: Decimal) -> str:
     return f"{betrag:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _pruefe_gespeicherte_spalte(db: Session, name: str, spalte: str, erwartet: object) -> None:
+    """Liest die Tarif-Zeile nach dem Commit neu aus der DB und prüft, dass die Fremdschlüssel-
+    bzw. Filterspalte tatsächlich den erwarteten Wert trägt (Review-Fix 1): Ein FK wie
+    `feld_id=f.id`, der VOR einem `flush()` gesetzt wird, wäre `None` (UUIDMixin.id hat einen
+    Python-seitigen Default, der erst beim Flush ausgewertet wird) – die Regel wäre dann
+    unspezifisch und der Test hätte nur zufällig über den Gleichstand-Tiebreak (neueste Regel
+    gewinnt) funktioniert, nie über den eigentlichen Filter."""
+    regel = db.scalar(select(Tarif).where(Tarif.name == name))
+    assert regel is not None
+    wert = getattr(regel, spalte)
+    assert wert == erwartet, f"{name}.{spalte} == {wert!r} in der DB, erwartet {erwartet!r}"
+
+
 @pytest.mark.parametrize(
     "szenario",
     ["feldregel", "wochentagregel", "uhrzeitregel", "gruppenregel", "gleichstand_neuere"],
@@ -214,63 +236,104 @@ def test_preis_gleichlauf_portal_hauptsystem(
     Hauptsystem beim Buchen tatsächlich reservierten Preis entsprechen. Portal und Hauptsystem
     lösen den Tarif in bewusst getrennten, gleichlautenden Funktionen auf (N-1: kein
     core-Import im Portal; siehe portal/beachhub_portal/services/tarife.py) – hier wird der
-    Gleichlauf über den echten Kanal geprüft, nicht nur je Seite isoliert. Jedes Szenario
-    testet eine andere Art von Regel (Feld/Wochentag/Uhrzeit/Kundengruppe) bzw. den Gleichstand
-    zweier gleich spezifischer Regeln, bei dem die zuletzt angelegte gewinnt."""
+    Gleichlauf über den echten Kanal geprüft, nicht nur je Seite isoliert.
+
+    Jedes Szenario legt neben der eigentlichen Regel zusätzlich eine ebenso spezifische, aber
+    nicht passende „Köder“-Regel mit auffälligem Preis (99,99 €) auf einem zweiten Feld, einer
+    anderen Kundengruppe, einem anderen Wochentag bzw. mit einem Uhrzeitfenster an, dessen
+    `uhrzeit_bis` genau der Slotbeginn ist (halboffenes Intervall: darf den Slot nicht mehr
+    einschließen). Ignorierte Portal/Hauptsystem den jeweiligen Filter, würde der Köder wegen
+    seines späteren `created_at` den Gleichstand gewinnen und der Test schlüge fehl (Review-Fix
+    2 – Nachweis über Mutationstests im Fix-Bericht)."""
     beginn, ende = _termin()
     wochentag = lokales_datum(beginn).weekday()
+    slot_beginn_uhrzeit = lokal(beginn).time()
+    koeder_wochentag = (wochentag + 1) % 7
+    t0 = datetime.now(UTC)
+    t1 = t0 + timedelta(seconds=1)  # garantiert "neuer" als t0, unabhängig von Flush-Timing.
     with CoreSession() as db:
         f = Feld(name="Feld 1", reihenfolge=1)
         f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
+        feld2 = Feld(name="Feld 2 (Köder)", reihenfolge=2)
+        feld2.raster.append(
+            FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[])
+        )
         privat = Kundengruppe(name="Privat")
-        db.add_all([f, privat, Kundengruppe(name="Verein")])
+        verein = Kundengruppe(name="Verein")
+        db.add_all([f, feld2, privat, verein])
         for wt in range(7):
             db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
+        # Review-Fix 1: erst flushen, damit f.id/feld2.id/privat.id/verein.id unten echte UUIDs
+        # sind statt None (siehe Docstring von _pruefe_gespeicherte_spalte).
+        db.flush()
+        assert None not in (f.id, feld2.id, privat.id, verein.id)
+
         # Unspezifische Basisregel (Spezifität 0): Jedes Szenario muss stattdessen die
-        # spezifischere, im Folgenden angelegte Regel wählen.
-        db.add(Tarif(name="Basis", preis=Decimal("25.00")))
+        # spezifischere Regel wählen, nicht diese.
+        db.add(Tarif(name="Basis", preis=Decimal("25.00"), created_at=t0))
+        pruefung: tuple[str, object] | None = None
         if szenario == "feldregel":
-            db.add(Tarif(name="Feldregel", preis=Decimal("40.00"), feld_id=f.id))
+            db.add(Tarif(name="Regel", preis=Decimal("40.00"), feld_id=f.id, created_at=t0))
+            db.add(Tarif(name="Koeder", preis=Decimal("99.99"), feld_id=feld2.id, created_at=t1))
             erwartet = Decimal("40.00")
+            pruefung = ("feld_id", f.id)
         elif szenario == "wochentagregel":
-            db.add(Tarif(name="Wochentagregel", preis=Decimal("35.00"), wochentag=wochentag))
+            db.add(Tarif(name="Regel", preis=Decimal("35.00"), wochentag=wochentag, created_at=t0))
+            db.add(
+                Tarif(
+                    name="Koeder", preis=Decimal("99.99"), wochentag=koeder_wochentag, created_at=t1
+                )
+            )
             erwartet = Decimal("35.00")
+            pruefung = ("wochentag", wochentag)
         elif szenario == "uhrzeitregel":
             db.add(
                 Tarif(
-                    name="Uhrzeitregel",
+                    name="Regel",
                     preis=Decimal("45.00"),
                     uhrzeit_von=time(18),
                     uhrzeit_bis=time(22),
+                    created_at=t0,
+                )
+            )
+            # Grenzfall: uhrzeit_bis == Slotbeginn – wegen `von <= Zeit < bis` darf das den Slot
+            # NICHT mehr einschließen.
+            db.add(
+                Tarif(
+                    name="Koeder",
+                    preis=Decimal("99.99"),
+                    uhrzeit_von=time(17),
+                    uhrzeit_bis=slot_beginn_uhrzeit,
+                    created_at=t1,
                 )
             )
             erwartet = Decimal("45.00")
+            pruefung = ("uhrzeit_von", time(18))
         elif szenario == "gruppenregel":
-            db.add(Tarif(name="Gruppenregel", preis=Decimal("20.00"), kundengruppe_id=privat.id))
+            db.add(
+                Tarif(
+                    name="Regel", preis=Decimal("20.00"), kundengruppe_id=privat.id, created_at=t0
+                )
+            )
+            db.add(
+                Tarif(
+                    name="Koeder", preis=Decimal("99.99"), kundengruppe_id=verein.id, created_at=t1
+                )
+            )
             erwartet = Decimal("20.00")
+            pruefung = ("kundengruppe_id", privat.id)
         else:
             assert szenario == "gleichstand_neuere"
             # Zwei gleich spezifische Regeln (nur Wochentag): Die zuletzt angelegte gewinnt,
             # sowohl im Hauptsystem (sortiert nach created_at) als auch im Portal-Dokument
             # (sortiert nach Anlagereihenfolge) – siehe tarife.py auf beiden Seiten.
-            db.add(
-                Tarif(
-                    name="Alt",
-                    preis=Decimal("50.00"),
-                    wochentag=wochentag,
-                    created_at=datetime.now(UTC) - timedelta(minutes=1),
-                )
-            )
-            db.add(
-                Tarif(
-                    name="Neu",
-                    preis=Decimal("60.00"),
-                    wochentag=wochentag,
-                    created_at=datetime.now(UTC),
-                )
-            )
+            db.add(Tarif(name="Alt", preis=Decimal("50.00"), wochentag=wochentag, created_at=t0))
+            db.add(Tarif(name="Neu", preis=Decimal("60.00"), wochentag=wochentag, created_at=t1))
             erwartet = Decimal("60.00")
         db.commit()
+        if pruefung is not None:
+            spalte, wert = pruefung
+            _pruefe_gespeicherte_spalte(db, "Regel", spalte, wert)
         lesestand.markiere_geaendert(db, "belegung", "tarife")
         db.commit()
         feld_id = f.id
@@ -287,8 +350,10 @@ def test_preis_gleichlauf_portal_hauptsystem(
     assert angezeigt == erwartet, f"Portal zeigt {angezeigt}, erwartet {erwartet} ({szenario})"
     assert f"– {_euro(erwartet)} €" in seite
 
-    # Vom Hauptsystem beim Buchen tatsächlich reservierter Preis (Betrag der Fake-Checkout-URL).
-    warteseite = _buchen(browser, csrf, feld_id)
+    # Vom Hauptsystem beim Buchen tatsächlich reservierter Preis (Betrag der Fake-Checkout-URL)
+    # und der auf der Buchung festgeschriebene Preis (Review-Fix 5: zusätzlich zum Betrag auf der
+    # Zahlungsseite, direkt auf der Buchung selbst).
+    warteseite = _buchen(browser, csrf, feld_id, beginn, ende)
     assert hauptsystem.abholen() == 1
     zahlseite = browser.get(warteseite, follow_redirects=False).headers["location"]
     reserviert = Decimal(parse_qs(urlsplit(zahlseite).query)["betrag"][0])
@@ -296,6 +361,9 @@ def test_preis_gleichlauf_portal_hauptsystem(
         reserviert == erwartet
     ), f"Hauptsystem reserviert {reserviert}, erwartet {erwartet} ({szenario})"
     assert reserviert == angezeigt
+    with CoreSession() as db:
+        buchung = db.scalar(select(Buchung))
+        assert buchung.preis == erwartet == angezeigt
 
 
 def test_hallenplan_wird_nie_ans_portal_gesendet() -> None:
