@@ -6,6 +6,7 @@ Schlüssel (CA wie Client) werden nur beim ersten Aufruf erzeugt und danach nie 
 nur das jeweilige Zertifikat wird neu ausgestellt.
 """
 
+import logging
 import os
 import re
 from collections.abc import Sequence
@@ -17,9 +18,15 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
+logger = logging.getLogger(__name__)
+
 CA_TAGE = 5 * 365
 CLIENT_TAGE = 365
+# Restlaufzeit der CA unter einem Jahr: nur noch eine Warnung, Client-Zertifikate werden wie
+# gehabt auf das CA-Ablaufdatum gekappt.
+CA_WARNSCHWELLE_TAGE = 365
 _NAME = re.compile(r"[a-z0-9-]{1,40}")
+_STANDARDNAMEN = ("portal-kanal", "halle")
 
 
 def _name(cn: str) -> x509.Name:
@@ -33,6 +40,9 @@ def _name(cn: str) -> x509.Name:
 
 def _lade_oder_erzeuge_schluessel(pfad: Path) -> ec.EllipticCurvePrivateKey:
     if pfad.exists():
+        # Rechte immer wieder auf 0600 ziehen, falls die Datei extern mit anderen Rechten
+        # angelegt oder verändert wurde (z. B. durch ein Backup-Restore).
+        os.chmod(pfad, 0o600)
         schluessel = serialization.load_pem_private_key(pfad.read_bytes(), password=None)
         if not isinstance(schluessel, ec.EllipticCurvePrivateKey):
             raise ValueError(f"{pfad} ist kein EC-Schlüssel")
@@ -66,14 +76,10 @@ def _key_usage(*, ca: bool) -> x509.KeyUsage:
     )
 
 
-def _lade_oder_erzeuge_ca(ordner: Path) -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
-    key_pfad, crt_pfad = ordner / "ca.key", ordner / "ca.crt"
-    key = _lade_oder_erzeuge_schluessel(key_pfad)
-    if crt_pfad.exists():
-        return key, x509.load_pem_x509_certificate(crt_pfad.read_bytes())
+def _neues_ca_zertifikat(key: ec.EllipticCurvePrivateKey) -> x509.Certificate:
     jetzt = datetime.now(UTC)
     name = _name("Beachhub interne CA")
-    cert = (
+    return (
         x509.CertificateBuilder()
         .subject_name(name)
         .issuer_name(name)
@@ -86,15 +92,61 @@ def _lade_oder_erzeuge_ca(ordner: Path) -> tuple[ec.EllipticCurvePrivateKey, x50
         .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
         .sign(key, hashes.SHA256())
     )
-    crt_pfad.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
+
+def _lade_oder_erzeuge_ca(ordner: Path) -> tuple[ec.EllipticCurvePrivateKey, x509.Certificate]:
+    key_pfad, crt_pfad = ordner / "ca.key", ordner / "ca.crt"
+    if crt_pfad.exists() and not key_pfad.exists():
+        # Ohne diese Sperre würde unten klammheimlich ein neuer CA-Schlüssel neben dem alten
+        # Zertifikat entstehen: Neue Client-Zertifikate wären dann mit dem neuen Schlüssel
+        # signiert, während ca.crt (der Vertrauensanker beim Portal) noch den alten öffentlichen
+        # Schlüssel trägt – die Signatur ließe sich dort nie mehr prüfen.
+        raise ValueError(
+            f"{crt_pfad} existiert, aber {key_pfad} fehlt. Ohne den passenden Schlüssel kann "
+            "kein neues Zertifikat signiert werden, das zur bestehenden CA passt – bitte den "
+            "verlorenen Schlüssel wiederherstellen oder beide Dateien gemeinsam entfernen."
+        )
+    key = _lade_oder_erzeuge_schluessel(key_pfad)
+    if not crt_pfad.exists():
+        cert = _neues_ca_zertifikat(key)
+        crt_pfad.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+        return key, cert
+
+    cert = x509.load_pem_x509_certificate(crt_pfad.read_bytes())
+    cert_public = cert.public_key()
+    if (
+        not isinstance(cert_public, ec.EllipticCurvePublicKey)
+        or cert_public.public_numbers() != key.public_key().public_numbers()
+    ):
+        raise ValueError(
+            f"{crt_pfad} passt nicht zu {key_pfad} (öffentlicher Schlüssel stimmt nicht überein)"
+            " – neue Client-Zertifikate würden von der falschen CA signiert und beim Portal nie"
+            " verifizieren."
+        )
+    jetzt = datetime.now(UTC)
+    if cert.not_valid_after_utc < jetzt:
+        raise ValueError(
+            f"{crt_pfad} ist am {cert.not_valid_after_utc:%Y-%m-%d} abgelaufen – bitte die CA"
+            " erneuern (ca.crt/ca.key gemeinsam entfernen und neu erzeugen)."
+        )
+    if cert.not_valid_after_utc - jetzt < timedelta(days=CA_WARNSCHWELLE_TAGE):
+        logger.warning(
+            "CA-Zertifikat %s läuft am %s ab (Restlaufzeit < %d Tage) – bald erneuern.",
+            crt_pfad,
+            cert.not_valid_after_utc,
+            CA_WARNSCHWELLE_TAGE,
+        )
     return key, cert
 
 
-def erzeuge(ordner: Path, namen: Sequence[str] = ("portal-kanal", "halle")) -> list[Path]:
+def erzeuge(ordner: Path, namen: Sequence[str] | None = None) -> list[Path]:
+    if namen is None:
+        namen = _STANDARDNAMEN
     for name in namen:
         if not _NAME.fullmatch(name):
             raise ValueError(f"Ungültiger Zertifikatsname: {name!r}")
-    ordner.mkdir(parents=True, exist_ok=True)
+    ordner.mkdir(parents=True, exist_ok=True, mode=0o700)
+    os.chmod(ordner, 0o700)  # mkdir(mode=...) wird vom umask beschnitten
     ca_key, ca_cert = _lade_oder_erzeuge_ca(ordner)
     pfade = [ordner / "ca.crt"]
     for name in namen:

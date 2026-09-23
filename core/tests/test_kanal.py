@@ -1,4 +1,5 @@
 import json
+import ssl
 import threading
 import time
 import uuid
@@ -358,3 +359,33 @@ def test_baue_client(monkeypatch: pytest.MonkeyPatch) -> None:
     c = kanal.baue_client()
     assert c.base_url.host == "portal.example" and c.base_url.port == 8443
     assert c.headers["authorization"] == "Bearer geheim"
+
+
+@pytest.mark.parametrize("mit_portal_ca", [True, False])
+def test_baue_client_mtls_pfad(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mit_portal_ca: bool
+) -> None:
+    """PORTAL_CA ist optional (Ruling K Task 6/7): leer -> Systemvertrauen, sonst die Datei."""
+    from beachhub_core import zertifikate
+
+    zertifikate.erzeuge(tmp_path)
+    monkeypatch.setattr(settings, "portal_url", "https://portal.example:8443")
+    monkeypatch.setattr(settings, "kanal_token", "geheim")
+    monkeypatch.setattr(settings, "portal_client_cert", str(tmp_path / "portal-kanal.crt"))
+    monkeypatch.setattr(settings, "portal_client_key", str(tmp_path / "portal-kanal.key"))
+    monkeypatch.setattr(settings, "portal_ca", str(tmp_path / "ca.crt") if mit_portal_ca else "")
+
+    aufrufe: list[str | None] = []
+    orig_create_default_context = ssl.create_default_context
+
+    def spy(*, cafile: str | None = None) -> ssl.SSLContext:
+        aufrufe.append(cafile)
+        return orig_create_default_context(cafile=cafile)
+
+    monkeypatch.setattr(kanal.ssl, "create_default_context", spy)
+
+    c = kanal.baue_client()
+
+    erwartete_cafile = str(tmp_path / "ca.crt") if mit_portal_ca else None
+    assert aufrufe == [erwartete_cafile]
+    assert c.base_url.host == "portal.example"

@@ -37,8 +37,11 @@ def main() -> None:
 
         from beachhub_core import zertifikate
 
-        namen = args.name or ["portal-kanal", "halle"]
-        for pfad in zertifikate.erzeuge(Path(args.ziel), namen):
+        try:
+            pfade = zertifikate.erzeuge(Path(args.ziel), args.name)
+        except ValueError as e:
+            p.error(str(e))
+        for pfad in pfade:
             print(pfad)
     elif args.cmd == "monatslauf":
         from beachhub_core import jobs

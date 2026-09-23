@@ -61,8 +61,9 @@ class Settings(BaseSettings):
             fehler.append("PORTAL_CLIENT_CERT fehlt, obwohl PORTAL_URL gesetzt ist")
         if self.portal_url and not self.portal_client_key:
             fehler.append("PORTAL_CLIENT_KEY fehlt, obwohl PORTAL_URL gesetzt ist")
-        if self.portal_url and not self.portal_ca:
-            fehler.append("PORTAL_CA fehlt, obwohl PORTAL_URL gesetzt ist")
+        # PORTAL_CA ist kein Pflichtfeld: Sie ist der Vertrauensanker für das Server-Zertifikat
+        # des Portals; das Portal hat aber ein öffentliches (ACME-)Zertifikat auf :8443, dem die
+        # System-CAs bereits vertrauen (kanal.baue_client() fällt dann auf sie zurück).
         return fehler
 
 
