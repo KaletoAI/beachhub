@@ -313,7 +313,9 @@ class HaZuhoerer:
             praesenz = lies(db, "praesenz", {})
         if tuer_erwartet(gespeichert.inhalt if gespeichert else None, jetzt):
             return
-        if praesenz:
+        # Nur konfigurierte Felder zählen – ein aus hall.toml entferntes Feld mit altem
+        # Präsenz-Eintrag darf den Tür-Alarm nicht dauerhaft abschalten.
+        if any(feld_id in self._z.felder for feld_id in praesenz):
             return
         if letzter_master and jetzt - datetime.fromisoformat(letzter_master) < MASTER_TUER_KULANZ:
             return

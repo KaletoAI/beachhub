@@ -288,6 +288,17 @@ async def test_tuer_bei_praesenz_kein_alarm(a: Aufbau) -> None:
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
 
 
+async def test_tuer_praesenz_eines_entfernten_felds_unterdrueckt_keinen_alarm(a: Aufbau) -> None:
+    """Ein gespeicherter Präsenz-Eintrag eines nicht (mehr) konfigurierten Felds darf den
+    Tür-Alarm nicht dauerhaft abschalten."""
+    with a.sitzungen() as db:
+        schreibe(db, "praesenz", {"feld_alt": {"seit": t(18).isoformat()}})
+        db.commit()
+    a.uhr.stelle(t(23))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
 async def test_tuer_offen_ausserhalb_nach_kulanzgrenze_erneut(a: Aufbau) -> None:
     a.plan(buchung(F1, t(19), t(21)))
     a.uhr.stelle(t(23))

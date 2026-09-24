@@ -71,13 +71,16 @@ class PlanAbruf:
     def _melde_verworfen(self, grund: str, version: Any) -> None:
         """Meldet `plan_verworfen` nur beim ersten Auftreten eines Fehlers – bietet das
         Hauptsystem dauerhaft dieselbe fehlerhafte Version an (z. B. nach einer Wiederher-
-        stellung aus einem alten Backup), entstünde sonst alle 5 min ein neuer Alarm."""
+        stellung aus einem alten Backup), entstünde sonst alle 5 min ein neuer Alarm.
+        `version_alt` wird nur nach dem Grund entprellt: Veröffentlicht das Hauptsystem mit
+        nachgehender Uhr immer neue, aber weiterhin zu alte Versionen, entstünde sonst je
+        Version ein Alarm – und über Melder und `plan_neu` ein Abruf ohne Pause."""
         with self._sitzungen() as db:
             marker = lies(db, "plan_verworfen_gemeldet")
             if (
                 marker is not None
                 and marker.get("grund") == grund
-                and marker.get("version") == version
+                and (grund == "version_alt" or marker.get("version") == version)
             ):
                 return
             schreibe(db, "plan_verworfen_gemeldet", {"grund": grund, "version": version})
