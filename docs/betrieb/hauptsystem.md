@@ -180,8 +180,10 @@ lässt dort nur `/hall/*` durch und nur mit einem Client-Zertifikat der internen
 prüft das Hauptsystem den Token `HALL_TOKEN`. Die Site hört auf den internen Hostnamen
 `kern.beachhub.wg` statt auf die nackte IP `10.8.0.1`: Für eine IP-Adresse schicken TLS-Clients
 kein SNI (RFC 6066), und ohne SNI kann Caddy die `client_auth`-Richtlinie der Site keiner
-Verbindung zuordnen – der Handshake schlägt dann für jeden Client fehl, mit oder ohne
-Zertifikat. Der Hallendienst löst `kern.beachhub.wg` deshalb über `extra_hosts` in
+Verbindung zuordnen – einen Aufruf über die nackte IP weist Caddy deshalb mit HTTP 421
+(„Misdirected Request“) ab, mit oder ohne Client-Zertifikat. Am Hostnamen greift die
+mTLS-Prüfung: Ohne oder mit falschem Client-Zertifikat scheitert dort schon der TLS-Handshake
+(siehe „Prüfen“ unten). Der Hallendienst löst `kern.beachhub.wg` deshalb über `extra_hosts` in
 `hall/docker-compose.yml` auf die WireGuard-Adresse des Hauptsystems auf (Details:
 `docs/betrieb/hallendienst.md`, Abschnitt 2). `core/deploy/Caddyfile` bindet beide Sites
 zusätzlich fest an `10.8.0.1` (`bind 10.8.0.1`), damit Caddy nicht auf allen Interfaces der VM
@@ -209,8 +211,10 @@ Erwartet: HTTP 200 mit dem signierten Plan als JSON. Ohne `--cert`/`--key` schl�
 TLS-Handshake fehl („certificate required“) – das ist beabsichtigt.
 
 Ein Wechsel der internen CA (`ca.crt`/`ca.key` gemeinsam entfernt und `zertifikate` erneut
-ausgeführt – **nicht** jeder erneute Aufruf des Befehls: ohne entfernte CA-Dateien stellt er nur
-fehlende Client-Zertifikate neu aus, die CA bleibt unverändert bestehen) erfordert einen Neustart
+ausgeführt – **nicht** jeder erneute Aufruf des Befehls: ohne entfernte CA-Dateien bleiben CA und
+alle Schlüssel bestehen, er stellt aber jedes Mal alle genannten Client-Zertifikate neu aus, ohne
+`--name` also `portal-kanal.crt` und `halle.crt`; für die jährliche Rotation der Halle allein
+deshalb `--name halle`) erfordert einen Neustart
 bzw. mindestens ein Reload der Caddy-Site `:8444` (`docker compose restart caddy`), damit der neue
 `trust_pool` geladen wird, sowie neue `halle.crt`/`halle.key` auf dem Hallenrechner – Details:
 `docs/betrieb/hallendienst.md`, Abschnitt 2 („Rotation“).

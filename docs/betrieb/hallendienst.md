@@ -23,9 +23,13 @@ Auf dem Hauptsystem:
 1. `docker compose -f core/docker-compose.yml exec app beachhub-core zertifikate --ziel
    /app/data/zertifikate` ausführen (siehe `docs/betrieb/portal.md`) – das ist bei der
    Ersteinrichtung des Hauptsystems bereits geschehen (`docs/betrieb/hauptsystem.md`, Abschnitt 2,
-   dort **vor** dem ersten `docker compose up -d`); ein erneuter Aufruf hier ist unschädlich
-   (vorhandene Schlüssel bleiben erhalten, es werden nur fehlende Zertifikate nachgezogen). Der
-   Befehl legt Ergebnisse **auf dem Datenvolume** ab (`/app/data/…`), nicht im beschreibbaren
+   dort **vor** dem ersten `docker compose up -d`). Ein erneuter Aufruf ist nicht folgenlos: Die
+   CA und alle privaten Schlüssel bleiben erhalten, aber **jeder Aufruf stellt alle genannten
+   Client-Zertifikate neu aus** – ohne `--name` also `portal-kanal.crt` **und** `halle.crt`; danach
+   muss das Hauptsystem neu gestartet werden, weil es `portal-kanal.crt` nur beim Start lädt
+   (`docs/betrieb/portal.md`, „Rotation“). Nur für die Halle deshalb gezielt
+   `beachhub-core zertifikate --ziel /app/data/zertifikate --name halle` aufrufen: Das stellt
+   allein `halle.crt` neu aus und lässt `portal-kanal.crt` unangetastet. Der Befehl legt Ergebnisse **auf dem Datenvolume** ab (`/app/data/…`), nicht im beschreibbaren
    Container-Dateisystem – sonst gingen sie beim nächsten `docker compose build`/Neuanlegen des
    Containers verloren. Es entstehen dort u. a. `ca.crt`/`ca.key` (interne CA, gemeinsamer
    Vertrauensanker für beide mTLS-Kanäle des Hauptsystems: `client_auth`-`trust_pool` sowohl für
@@ -49,8 +53,10 @@ Auf dem Hauptsystem:
    ```
 3. **Hostnamen der Hallenschnittstelle eintragen.** Caddy hört auf `kern.beachhub.wg:8444`, nicht
    auf die nackte IP `10.8.0.1`: Für eine IP-Adresse schicken TLS-Clients kein SNI (RFC 6066), und
-   ohne SNI kann Caddy seine `client_auth`-Richtlinie keiner Verbindung zuordnen – der Handshake
-   schlägt dann für jeden Client fehl, mit oder ohne Zertifikat (Details:
+   ohne SNI kann Caddy seine `client_auth`-Richtlinie keiner Verbindung zuordnen – einen Aufruf
+   über die nackte IP weist Caddy deshalb mit HTTP **421** („Misdirected Request“) ab, mit oder
+   ohne Client-Zertifikat. Erst am richtigen Hostnamen greift die mTLS-Prüfung; fehlt dort das
+   Client-Zertifikat oder ist es falsch, scheitert schon der **TLS-Handshake** (Details:
    `docs/betrieb/hauptsystem.md`, Abschnitt „5b. Hallendienst anbinden“). `hall/.env.example`
    setzt bereits `CORE_URL=https://kern.beachhub.wg:8444`; in `hall/docker-compose.yml` löst
    `extra_hosts: ["kern.beachhub.wg:10.8.0.1"]` den Namen auf die WireGuard-Adresse des
@@ -70,13 +76,17 @@ Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensank
 
 **Rotation:**
 
-- **Client-Zertifikat** (`halle.crt`) läuft nach einem Jahr ab. Schritt 1 erneut ausführen – die
-  Schlüsseldatei (`halle.key`) bleibt dabei unverändert, nur `halle.crt` wird neu ausgestellt.
+- **Client-Zertifikat** (`halle.crt`) läuft nach einem Jahr ab. Schritt 1 mit `--name halle`
+  erneut ausführen (`beachhub-core zertifikate --ziel /app/data/zertifikate --name halle`) – die
+  Schlüsseldatei (`halle.key`) bleibt dabei unverändert, nur `halle.crt` wird neu ausgestellt;
+  ohne `--name` entstünde zusätzlich ein neues `portal-kanal.crt`, und das Hauptsystem müsste neu
+  gestartet werden (siehe Schritt 1).
   Neues `halle.crt` auf den Hallenrechner kopieren (`halle.key` bleibt dort unverändert) und den
   Hallendienst neu starten (`docker compose restart hall`), sonst verbindet er sich weiter mit dem
   alten, demnächst abgelaufenen Zertifikat.
 - **Schlüsselrotation** (z. B. bei Verdacht auf Kompromittierung): vor dem erneuten Aufruf von
-  Schritt 1 auf dem Hauptsystem `halle.key` (und `halle.crt`) löschen – der Befehl legt dann ein
+  Schritt 1 (mit `--name halle`) auf dem Hauptsystem `halle.key` (und `halle.crt`) löschen – der
+  Befehl legt dann ein
   neues Schlüsselpaar samt Zertifikat an; danach `halle.crt` **und** `halle.key` neu auf den
   Hallenrechner kopieren und den Hallendienst neu starten.
 - **Wechsel der internen CA** (`ca.crt`/`ca.key` gemeinsam entfernt und Schritt 1 erneut
@@ -191,6 +201,56 @@ Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensank
    genau diesem Frostschutzwert entsprechen (bei `generic_thermostat` z. B. über `min_temp:` in der
    `climate`-Konfiguration einstellbar). Ein `min_temp` unterhalb des gewünschten Frostschutzes
    hielte die Heizung dauerhaft kälter als beabsichtigt.
+7. **Wiederverriegelung bei `lock.*` – Pflicht.** Ist `[tuer] entity` ein Schloss (`lock.*`), ruft
+   der Dienst bei gültiger PIN nur `lock.unlock` auf und verriegelt **nicht** selbst wieder. Das
+   muss das Schloss selbst (Auto-Lock in der Schlosskonfiguration, z. B. nach 10 s) oder eine
+   HA-Automation übernehmen – sonst bleibt die Halle nach der ersten PIN offen. Beispiel (mit
+   Türkontakt; ohne Kontakt den zweiten Auslöser und die zweite Bedingung weglassen):
+
+   ```yaml
+   alias: Beachhub Tür wieder verriegeln
+   mode: single
+   triggers:
+     - trigger: state
+       entity_id: lock.eingang
+       to: unlocked
+       for: { seconds: 10 }
+     - trigger: state
+       entity_id: binary_sensor.tuer
+       to: "off"
+       for: { seconds: 5 }
+   conditions:
+     - condition: state
+       entity_id: lock.eingang
+       state: unlocked
+     - condition: state
+       entity_id: binary_sensor.tuer
+       state: "off"
+   actions:
+     - action: lock.lock
+       target:
+         entity_id: lock.eingang
+   ```
+
+   Der erste Auslöser verriegelt 10 s nach dem Entriegeln, wenn niemand die Tür geöffnet hat; der
+   zweite, sobald eine geöffnete Tür wieder 5 s zu ist. Bei `switch.*`-Türöffnern (Impuls) ist
+   keine Automation nötig. Vor der Inbetriebnahme prüfen (Checkliste in Abschnitt 5).
+8. **Präsenzsensoren entprellen.** Präsenzmelder fallen bei ruhigem Spiel oder in toten Winkeln
+   kurz auf „aus“. Jeder dieser Aussetzer erzeugt beim Dienst `praesenz_ende` und gleich darauf
+   `praesenz_start` und lässt den Tür-Alarm kurzzeitig ohne Präsenz entscheiden. Deshalb in HA eine
+   Ausschaltverzögerung (`delay_off`, 2–5 min) vorschalten – entweder in der Sensorkonfiguration
+   selbst (bei vielen Meldern „Haltezeit“) oder über einen Template-Sensor, den `hall.toml` dann
+   statt des Rohsensors als `praesenz` nennt:
+
+   ```yaml
+   template:
+     - binary_sensor:
+         - name: Praesenz Feld 1
+           unique_id: beachhub_praesenz_feld_1
+           state: "{{ is_state('binary_sensor.praesenz_feld_1_roh', 'on') }}"
+           device_class: occupancy
+           delay_off: "00:03:00"
+   ```
 
 ## 4. Installation
 
@@ -210,6 +270,16 @@ Argon2id-Hash über `beachhub-hall master-pin` (fragt die PIN zweimal interaktiv
 Hash aus). Er muss aus **8 bis 12 Ziffern** bestehen – er öffnet die Tür jederzeit, auch ohne
 Buchung, und muss deshalb deutlich schwerer zu erraten sein als eine Buchungs-PIN. Mit dem
 Platzhalter `$argon2id$ERSETZEN` aus `hall.toml.example` startet der Dienst absichtlich nicht.
+
+**Datenbank der Halle (`data/hall.sqlite`) nie aus einer Sicherung zurückspielen.** Sie muss
+nicht gesichert werden: Den Plan holt der Dienst beim Start neu vom Hauptsystem, Master-PIN und
+Zuordnung stehen in `hall.toml`. Bei einem Defekt oder Hardwaretausch `data/hall.sqlite` (samt
+`hall.sqlite-wal`/`-shm`) **löschen** und den Dienst neu starten – er legt die Datenbank mit
+einer neuen Dienst-ID an und zählt `seq` wieder ab 1. Eine zurückgespielte ältere Kopie behielte
+dagegen die alte Dienst-ID mit einem älteren `seq`-Stand: Neue Ereignisse bekämen Nummern, die das
+Hauptsystem für diese Dienst-ID schon bestätigt hat, und es verwürfe sie stillschweigend als
+Duplikate. Verloren gehen beim Löschen nur noch nicht zugestellte Ereignisse (Anzeige
+`sensor.beachhub_warteschlange`).
 
 `GET http://127.0.0.1:8099/health` zeigt Planversion, HA-Verbindung und Länge der
 Warteschlange. Der Endpunkt bindet über die Einstellung `HEALTH_HOST` standardmäßig nur an
@@ -294,6 +364,20 @@ Der Hallendienst selbst wird in diesem Probelauf genauso über `docker compose u
 gestartet wie im echten Betrieb (Abschnitt 4) – es gibt keinen separaten Testmodus. Die
 automatisierten Tests in `hall/tests/` (u. a. `test_beispielkonfiguration.py`) prüfen die
 Beispieldateien dieses Dokuments bereits ohne echtes HA und ohne echtes Hauptsystem.
+
+**Checkliste vor der Inbetriebnahme in der Halle** (im Probelauf und noch einmal mit der echten
+Technik):
+
+- [ ] HA-Benutzer „beachhub“ ist Administrator; `docker compose logs hall` zeigt weder
+      „Tastenfeld abgeschaltet“ noch „HTTP 401“ (Abschnitt 3, Punkt 1).
+- [ ] `recorder: exclude` für den Tastenfeld-Ereignistyp ist gesetzt (Abschnitt 3, Punkt 3).
+- [ ] Gültige PIN im Zutrittsfenster öffnet die Tür, falsche PIN nicht.
+- [ ] Bei `lock.*`: Das Schloss verriegelt nach dem Öffnen **von selbst wieder** (Auto-Lock oder
+      Automation aus Abschnitt 3, Punkt 7) – einmal ohne und einmal mit Öffnen der Tür prüfen.
+- [ ] Bei `switch.*`: Der Türöffner geht nach `impuls_sekunden` wieder aus.
+- [ ] Präsenzsensoren sind entprellt (Abschnitt 3, Punkt 8).
+- [ ] Die `sensor.beachhub_*`-Sensoren erscheinen in HA, **System → Halle** im Hauptsystem zeigt
+      den ersten Kontakt.
 
 ## 6. Störungen
 

@@ -13,8 +13,9 @@ https://10.8.0.1:8443 {
 # Hallendienst – nur über WireGuard und nur mit Client-Zertifikat der internen CA
 # (erzeugt mit `beachhub-core zertifikate`, siehe docs/betrieb/portal.md). Eigener interner
 # Hostname statt der IP: Für eine IP-Adresse schicken TLS-Clients kein SNI (RFC 6066); ohne SNI
-# griffe die client_auth-Richtlinie unten nie – Caddy verweigerte entweder mit 421 (strict SNI
-# Host) oder ließe den Handshake ganz ohne Zertifikatsprüfung durch. `kern.beachhub.wg` muss beim
+# griffe die client_auth-Richtlinie unten nie – Caddy weist einen solchen Aufruf mit 421
+# (Misdirected Request) ab. Am Hostnamen scheitert ein Aufruf ohne oder mit falschem
+# Client-Zertifikat dagegen schon im TLS-Handshake. `kern.beachhub.wg` muss beim
 # Hallendienst über `extra_hosts` auf die WireGuard-Adresse des Hauptsystems zeigen (siehe
 # hall/docker-compose.yml, docs/betrieb/hallendienst.md, Abschnitt 2).
 https://kern.beachhub.wg:8444 {

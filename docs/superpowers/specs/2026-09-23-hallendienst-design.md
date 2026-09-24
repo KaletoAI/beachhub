@@ -308,6 +308,11 @@ Die Dokumentation `docs/betrieb/hallendienst.md` beschreibt:
   `POST /api/states/<entity_id>` (Status-Sensoren) gar nicht; der Token ist deshalb sicher zu
   verwahren,
 - den Helfer `input_boolean.beachhub_handbetrieb`,
+- bei `lock.*` die Wiederverriegelung als Pflicht (Auto-Lock des Schlosses oder Beispiel-Automation
+  „`unlocked` seit 10 s → `lock.lock`“) samt Prüfpunkt in der Checkliste vor der Inbetriebnahme,
+- das Entprellen der Präsenzsensoren (`delay_off`),
+- dass `hall.sqlite` nie aus einer Sicherung zurückgespielt, sondern gelöscht wird (sonst gleiche
+  Dienst-ID mit altem `seq`-Stand, neue Ereignisse würden als Duplikate verworfen),
 - ein Beispiel-Dashboard mit den `beachhub`-Sensoren und dem Handbetrieb-Schalter,
 - die Rückfall-Automation aus Hauptspec § 8.2 (Licht aus außerhalb der Betriebszeit, falls der
   Dienst ausfällt),
