@@ -1,5 +1,6 @@
 """Ereignisse und Status der Halle, Alarme an den Betreiber (Hallendienst-Spec § 2)."""
 
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Any
@@ -19,6 +20,8 @@ from beachhub_core.models import (
     LesestandVersion,
     utcnow,
 )
+
+logger = logging.getLogger(__name__)
 
 KONTAKT_MARKER = "halle_ohne_kontakt_seit"
 KONTAKT_GRENZE = timedelta(minutes=60)
@@ -120,6 +123,13 @@ def speichere_ereignisse(db: Session, lieferung: EreignisLieferung) -> tuple[int
     if lieferung.ereignisse:
         untergrenze = min(e.seq for e in lieferung.ereignisse) - 1
         if untergrenze > dienst.bestaetigt_bis:
+            logger.warning(
+                "Hallen-Marke von %s auf %s nachgezogen – Ereignisse %s..%s fehlen im Hauptsystem",
+                dienst.bestaetigt_bis,
+                untergrenze,
+                dienst.bestaetigt_bis + 1,
+                untergrenze,
+            )
             dienst.bestaetigt_bis = untergrenze
 
     # created_at/updated_at mit der echten Uhr, nicht mit `jetzt` (clock.now, vom Admin

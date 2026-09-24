@@ -223,9 +223,11 @@ Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensank
      - condition: state
        entity_id: lock.eingang
        state: unlocked
-     - condition: state
-       entity_id: binary_sensor.tuer
-       state: "off"
+     - condition: not
+       conditions:
+         - condition: state
+           entity_id: binary_sensor.tuer
+           state: "on"
    actions:
      - action: lock.lock
        target:
@@ -233,7 +235,10 @@ Namen an, und der Hallendienst findet weder Client-Zertifikat noch Vertrauensank
    ```
 
    Der erste Auslöser verriegelt 10 s nach dem Entriegeln, wenn niemand die Tür geöffnet hat; der
-   zweite, sobald eine geöffnete Tür wieder 5 s zu ist. Bei `switch.*`-Türöffnern (Impuls) ist
+   zweite, sobald eine geöffnete Tür wieder 5 s zu ist. Die Bedingung „nicht offen“ statt „zu“
+   verriegelt auch, wenn der Türkontakt `unavailable` ist. Einen Wechsel während eines
+   HA-Neustarts verpasst die Automation – deshalb das Auto-Lock des Schlosses bevorzugen und die
+   Automation nur als Ersatz nehmen. Bei `switch.*`-Türöffnern (Impuls) ist
    keine Automation nötig. Vor der Inbetriebnahme prüfen (Checkliste in Abschnitt 5).
 8. **Präsenzsensoren entprellen.** Präsenzmelder fallen bei ruhigem Spiel oder in toten Winkeln
    kurz auf „aus“. Jeder dieser Aussetzer erzeugt beim Dienst `praesenz_ende` und gleich darauf
