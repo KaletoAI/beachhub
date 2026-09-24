@@ -91,7 +91,11 @@ Ausfall (älter als 6 h), fasst das Hauptsystem die Alarme einer Lieferung in ei
 **Status** (`HallenStatus`): `{planversion, letzter_abruf, ha_erreichbar, handbetrieb,
 felder: [{feld_id, licht_ist, praesenz}], heizung: {soll, ist?}, tuer: {verriegelt?, offen?},
 warteschlange: int, version_dienst}`. Das Hauptsystem speichert ihn in `hallen_status` (eine Zeile,
-JSONB und `empfangen_am`). `plan_neu = (planversion < aktuelle Version von hallenplan)`.
+JSONB und `empfangen_am`). `plan_neu = (planversion ≠ aktuelle Version von hallenplan)`.
+Fordert die Halle mit `ab` eine höhere Version an, als das Hauptsystem gespeichert hat (nach einer
+Wiederherstellung aus einem Backup), veröffentlicht `GET /hall/plan` den Plan neu – mit
+`max(alt + 1, Unixzeit in ms)` liegt die neue Version über `ab`, statt dass die Halle den alten
+Plan als `version_alt` verwirft.
 
 **Alarm „Halle ohne Kontakt“:** Ein APScheduler-Job prüft alle 5 min. Liegt `empfangen_am` mehr als
 60 min zurück, geht einmal eine Mail raus (Marker in `app_setting`). Beim nächsten Kontakt folgt

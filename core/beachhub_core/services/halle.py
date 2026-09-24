@@ -232,7 +232,10 @@ def plan_neu(db: Session, planversion: int | None) -> bool:
     if planversion is None:
         return False
     zeile = db.get(LesestandVersion, DOKUMENT)
-    return zeile is None or zeile.geaendert or planversion < zeile.version
+    # Ungleich statt kleiner: Hat die Halle eine höhere Version als das Hauptsystem (nach einer
+    # Wiederherstellung aus einem Backup), soll sie ebenfalls sofort abrufen – GET /hall/plan
+    # veröffentlicht den Plan dann neu mit einer Version über ihrer.
+    return zeile is None or zeile.geaendert or planversion != zeile.version
 
 
 def _zeile(e: Ereignis, felder: dict[uuid.UUID, str]) -> str:

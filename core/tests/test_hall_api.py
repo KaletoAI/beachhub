@@ -1,4 +1,5 @@
 import threading
+import time as time_mod
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
@@ -84,6 +85,28 @@ def test_plan_ist_signiert_und_liefert_304(client: TestClient, db: Session, welt
     # Version ist max(bisherige+1, Unixzeit in ms) (Ruling Lesestand-Versionen), also nicht
     # zwingend genau +1 – wie test_lesestand.py::test_publiziere_zweimal_erhoeht_version.
     assert r2.status_code == 200 and r2.json()["version"] > dok.version
+
+
+def test_plan_nach_wiederherstellung_wird_neu_veroeffentlicht(
+    client: TestClient, db: Session, welt
+) -> None:
+    """Hauptsystem aus einem Backup wiederhergestellt: Die Halle kennt schon eine höhere
+    Planversion als die gespeicherte. Statt ihr die alte Version zu schicken (die sie als
+    version_alt verwürfe, mit Alarm-Mail), veröffentlicht das Hauptsystem den Plan neu – die
+    neue Version ist max(alt + 1, Unixzeit in ms) und damit größer als `ab`. Schon der Status
+    mit der höheren Version meldet plan_neu, damit die Halle sofort abruft."""
+    alt = client.get("/hall/plan?ab=0", headers=H).json()["version"]
+    # Die Halle hat nach dem Stand des Backups noch eine Version bekommen (etwas später
+    # veröffentlicht, also Unixzeit in ms knapp über `alt`), die das Hauptsystem nicht mehr kennt.
+    halle_kennt = alt + 1
+    time_mod.sleep(0.01)  # die Uhr (ms) ist seitdem sicher weitergelaufen
+    r = client.post("/hall/status", headers=H, json=_status(halle_kennt).model_dump(mode="json"))
+    assert r.json() == {"plan_neu": True}
+    r = client.get(f"/hall/plan?ab={halle_kennt}", headers=H)
+    assert r.status_code == 200
+    dok = Dokument.model_validate(r.json())
+    assert dok.version > halle_kennt and lesestand.pruefe(dok)
+    assert client.get(f"/hall/plan?ab={dok.version}", headers=H).status_code == 304
 
 
 def test_plan_ohne_schluessel_503(client: TestClient, welt) -> None:

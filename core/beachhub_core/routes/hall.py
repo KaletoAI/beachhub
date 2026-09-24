@@ -37,7 +37,19 @@ router = APIRouter(prefix="/hall", dependencies=[Depends(pruefe_token)])
 def plan(ab: int = 0, db: Session = Depends(get_db)) -> Response:
     zeile = db.get(LesestandVersion, DOKUMENT)
     dok = lesestand.lade(DOKUMENT)
-    if zeile is None or zeile.geaendert or dok is None or dok.version != zeile.version:
+    # `ab` größer als die gespeicherte Version: Die Halle kennt einen neueren Plan als das
+    # Hauptsystem – typischerweise nach einer Wiederherstellung aus einem Backup. Die alte Version
+    # zu schicken hieße, dass die Halle sie als version_alt verwirft (mit Alarm-Mail) und bei
+    # ihrem Stand bleibt. Stattdessen neu veröffentlichen: publiziere() vergibt
+    # max(alt + 1, Unixzeit in ms), und da die Halle ihre Version früher von hier bekommen hat,
+    # liegt die neue darüber.
+    if (
+        zeile is None
+        or zeile.geaendert
+        or dok is None
+        or dok.version != zeile.version
+        or ab > zeile.version
+    ):
         try:
             dok = lesestand.publiziere(db, DOKUMENT)
             db.commit()
