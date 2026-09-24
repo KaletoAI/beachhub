@@ -7,9 +7,10 @@ services:
     network_mode: host
     env_file: .env
     # Zeit für das geordnete Herunterfahren: Dienst.schliesse() schaltet einen offenen
-    # switch.*-Türöffner aus (bis zu 3 Versuche) und lässt einen laufenden Impuls ablaufen,
-    # bevor der Prozess endet. Danach schickt Docker SIGKILL.
-    stop_grace_period: 30s
+    # switch.*-Türöffner aus (bis zu 3 Versuche à höchstens 5 s mit je 1 s Pause, siehe
+    # beachhub_hall/tuer.py) und schließt die Verbindungen, bevor der Prozess endet. Danach
+    # schickt Docker SIGKILL – 60 s lassen reichlich Luft.
+    stop_grace_period: 60s
     # CORE_URL zeigt auf den Hostnamen der Caddy-Site des Hauptsystems (kern.beachhub.wg), nicht
     # auf ihre nackte IP – für eine IP-Adresse schickt der TLS-Client kein SNI, ohne SNI griffe
     # die client_auth-Richtlinie bei Caddy nie (docs/betrieb/hauptsystem.md, „5b. Hallendienst
