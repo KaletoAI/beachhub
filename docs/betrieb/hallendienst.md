@@ -208,13 +208,14 @@ docker compose logs -f hall
 Der Master-PIN wird **nie im Klartext** in `hall.toml` eingetragen, sondern ausschließlich als
 Argon2id-Hash über `beachhub-hall master-pin` (fragt die PIN zweimal interaktiv ab und gibt den
 Hash aus). Er muss aus **8 bis 12 Ziffern** bestehen – er öffnet die Tür jederzeit, auch ohne
-Buchung, und muss deshalb deutlich schwerer zu erraten sein als eine Buchungs-PIN. Mit dem Platzhalter `$argon2id$ERSETZEN` aus `hall.toml.example` startet der Dienst
-absichtlich nicht.
+Buchung, und muss deshalb deutlich schwerer zu erraten sein als eine Buchungs-PIN. Mit dem
+Platzhalter `$argon2id$ERSETZEN` aus `hall.toml.example` startet der Dienst absichtlich nicht.
 
 `GET http://127.0.0.1:8099/health` zeigt Planversion, HA-Verbindung und Länge der
 Warteschlange. Der Endpunkt bindet über die Einstellung `HEALTH_HOST` standardmäßig nur an
 `127.0.0.1` (Vorgabe in `.env.example`); der `HEALTHCHECK` im Dockerfile prüft ebenfalls immer
-`127.0.0.1` und funktioniert damit unverändert. `HEALTH_HOST` muss nur auf `0.0.0.0` gesetzt
+`127.0.0.1` und funktioniert damit unverändert. Den Port nimmt er wie der Dienst aus
+`HEALTH_PORT` (Vorgabe 8099). `HEALTH_HOST` muss nur auf `0.0.0.0` gesetzt
 werden, wenn der Health-Endpunkt von außerhalb des Containers direkt (nicht über
 `docker compose exec`/`docker inspect`) erreichbar sein soll, z. B. für ein externes
 Monitoring-System auf einem anderen Rechner – dann ist der Port nach außen zu begrenzen
