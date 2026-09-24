@@ -25,3 +25,7 @@ build-backend = "setuptools.build_meta"
 include = ["beachhub_portal*"]
 [tool.setuptools.package-data]
 beachhub_portal = ["templates/**/*", "static/*"]
+[tool.pytest.ini_options]
+# Nur, um die PytestDeprecationWarning von pytest-asyncio zu vermeiden (in derselben Umgebung
+# für hall/ installiert); die Tests hier nutzen selbst keine asyncio-Fixtures.
+asyncio_default_fixture_loop_scope = "function"
