@@ -18,5 +18,7 @@ VOLUME ["/data"]
 STOPSIGNAL SIGTERM
 # Prüft immer 127.0.0.1, unabhängig von HEALTH_HOST: der Dienst lauscht im Container per
 # Vorgabe nur dort (siehe .env.example), auf 0.0.0.0 zusätzlich auch auf 127.0.0.1 erreichbar.
-HEALTHCHECK --interval=60s --timeout=5s CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8099/health').status == 200 else 1)"
+# Den Port liest die Prüfung wie der Dienst aus HEALTH_PORT (Vorgabe 8099) – sonst schlüge sie nach
+# einer Änderung des Ports in .env dauerhaft fehl.
+HEALTHCHECK --interval=60s --timeout=5s CMD python -c "import os,sys,urllib.request; port = os.environ.get('HEALTH_PORT') or '8099'; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{port}/health', timeout=4).status == 200 else 1)"
 CMD ["beachhub-hall", "start"]

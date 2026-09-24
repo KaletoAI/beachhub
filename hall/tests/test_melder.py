@@ -76,6 +76,46 @@ async def test_offline_mit_backoff_nach_der_uhr(a: Aufbau) -> None:
     assert a.ereignisse.offen() == 0
 
 
+async def test_stehende_marke_kein_heisslauf(a: Aufbau) -> None:
+    """Hauptsystem aus einem Backup wiederhergestellt: seine Marke (hier 2) liegt hinter dem,
+    was die Halle schon als bestätigt kennt (bis 4), und ohne Nachziehen der Marke bestätigt es
+    nie mehr als 2. Der Melder darf dann nicht in einer Schleife ohne Pause immer wieder
+    liefern, sondern wartet wie bei einem Fehler (Backoff)."""
+    for _ in range(4):
+        a.ereignisse.melde("pin_abgelehnt")
+    a.ereignisse.bestaetige_bis(4)
+    a.ereignisse.melde("licht_geschaltet", feld_id=F1, an=True)  # seq 5
+    a.core.marke, a.core.marke_nachziehen = 2, False
+    a.ereignisse.neu.clear()
+    # Die Dauerschleife (`takt`) wartet auf `ereignisse.neu`; setzte einmal() es hier erneut,
+    # liefe sie ohne Pause – so heiß, dass die Event-Loop nichts anderes mehr ausführt.
+    for _ in range(5):
+        await a.melder.einmal()
+        if a.ereignisse.neu.is_set():
+            break
+    assert not a.ereignisse.neu.is_set()
+    assert a.core.anfragen == 1
+    assert a.ereignisse.offen() == 1  # nichts als zugestellt markiert, was nicht bestätigt ist
+    # Innerhalb des Backoffs kein neuer Versuch, danach wieder.
+    anfragen = a.core.anfragen
+    assert await a.melder.einmal() is None and a.core.anfragen == anfragen
+    a.uhr.vor(seconds=2)
+    assert await a.melder.einmal() is not None and a.core.anfragen == anfragen + 1
+
+
+async def test_nachgezogene_marke_bestaetigt_nach_backup(a: Aufbau) -> None:
+    """Gegenstück mit dem echten Verhalten des Hauptsystems: Es zieht seine Marke auf „kleinste
+    gelieferte seq − 1“ nach und bestätigt die Lieferung vollständig."""
+    for _ in range(4):
+        a.ereignisse.melde("pin_abgelehnt")
+    a.ereignisse.bestaetige_bis(4)
+    a.ereignisse.melde("licht_geschaltet", feld_id=F1, an=True)  # seq 5
+    a.core.marke = 2
+    antwort = await a.melder.einmal()
+    assert antwort is not None and antwort.bestaetigt_bis == 5
+    assert a.ereignisse.offen() == 0
+
+
 async def test_plan_neu_weckt_den_plan_abruf(a: Aufbau) -> None:
     a.core.plan_neu = True
     await a.melder.einmal()

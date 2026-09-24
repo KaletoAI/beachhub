@@ -3,7 +3,8 @@ switch.* bekommt einen Impuls von `impuls_sekunden`.
 
 Ein zweites Öffnen während eines laufenden Impulses bricht den alten Impuls ab und startet
 ihn neu – ein überlappendes Öffnen verlängert die offene Zeit, statt zwei Impulse zu verschachteln.
-`turn_off` wird bis zu drei Mal versucht, bevor ein `aktor_fehler` gemeldet wird; auch wenn
+`turn_off` wird bis zu drei Mal versucht (je höchstens `TURN_OFF_TIMEOUT` Sekunden, dazwischen
+`TURN_OFF_PAUSE` Sekunden Pause), bevor ein `aktor_fehler` gemeldet wird; auch wenn
 schon `turn_on` mit einem Fehler antwortet, planen wir sicherheitshalber trotzdem ein `turn_off`
 – HA könnte den Schalter trotz Fehlerantwort geschaltet haben, sonst bliebe die Tür dauerhaft
 offen. `schliesse()` beendet einen laufenden Impuls sofort (für das Herunterfahren des Dienstes).
@@ -21,6 +22,11 @@ from beachhub_hall.ha import HaClient, HaFehler
 logger = logging.getLogger(__name__)
 
 TURN_OFF_VERSUCHE = 3
+# Frist je Versuch statt der 15 s des HTTP-Timeouts: Beim Herunterfahren müssen alle drei
+# Versuche samt Pausen in die Kulanzfrist von Docker passen (stop_grace_period in
+# docker-compose.yml) – höchstens 3 × 5 s + 2 × 1 s.
+TURN_OFF_TIMEOUT = 5.0
+TURN_OFF_PAUSE = 1.0
 
 
 class Tuer:
@@ -82,15 +88,20 @@ class Tuer:
 
     async def _turn_off_mit_wiederholung(self, entity: str) -> None:
         for versuch in range(1, TURN_OFF_VERSUCHE + 1):
+            if versuch > 1:
+                # Kurze Pause statt direkt hintereinander: Ein kurzer Aussetzer von HA (z. B.
+                # Neustart der Integration) hätte sonst alle drei Versuche sofort verbraucht.
+                await self._schlafen(TURN_OFF_PAUSE)
             try:
-                await self._ha.dienst("switch", "turn_off", {"entity_id": entity})
+                async with asyncio.timeout(TURN_OFF_TIMEOUT):
+                    await self._ha.dienst("switch", "turn_off", {"entity_id": entity})
                 return
-            except HaFehler as e:
+            except (HaFehler, TimeoutError) as e:
                 logger.error(
                     "Türimpuls beenden (Versuch %s/%s) fehlgeschlagen: %s",
                     versuch,
                     TURN_OFF_VERSUCHE,
-                    e,
+                    str(e) or "Zeitüberschreitung",
                 )
         self._ereignisse.melde("aktor_fehler", entity=entity, grund="tuer_impuls_nicht_beendet")
 

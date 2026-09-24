@@ -52,6 +52,29 @@ def test_fehlende_oder_kaputte_datei(tmp_path: Path) -> None:
         lade_zuordnung(p)
 
 
+@pytest.mark.parametrize(
+    ("kaputt", "schluessel"),
+    [
+        ('tuer = "lock.eingang"', "tuer"),
+        ('heizung = "climate.halle"', "heizung"),
+        ("tastenfeld = 3", "tastenfeld"),
+        ('handbetrieb = "input_boolean.x"', "handbetrieb"),
+        ('felder = "light.feld_1"', "felder"),
+        (f'[felder]\n"{F1}" = "light.feld_1"', f"felder.{F1}"),
+    ],
+)
+def test_falscher_tabellentyp_wird_konfigfehler(
+    tmp_path: Path, kaputt: str, schluessel: str
+) -> None:
+    """Ein Schlüssel, der eine Tabelle sein muss, aber ein einfacher Wert ist (z. B. `tuer =
+    "lock.eingang"` statt `[tuer]`), führt zu einem lesbaren KonfigFehler statt einem
+    AttributeError mit Traceback."""
+    p = tmp_path / "hall.toml"
+    p.write_text(f'master_pin_hash = "{MASTER_HASH}"\n{kaputt}\n', encoding="utf-8")
+    with pytest.raises(KonfigFehler, match=schluessel):
+        lade_zuordnung(p)
+
+
 def test_nicht_numerische_zeiten_werden_abgelehnt(tmp_path: Path) -> None:
     p = tmp_path / "hall.toml"
     p.write_text(

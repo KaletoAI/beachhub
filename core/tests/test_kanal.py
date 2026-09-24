@@ -195,18 +195,20 @@ def test_verteilen_gleichzeitig_kein_wettlauf(
 
 
 def test_verteilen_nur_portal_dokumente(db: Session, welt, portal: FakePortal, k) -> None:
-    # "hallenplan" ist ein echtes, fälliges Dokument (eigene LesestandVersion-Zeile + Datei),
-    # aber nicht in vertrag.PORTAL_DOKUMENTE – verteilen() muss es trotzdem draußen lassen.
+    # Jede Änderung von "belegung" markiert seit Task 13 automatisch auch "hallenplan" mit
+    # (lesestand.markiere_geaendert) – ein echtes, fälliges Dokument mit eigener
+    # LesestandVersion-Zeile und Datei, aber nicht in vertrag.PORTAL_DOKUMENTE. verteilen()
+    # muss es trotzdem draußen lassen.
     lesestand.markiere_geaendert(db, "belegung")
     db.commit()
+    # Vorbedingung: die Kopplung hat "hallenplan" wirklich mitmarkiert und verarbeite_geaenderte
+    # hat es wirklich veröffentlicht – sonst wäre die Prüfung unten aussagelos, sobald die
+    # Kopplung eines Tages entfiele (portal.dokumente enthielte dann ohnehin nur "belegung").
+    assert db.get(LesestandVersion, "hallenplan").geaendert is True
     lesestand.verarbeite_geaenderte(db)
-    beleg = lesestand.lade("belegung")
-    hallenplan = beleg.model_copy(update={"dokument": "hallenplan"})
-    (settings.data_dir / "lesestand" / "hallenplan.json").write_text(
-        hallenplan.model_dump_json(), encoding="utf-8"
-    )
-    db.add(LesestandVersion(dokument="hallenplan", version=hallenplan.version, geaendert=False))
-    db.commit()
+    hallenplan_zeile = db.get(LesestandVersion, "hallenplan")
+    assert hallenplan_zeile is not None and hallenplan_zeile.version > 0
+    assert lesestand.lade("hallenplan") is not None
     assert k.verteilen() == 1
     assert [d["dokument"] for d in portal.dokumente] == ["belegung"]
 

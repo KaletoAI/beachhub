@@ -5,8 +5,8 @@ import uuid
 from datetime import timedelta
 from typing import Any
 
+from beachhub_shared import hallenplan, signatur
 from beachhub_shared import lesestand as schema
-from beachhub_shared import signatur
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -207,6 +207,55 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
     )
 
 
+def baue_hallenplan(db: Session) -> hallenplan.HallenplanInhalt:
+    """Betriebsplan der Halle für 7 Tage: nur bestätigte Buchungen (mit PIN-Hash), Sperren nur
+    zur Information – sie schalten in der Halle nichts. Keine Personendaten."""
+    jetzt = clock.now(db)
+    bis = jetzt + timedelta(days=7)
+    gebucht = db.scalars(
+        select(Buchung)
+        .where(
+            Buchung.status == Buchung.BESTAETIGT,
+            Buchung.beginn < bis,
+            Buchung.ende > jetzt,
+            Buchung.pin_hash.is_not(None),
+        )
+        .order_by(Buchung.beginn)
+    ).all()
+    gesperrt = db.scalars(
+        select(Sperre).where(Sperre.beginn < bis, Sperre.ende > jetzt).order_by(Sperre.beginn)
+    ).all()
+    return hallenplan.HallenplanInhalt(
+        gueltig_ab=jetzt,
+        gueltig_bis=bis,
+        felder=[
+            hallenplan.PlanFeld(id=str(f.id), name=f.name, aktiv=f.aktiv)
+            for f in db.scalars(select(Feld).order_by(Feld.reihenfolge))
+        ],
+        buchungen=[
+            hallenplan.PlanBuchung(
+                buchung_id=str(b.id),
+                feld_id=str(b.feld_id),
+                beginn=b.beginn,
+                ende=b.ende,
+                # Der Filter oben (Buchung.pin_hash.is_not(None)) schließt None hier aus.
+                pin_hash=b.pin_hash,
+            )
+            for b in gebucht
+        ],
+        sperren=[
+            hallenplan.PlanSperre(
+                feld_id=str(s.feld_id) if s.feld_id else None, beginn=s.beginn, ende=s.ende
+            )
+            for s in gesperrt
+        ],
+        konfig=hallenplan.PlanKonfig(
+            **{k: konfiguration.hole(db, k) for k in konfiguration.HALLEN_KONFIG}
+        ),
+        pin=pin.parameter(),
+    )
+
+
 def _inhalt(db: Session, name: str) -> dict[str, Any]:
     if name == "belegung":
         return baue_belegung(db).model_dump(mode="json")
@@ -217,6 +266,8 @@ def _inhalt(db: Session, name: str) -> dict[str, Any]:
         if kunde is None:
             raise KeyError(name)
         return baue_konto(db, kunde).model_dump(mode="json")
+    if name == hallenplan.DOKUMENT:
+        return baue_hallenplan(db).model_dump(mode="json")
     raise KeyError(name)
 
 
@@ -261,6 +312,9 @@ def publiziere(db: Session, name: str) -> schema.Dokument:
 
 
 def markiere_geaendert(db: Session, *namen: str) -> None:
+    # Jede Änderung der Belegung (Buchung, Sperre, Feld) betrifft auch den Plan der Halle.
+    if "belegung" in namen and hallenplan.DOKUMENT not in namen:
+        namen = (*namen, hallenplan.DOKUMENT)
     for name in namen:
         zeile = db.get(LesestandVersion, name)
         if zeile is None:

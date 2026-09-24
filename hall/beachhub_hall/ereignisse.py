@@ -67,14 +67,17 @@ class Ereignisse:
                 for z in zeilen
             ]
 
-    def bestaetige_bis(self, seq: int) -> None:
+    def bestaetige_bis(self, seq: int) -> int:
+        """Markiert alle unbestätigten Ereignisse bis `seq` als zugestellt und gibt zurück, wie
+        viele es waren (0: die Bestätigung brachte nichts Neues)."""
         with self._sitzungen() as db:
-            db.execute(
+            ergebnis = db.execute(
                 update(EreignisZeile)
                 .where(EreignisZeile.seq <= seq, EreignisZeile.gesendet_am.is_(None))
                 .values(gesendet_am=self._uhr.jetzt())
             )
             db.commit()
+            return int(ergebnis.rowcount)
 
     def offen(self) -> int:
         with self._sitzungen() as db:

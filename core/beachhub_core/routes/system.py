@@ -1,3 +1,6 @@
+from datetime import timedelta
+
+from beachhub_shared.hallenplan import DOKUMENT, EREIGNISTYPEN, HallenStatus
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
@@ -6,9 +9,18 @@ from sqlalchemy.orm import Session
 from beachhub_core import auth, clock
 from beachhub_core.config import settings
 from beachhub_core.database import get_db
-from beachhub_core.models import AdminUser, Audit, Buchung, LesestandVersion, Storno
+from beachhub_core.models import (
+    AdminUser,
+    Audit,
+    Buchung,
+    Ereignis,
+    Feld,
+    HallenStatusZeile,
+    LesestandVersion,
+    Storno,
+)
 from beachhub_core.routes._form import fehlertext, t_datum
-from beachhub_core.services import lesestand
+from beachhub_core.services import halle, lesestand
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
@@ -128,3 +140,40 @@ def stornos(
         .order_by(Buchung.beginn)
     ).all()
     return render(request, "system/stornos.html", admin=admin, stornos=kostenpflichtig)
+
+
+@router.get("/halle", response_class=HTMLResponse)
+def halle_seite(
+    request: Request,
+    typ: str = "",
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    zeile = db.get(HallenStatusZeile, 1)
+    status = HallenStatus.model_validate(zeile.daten_json) if zeile and zeile.daten_json else None
+    plan = db.get(LesestandVersion, DOKUMENT)
+    stmt = (
+        select(Ereignis)
+        .where(Ereignis.quelle == "halle")
+        .order_by(Ereignis.zeitpunkt.desc(), Ereignis.halle_seq.desc())
+        .limit(100)
+    )
+    if typ:
+        stmt = stmt.where(Ereignis.typ == typ)
+    # Nie das rohe `daten_json` an das Template geben (freies Feld der Halle): gefiltert und
+    # gekürzt über halle.anzeige_daten (Allowlist EREIGNIS_FELDER).
+    ereignisse = [(e, halle.anzeige_daten(e)) for e in db.scalars(stmt).all()]
+    return render(
+        request,
+        "system/halle.html",
+        admin=admin,
+        status=status,
+        empfangen_am=zeile.empfangen_am if zeile else None,
+        ohne_kontakt=zeile is not None
+        and clock.now(db) - zeile.empfangen_am > timedelta(minutes=60),
+        aktuelle_version=plan.version if plan else 0,
+        ereignisse=ereignisse,
+        felder={str(f.id): f.name for f in db.scalars(select(Feld))},
+        typ=typ,
+        typen=sorted(EREIGNISTYPEN),
+    )

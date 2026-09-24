@@ -159,12 +159,15 @@ PRIV, _ = erzeuge_schluesselpaar()
 
 
 def speichere_plan(
-    sitzungen: sessionmaker[Session], *buchungen: PlanBuchung, sperren: Iterable[PlanSperre] = ()
+    sitzungen: sessionmaker[Session],
+    *buchungen: PlanBuchung,
+    sperren: Iterable[PlanSperre] = (),
+    konfig: PlanKonfig = KONFIG,
 ) -> None:
     """Baut, signiert und speichert einen Plan wie `plan.speichere()` ihn erwartet. Gemeinsame
     Grundlage der `Aufbau`-Testhelfer, damit die Boilerplate nicht in jedem von ihnen erneut
     steht."""
-    inhalt = baue_plan(buchungen, sperren=sperren)
+    inhalt = baue_plan(buchungen, sperren=sperren, konfig=konfig)
     with sitzungen() as db:
         plan.speichere(db, signiertes_dokument(inhalt, plan.version(db) + 1, PRIV), inhalt, t(0))
 

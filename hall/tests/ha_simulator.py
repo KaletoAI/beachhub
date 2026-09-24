@@ -4,6 +4,12 @@ REST: GET /api/states, GET/POST /api/states/<entity_id>, POST /api/services/<dom
 WebSocket /api/websocket nach dem echten Protokoll: auth_required → auth → auth_ok,
 subscribe_events → result, danach Nachrichten vom Typ "event".
 
+Rechte wie im echten HA: Ist `admin = False` (Token eines Benutzers ohne Administratorrechte),
+lehnt der Simulator `subscribe_events` für jeden Ereignistyp außerhalb von HAs
+`SUBSCRIBE_ALLOWLIST` (z. B. den eigenen Tastenfeld-Typ `esphome.beachhub_pin`) mit
+`unauthorized` ab und `POST /api/states/<entity_id>` mit HTTP 401 – beides braucht in HA einen
+Administrator.
+
 Lokal starten (z. B. für einen Probelauf ohne echtes HA): `cd hall && python -m tests.ha_simulator`
 """
 
@@ -13,6 +19,12 @@ from typing import Any
 
 from aiohttp import WSMsgType, web
 from aiohttp.test_utils import TestServer
+
+# Auszug aus HAs SUBSCRIBE_ALLOWLIST (homeassistant/components/websocket_api/commands.py): nur
+# diese Typen darf ein Benutzer ohne Administratorrechte abonnieren.
+ABOS_OHNE_ADMIN = frozenset(
+    {"state_changed", "component_loaded", "core_config_updated", "themes_updated"}
+)
 
 
 def _jetzt() -> str:
@@ -35,6 +47,9 @@ class HaSimulator:
         # für Tests, dass der Fehler einer Entität die übrigen nicht blockiert.
         self.fehler_bei_zustand: set[str] = set()
         self.verbindungen_gesamt = 0
+        # Token gehört einem Administrator (Vorgabe) – False bildet einen HA-Benutzer ohne
+        # Administratorrechte nach (siehe Moduldocstring).
+        self.admin = True
         self._abos: dict[web.WebSocketResponse, dict[int, str | None]] = {}
         self._server: TestServer | None = None
         self.url = ""
@@ -106,6 +121,8 @@ class HaSimulator:
         return web.json_response(z)
 
     async def _schreiben(self, request: web.Request) -> web.Response:
+        if not self.admin:
+            return web.json_response({"message": "Unauthorized"}, status=401)
         entity_id = request.match_info["entity_id"]
         daten = await request.json()
         self.geschrieben[entity_id] = daten
@@ -198,6 +215,16 @@ class HaSimulator:
                     continue
                 befehl = json.loads(msg.data)
                 if befehl.get("type") == "subscribe_events":
+                    if not self.admin and befehl.get("event_type") not in ABOS_OHNE_ADMIN:
+                        await ws.send_json(
+                            {
+                                "id": befehl["id"],
+                                "type": "result",
+                                "success": False,
+                                "error": {"code": "unauthorized", "message": "Unauthorized"},
+                            }
+                        )
+                        continue
                     self._abos[ws][befehl["id"]] = befehl.get("event_type")
                     await ws.send_json(
                         {"id": befehl["id"], "type": "result", "success": True, "result": None}

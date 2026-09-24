@@ -5,7 +5,7 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 
-from argon2.low_level import Type, hash_secret_raw
+from beachhub_shared.hallenplan import PinParameter, pin_hash
 from beachhub_shared.zeit import lokales_datum
 from cryptography.fernet import Fernet
 from sqlalchemy import or_, select
@@ -23,19 +23,26 @@ def erzeuge(laenge: int) -> str:
     return "".join(secrets.choice("0123456789") for _ in range(laenge))
 
 
-def hash(klar: str) -> str:  # noqa: A001 – bewusst so benannt, wird als pin.hash() gelesen
-    """Argon2id mit hallenweitem Salt: deterministisch, damit die Halle lokal prüfen kann."""
-    salt = hashlib.sha256(b"beachhub-pin-salt" + _schluessel()).digest()[:16]
-    raw = hash_secret_raw(
-        klar.encode(),
-        salt,
+def salt() -> bytes:
+    """Hallenweites Salt, abgeleitet aus dem PIN-Schlüssel. Es geht mit dem Plan an die Halle;
+    es erlaubt das Nachrechnen von Hashes, nicht das Entschlüsseln gespeicherter PINs."""
+    return hashlib.sha256(b"beachhub-pin-salt" + _schluessel()).digest()[:16]
+
+
+def parameter() -> PinParameter:
+    # Eine Änderung dieser Werte machte alle gespeicherten PIN-Hashes ungültig.
+    return PinParameter(
+        salt_b64=base64.b64encode(salt()).decode(),
         time_cost=2,
         memory_cost=65536,
         parallelism=1,
         hash_len=32,
-        type=Type.ID,
     )
-    return "argon2id$" + base64.b64encode(raw).decode()
+
+
+def hash(klar: str) -> str:  # noqa: A001 – bewusst so benannt, wird als pin.hash() gelesen
+    """Argon2id mit hallenweitem Salt: deterministisch, damit die Halle lokal prüfen kann."""
+    return pin_hash(klar, parameter())
 
 
 def _fernet() -> Fernet:

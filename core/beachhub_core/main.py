@@ -15,6 +15,7 @@ from beachhub_core.routes import (
     admin_auth,
     belegung,
     dashboard,
+    hall,
     kunden,
     rechnungen,
     stammdaten,
@@ -95,6 +96,7 @@ app.include_router(kunden.router, prefix="/admin", dependencies=csrf)
 app.include_router(belegung.router, prefix="/admin", dependencies=csrf)
 app.include_router(rechnungen.router, prefix="/admin", dependencies=csrf)
 app.include_router(system.router, prefix="/admin", dependencies=csrf)
+app.include_router(hall.router)  # eigener Token statt Admin-Session/CSRF
 
 
 @app.exception_handler(HTTPException)

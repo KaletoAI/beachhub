@@ -24,7 +24,17 @@ from beachhub_shared.hallenplan import PlanBuchung
 from sqlalchemy.orm import Session, sessionmaker
 
 from tests.ha_simulator import HaSimulator
-from tests.hilfen import F1, F2, MASTER_HASH, MASTER_PIN, FakeSchlaf, buchung, speichere_plan, t
+from tests.hilfen import (
+    F1,
+    F2,
+    KONFIG,
+    MASTER_HASH,
+    MASTER_PIN,
+    FakeSchlaf,
+    buchung,
+    speichere_plan,
+    t,
+)
 
 PIN = "482913"
 ZUORDNUNG = Zuordnung(
@@ -245,6 +255,50 @@ async def test_tuer_offen_ausserhalb(a: Aufbau) -> None:
     assert len(a.ereignis("tuer_offen_ausserhalb")) == 1  # Master-PIN vor 3 min: kein Alarm
 
 
+async def test_tuer_beim_verlassen_nach_dem_ende_kein_alarm(a: Aufbau) -> None:
+    """Spieler verlassen die Halle nach dem Ende ihrer Buchung: Innerhalb von ende +
+    licht_nachlauf ist die Tür erwartet (hier Nachlauf 15 min, Verlassen 10 min nach Ende)."""
+    speichere_plan(
+        a.sitzungen,
+        buchung(F1, t(19), t(21)),
+        konfig=KONFIG.model_copy(update={"licht_nachlauf_minuten": 15}),
+    )
+    a.uhr.stelle(t(21, 10))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert a.ereignis("tuer_offen_ausserhalb") == []
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))
+    a.uhr.stelle(t(21, 15))  # ende + nachlauf erreicht, niemand mehr da
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
+async def test_tuer_bei_praesenz_kein_alarm(a: Aufbau) -> None:
+    """Meldet ein Feld gerade Präsenz, ist jemand in der Halle – dann ist ein Öffnen der Tür
+    (z. B. beim späten Verlassen) kein Alarm."""
+    a.plan(buchung(F1, t(19), t(21)))
+    a.uhr.stelle(t(20))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "on"))
+    a.uhr.stelle(t(21, 30))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert a.ereignis("tuer_offen_ausserhalb") == []
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "off"))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.praesenz_feld_1", "off"))
+    a.uhr.vor(minutes=1)
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
+async def test_tuer_praesenz_eines_entfernten_felds_unterdrueckt_keinen_alarm(a: Aufbau) -> None:
+    """Ein gespeicherter Präsenz-Eintrag eines nicht (mehr) konfigurierten Felds darf den
+    Tür-Alarm nicht dauerhaft abschalten."""
+    with a.sitzungen() as db:
+        schreibe(db, "praesenz", {"feld_alt": {"seit": t(18).isoformat()}})
+        db.commit()
+    a.uhr.stelle(t(23))
+    await a.zuhoerer.verarbeite(zustandswechsel("binary_sensor.tuer", "on"))
+    assert len(a.ereignis("tuer_offen_ausserhalb")) == 1
+
+
 async def test_tuer_offen_ausserhalb_nach_kulanzgrenze_erneut(a: Aufbau) -> None:
     a.plan(buchung(F1, t(19), t(21)))
     a.uhr.stelle(t(23))
@@ -343,6 +397,31 @@ async def test_wiederverbindung_ueber_websocket(a: Aufbau) -> None:
         aufgabe.cancel()
         with pytest.raises(asyncio.CancelledError):
             await aufgabe
+
+
+async def test_ohne_administratorrechte_laeuft_state_changed_weiter(
+    a: Aufbau, caplog: pytest.LogCaptureFixture
+) -> None:
+    """HA lehnt für einen Benutzer ohne Administratorrechte das Abo des eigenen
+    Tastenfeld-Ereignistyps ab. Das ist kein HA-Ausfall: klare Fehlermeldung im Log, aber
+    state_changed (Handbetrieb, Präsenz, Tür) läuft weiter, kein Reconnect-Kreislauf und kein
+    `ha_nicht_erreichbar`."""
+    caplog.set_level(logging.ERROR)
+    a.sim.admin = False
+    aufgabe = asyncio.create_task(a.zuhoerer.laufen())
+    try:
+        await warte_bis(lambda: a.sim.abonnements() == 1 and a.lage.ha_verbunden)
+        await a.sim.setze("input_boolean.beachhub_handbetrieb", "on")
+        await warte_bis(lambda: len(a.ereignis("handbetrieb_an")) == 1)
+        a.uhr.vor(minutes=5)
+        a.zuhoerer.pruefe_ausfall()
+        assert a.ereignis("ha_nicht_erreichbar") == []
+        assert a.sim.verbindungen_gesamt == 1  # kein Neuverbinden wegen des abgelehnten Abos
+    finally:
+        aufgabe.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await aufgabe
+    assert "Administratorrechte" in caplog.text
 
 
 async def test_laufen_uebersteht_ausnahme_in_verarbeite(

@@ -14,3 +14,7 @@ requires = ["setuptools==75.6.0"]
 build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["beachhub_shared*"]
+[tool.pytest.ini_options]
+# Nur, um die PytestDeprecationWarning von pytest-asyncio zu vermeiden (in derselben Umgebung
+# für hall/ installiert); die Tests hier nutzen selbst keine asyncio-Fixtures.
+asyncio_default_fixture_loop_scope = "function"

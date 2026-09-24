@@ -58,7 +58,8 @@ die unterschiedlichen Ports und die je Kanal eigenen Token (`KANAL_TOKEN`/`PORTA
 **Rotation:**
 
 - **Client-Zertifikate** (`portal-kanal.crt`) laufen nach einem Jahr ab. Der obige Befehl erneut
-  ausgeführt stellt ein neues Zertifikat aus den vorhandenen Schlüsseln aus – die Schlüsseldatei
+  ausgeführt stellt ein neues Zertifikat aus den vorhandenen Schlüsseln aus (ohne `--name` auch ein
+  neues `halle.crt`, das dann auf den Hallenrechner muss; mit `--name portal-kanal` nur dieses) – die Schlüsseldatei
   (`portal-kanal.key`) bleibt dabei unverändert bestehen, nur `portal-kanal.crt` wird ersetzt.
   Danach `ca.crt` nicht erneut kopieren (unverändert). Der Kanal-Client im Hauptsystem lädt
   Zertifikat und Schlüssel nur beim Start (`kanal.baue_client()`) und bemerkt eine ausgetauschte

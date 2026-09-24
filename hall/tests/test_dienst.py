@@ -146,24 +146,28 @@ async def test_dauerhaft_setzt_backoff_nach_langem_lauf_zurueck() -> None:
 def test_master_pin_befehl(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    eingaben = iter(["4711", "4711"])
+    eingaben = iter(["47114711", "47114711"])
     monkeypatch.setattr(cli, "getpass", lambda _prompt: next(eingaben))
     cli.main(["master-pin"])
     ausgabe = capsys.readouterr().out.strip()
-    assert PasswordHasher().verify(ausgabe, "4711")
-    assert ist_master("4711", ausgabe)  # derselbe Hash, den hall.toml als master_pin_hash bekommt
-    eingaben = iter(["4711", "4712"])
+    assert PasswordHasher().verify(ausgabe, "47114711")
+    # derselbe Hash, den hall.toml als master_pin_hash bekommt
+    assert ist_master("47114711", ausgabe)
+    eingaben = iter(["47114711", "47114712"])
     with pytest.raises(SystemExit):
         cli.main(["master-pin"])
 
 
-@pytest.mark.parametrize("ungueltig", ["12a4", "123", "４７１１"])
+@pytest.mark.parametrize(
+    "ungueltig", ["12a4", "123", "４７１１", "4711", "1234567", "1234567890123"]
+)
 def test_master_pin_befehl_lehnt_ungueltige_formate_ab(
     monkeypatch: pytest.MonkeyPatch, ungueltig: str
 ) -> None:
-    # Dieselbe Prüfung wie am Tastenfeld (pin.ZIFFERN, jetzt wiederverwendet statt einer eigenen
-    # \d-Regel): nur ASCII-Ziffern, 4–12 Stellen – sonst erzeugt die CLI einen Hash für eine PIN,
-    # die argon2 später anders liest als das Hauptsystem (Ruling Task 11 Fix-Runde 1).
+    # Nur ASCII-Ziffern (keine \d-Regel) – sonst erzeugt die CLI einen Hash für eine PIN, die
+    # argon2 später anders liest als das Hauptsystem (Ruling Task 11 Fix-Runde 1). Der Master-PIN
+    # öffnet immer, auch ohne Buchung, daher mindestens 8 statt 4 Stellen (höchstens 12 wie am
+    # Tastenfeld).
     eingaben = iter([ungueltig, ungueltig])
     monkeypatch.setattr(cli, "getpass", lambda _prompt: next(eingaben))
     with pytest.raises(SystemExit):

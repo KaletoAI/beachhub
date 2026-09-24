@@ -21,7 +21,7 @@ administriert. Das Admin-UI ist ausschließlich über WireGuard erreichbar, niem
 - **Docker** und das Compose-Plugin (`docker compose version` muss funktionieren).
 - **WireGuard** (`apt install wireguard`) – Konfiguration siehe `core/deploy/wireguard-beispiel.md`.
 - In der Hetzner-Cloud-Firewall darf nach außen nur `51820/udp` (WireGuard) offen sein. Kein Port
-  des Hauptsystems (weder `8000` noch `8443`) wird öffentlich freigegeben.
+  des Hauptsystems (weder `8000`, `8443` noch `8444`) wird öffentlich freigegeben.
 - **Für unbeaufsichtigte Backups** (Abschnitt 6) einmalig vorbereiten:
   - Den öffentlichen GPG-Schlüssel des Betreibers auf die VM übertragen und importieren:
     `gpg --import betreiber.pub`. Das Backup-Skript verschlüsselt mit `--trust-model always`, d. h.
@@ -72,12 +72,20 @@ docker compose up -d db
 docker compose run --rm app alembic upgrade head
 docker compose run --rm app beachhub-core keygen
 docker compose run --rm app beachhub-core create-admin --name <name>
+docker compose run --rm app beachhub-core zertifikate --ziel /app/data/zertifikate
 ```
 
 `keygen` gibt den öffentlichen Signaturschlüssel (Hex) aus – diesen Wert notieren/sichern, er wird
 gebraucht, um die Signatur des Lesestands später extern zu prüfen (siehe N-2 in der Spezifikation).
 `create-admin` fragt interaktiv nach einem Passwort (mindestens 12 Zeichen) und gibt danach das
 TOTP-Secret sowie eine `otpauth://`-URI aus, die der Betreiber mit einer Authenticator-App scannt.
+`zertifikate` legt die interne CA (`ca.crt`/`ca.key`) sowie Client-Zertifikate für Portal und Halle
+an (Details: `docs/betrieb/portal.md`, Abschnitt 2). **Dieser Schritt muss vor dem ersten
+`docker compose up -d` erfolgen**: `core/docker-compose.yml` bindet `ca.crt` fest in den
+Caddy-Container ein (`/etc/caddy/beachhub-ca.crt`, Vertrauensanker der Hallenschnittstelle `:8444`,
+siehe Abschnitt 5b). Fehlt die Datei beim Start, legt Docker an ihrer Stelle ein leeres
+Verzeichnis an, und Caddy startet überhaupt nicht – auch das Admin-UI auf `:8443` wäre dann nicht
+erreichbar (siehe Abschnitt 8, „Caddy startet nicht: `ca.crt` ist ein Verzeichnis“).
 
 Anwendung (inklusive Caddy als TLS-Terminierung) starten:
 
@@ -165,6 +173,66 @@ die interne `ca.crt` setzen.
 - Bis zur Entscheidung über den Zahlungsanbieter (Ⓞ-13) gibt es nur die Testzahlung. Mit gesetzter
   `PORTAL_URL` und `APP_ENV=production` startet das Hauptsystem deshalb bewusst nicht.
 
+## 5b. Hallendienst anbinden
+
+Der Hallendienst in der Halle ruft das Hauptsystem über WireGuard auf Port **8444** auf; Caddy
+lässt dort nur `/hall/*` durch und nur mit einem Client-Zertifikat der internen CA. Zusätzlich
+prüft das Hauptsystem den Token `HALL_TOKEN`. Die Site hört auf den internen Hostnamen
+`kern.beachhub.wg` statt auf die nackte IP `10.8.0.1`: Für eine IP-Adresse schicken TLS-Clients
+kein SNI (RFC 6066), und ohne SNI kann Caddy die `client_auth`-Richtlinie der Site keiner
+Verbindung zuordnen – einen Aufruf über die nackte IP weist Caddy deshalb mit HTTP 421
+(„Misdirected Request“) ab, mit oder ohne Client-Zertifikat. Am Hostnamen greift die
+mTLS-Prüfung: Ohne oder mit falschem Client-Zertifikat scheitert dort schon der TLS-Handshake
+(siehe „Prüfen“ unten). Der Hallendienst löst `kern.beachhub.wg` deshalb über `extra_hosts` in
+`hall/docker-compose.yml` auf die WireGuard-Adresse des Hauptsystems auf (Details:
+`docs/betrieb/hallendienst.md`, Abschnitt 2). `core/deploy/Caddyfile` bindet beide Sites
+zusätzlich fest an `10.8.0.1` (`bind 10.8.0.1`), damit Caddy nicht auf allen Interfaces der VM
+lauscht.
+
+1. `HALL_TOKEN` in `core/.env` auf einen langen Zufallswert setzen und denselben Wert in
+   `hall/.env` eintragen. Leer bedeutet: Schnittstelle aus (404).
+2. Interne CA und Client-Zertifikate entstehen bereits bei der Ersteinrichtung (Abschnitt 2,
+   `beachhub-core zertifikate`). `halle.crt`/`halle.key` sowie Caddys eigene interne Root-CA
+   (`CORE_CA`, Export aus dem Volume `caddy_data`, **nicht** `ca.crt`) kommen auf den
+   Hallenrechner – vollständiger Ablauf inklusive der jährlichen Rotation von `halle.crt`:
+   `docs/betrieb/hallendienst.md`, Abschnitt 2.
+3. `docker compose up -d` – danach zeigt **System → Halle** den ersten Kontakt.
+
+**Prüfen** (von einem Rechner mit WireGuard-Verbindung und den Dateien aus Schritt 2 –
+`halle.crt`, `halle.key`, `caddy-root.crt`):
+
+```bash
+curl --resolve kern.beachhub.wg:8444:10.8.0.1 --cacert caddy-root.crt \
+  --cert halle.crt --key halle.key -H "Authorization: Bearer <HALL_TOKEN>" \
+  "https://kern.beachhub.wg:8444/hall/plan?ab=0"
+```
+
+Erwartet: HTTP 200 mit dem signierten Plan als JSON. Ohne `--cert`/`--key` schlägt schon der
+TLS-Handshake fehl („certificate required“) – das ist beabsichtigt.
+
+Ein Wechsel der internen CA (`ca.crt`/`ca.key` gemeinsam entfernt und `zertifikate` erneut
+ausgeführt – **nicht** jeder erneute Aufruf des Befehls: ohne entfernte CA-Dateien bleiben CA und
+alle Schlüssel bestehen, er stellt aber jedes Mal alle genannten Client-Zertifikate neu aus, ohne
+`--name` also `portal-kanal.crt` und `halle.crt`; für die jährliche Rotation der Halle allein
+deshalb `--name halle`) erfordert einen Neustart
+bzw. mindestens ein Reload der Caddy-Site `:8444` (`docker compose restart caddy`), damit der neue
+`trust_pool` geladen wird, sowie neue `halle.crt`/`halle.key` auf dem Hallenrechner – Details:
+`docs/betrieb/hallendienst.md`, Abschnitt 2 („Rotation“).
+
+**Backup:** Caddys eigene interne Root-CA (Docker-Volume `caddy_data`, Quelle für
+`caddy-root.crt`) ist **nicht** Teil des Backups aus Abschnitt 6 (das sichert nur `data/`, keine
+Docker-Volumes). Nach einer Wiederherstellung auf einer neuen VM legt Caddy beim ersten Start
+automatisch eine neue interne Root-CA an; `caddy-root.crt` muss dann erneut exportiert und auf den
+Hallenrechner kopiert werden (`docs/betrieb/hallendienst.md`, Abschnitt 2).
+
+Das Hauptsystem erzeugt den Plan neu, sobald sich eine Buchung, Sperre, ein Feld oder ein
+Hallenwert der Konfiguration ändert, und zusätzlich jede Nacht um 00:05. Meldet sich die Halle
+60 Minuten nicht, kommt eine Mail „Halle ohne Kontakt“, bei Rückkehr „Halle wieder verbunden“.
+Alarme der Halle (Fehlversuche am Tastenfeld, Geräte, Anwesenheit ohne Buchung, Tür) kommen als
+Mail an `EMAIL_FROM`; nachgelieferte Alarme nach einem Ausfall gesammelt in einer Mail.
+
+Einrichtung des Hallenrechners und von Home Assistant: `docs/betrieb/hallendienst.md`.
+
 ## 6. Backup und Wiederherstellung
 
 Das Skript `core/deploy/backup.sh` erstellt ein verschlüsseltes Backup aus Datenbank-Dump und dem
@@ -250,6 +318,12 @@ Cron-Eintrag für ein tägliches Backup um 03:15 Uhr:
    `docker compose up -d` mit `502 Bad Gateway` antworten, solange uvicorn im `app`-Container noch
    hochfährt – das ist normal und verschwindet nach wenigen Sekunden von selbst.
 
+**Hinweis für Portal und Halle:** Das Docker-Volume `caddy_data` (Caddys eigene interne Root-CA)
+ist **nicht** Teil dieses Backups – nach einer Wiederherstellung auf einer neuen VM (leeres
+`caddy_data`) legt Caddy beim ersten Start automatisch eine neue Root-CA an. Portal und
+Hallendienst vertrauen noch der alten und müssen die neue Root-CA erneut erhalten
+(`docs/betrieb/portal.md` bzw. `docs/betrieb/hallendienst.md`, jeweils Abschnitt 2).
+
 **Vor Saisonstart** sollte ein vollständiger Restore-Testlauf gegen eine separate Testdatenbank
 durchgeführt werden, um sicherzustellen, dass Backup und Wiederherstellung tatsächlich
 funktionieren (siehe Abnahmekriterium N-10 der Spezifikation).
@@ -274,8 +348,11 @@ Die Compose-Services `db`, `app` und `caddy` sind mit `restart: unless-stopped` 
 starten nach einem VM-Reboot oder einem Absturz automatisch neu, sobald der Docker-Daemon läuft.
 
 **Startreihenfolge nach einem Reboot**: Caddy lauscht ausschließlich auf der WireGuard-Adresse
-(`10.8.0.1:8443`, `network_mode: host`). Startet Docker vor WireGuard, versucht Caddy auf eine zu
-diesem Zeitpunkt noch nicht existierende Adresse zu binden und schlägt fehl. Damit
+(`10.8.0.1:8443` und `10.8.0.1:8444`, je mit `bind 10.8.0.1` in `core/deploy/Caddyfile`, zusammen
+mit `network_mode: host`; ohne dieses `bind` würde Caddy auf allen Interfaces lauschen, die
+Adresse in der Site dient sonst nur dem Routing/der Zertifikatsauswahl, nicht der Bindung).
+Startet Docker vor WireGuard, versucht Caddy auf eine zu diesem Zeitpunkt noch nicht existierende
+Adresse zu binden und schlägt fehl. Damit
 `wg-quick@wg0` vor Docker aktiv ist, zusätzlich zu `systemctl enable wg-quick@wg0`
 (siehe `core/deploy/wireguard-beispiel.md`) eine systemd-Drop-in-Datei für den Docker-Dienst
 anlegen:
@@ -313,3 +390,15 @@ sudo systemctl daemon-reload
   systemd-Abhängigkeit aus diesem Abschnitt fehlt oder `wg-quick@wg0` selbst nicht hochkam):
   `systemctl status wg-quick@wg0` prüfen und bei Bedarf starten (`systemctl start wg-quick@wg0`),
   danach `docker compose restart caddy`.
+- **Caddy startet nicht: `ca.crt` ist ein Verzeichnis** (`docker compose logs caddy` zeigt einen
+  Fehler beim Laden von `/etc/caddy/beachhub-ca.crt`, z. B. „is a directory“): `beachhub-core
+  zertifikate` wurde vor dem allerersten `docker compose up -d` nicht ausgeführt (Abschnitt 2);
+  Docker hat beim Start selbst ein leeres Verzeichnis an dieser Stelle angelegt. Abhilfe:
+
+  ```bash
+  docker compose down
+  rmdir data/zertifikate/ca.crt   # nur falls Docker dort ein Verzeichnis angelegt hat
+  docker compose up -d db
+  docker compose run --rm app beachhub-core zertifikate --ziel /app/data/zertifikate
+  docker compose up -d
+  ```

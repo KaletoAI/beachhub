@@ -78,7 +78,11 @@ ab.
 **Ereignis** (`HallenEreignis`): `{seq: int, typ: str, zeitpunkt: datetime, feld_id?: UUID,
 buchung_id?: UUID, daten: dict}`. Das Hauptsystem speichert jedes Ereignis in `ereignis`
 (`quelle = "halle"`, unique über `(halle_dienst_id, halle_seq)`). Ein Duplikat überspringt es stillschweigend. `halle_dienst_id` ist eine UUID, die der Hallendienst beim Anlegen seiner Datenbank einmal erzeugt und in jeder Ereignislieferung mitschickt; wird die SQLite-Datei neu angelegt (Hardwaretausch, Neuinstallation), beginnt `seq` wieder bei 1, ohne dass neue Ereignisse als Duplikate verworfen werden.
-`bestaetigt_bis` ist die höchste `seq`, bis zu der alle Ereignisse gespeichert sind. Bei diesen
+`bestaetigt_bis` ist die höchste `seq`, bis zu der alle Ereignisse gespeichert sind. Weil die
+Halle immer ab ihrer niedrigsten unbestätigten `seq` liefert, zieht das Hauptsystem seine Marke
+vorher auf „kleinste gelieferte `seq` − 1“ nach (nur anheben) – sonst bliebe sie nach einer
+Wiederherstellung aus einem älteren Backup für immer stehen. Bestätigt das Hauptsystem von einer
+Lieferung nichts, wartet der Melder mit Backoff, statt sofort erneut zu liefern. Bei diesen
 Typen bekommt der Betreiber eine Alarm-Mail (A-MAIL-2): `tastenfeld_fehlversuche`,
 `praesenz_ohne_buchung`, `aktor_fehler`, `ha_nicht_erreichbar`, `plan_verworfen`,
 `tuer_offen_ausserhalb`. Stammt ein alarmierendes Ereignis aus der Nachlieferung nach einem
@@ -87,7 +91,11 @@ Ausfall (älter als 6 h), fasst das Hauptsystem die Alarme einer Lieferung in ei
 **Status** (`HallenStatus`): `{planversion, letzter_abruf, ha_erreichbar, handbetrieb,
 felder: [{feld_id, licht_ist, praesenz}], heizung: {soll, ist?}, tuer: {verriegelt?, offen?},
 warteschlange: int, version_dienst}`. Das Hauptsystem speichert ihn in `hallen_status` (eine Zeile,
-JSONB und `empfangen_am`). `plan_neu = (planversion < aktuelle Version von hallenplan)`.
+JSONB und `empfangen_am`). `plan_neu = (planversion ≠ aktuelle Version von hallenplan)`.
+Fordert die Halle mit `ab` eine höhere Version an, als das Hauptsystem gespeichert hat (nach einer
+Wiederherstellung aus einem Backup), veröffentlicht `GET /hall/plan` den Plan neu – mit
+`max(alt + 1, Unixzeit in ms)` liegt die neue Version über `ab`, statt dass die Halle den alten
+Plan als `version_alt` verwirft.
 
 **Alarm „Halle ohne Kontakt“:** Ein APScheduler-Job prüft alle 5 min. Liegt `empfangen_am` mehr als
 60 min zurück, geht einmal eine Mail raus (Marker in `app_setting`). Beim nächsten Kontakt folgt
@@ -171,7 +179,7 @@ entity = "input_boolean.beachhub_handbetrieb"
 Ein Feld aus dem Plan ohne Eintrag in `hall.toml` wird nicht geschaltet. Beim ersten Plan meldet
 der Dienst das einmal als `aktor_fehler` mit `grund = "feld_nicht_zugeordnet"`. Ein
 Master-PIN-Hash ist Pflicht, sonst startet der Dienst nicht. `beachhub-hall master-pin` fragt die
-PIN ab und gibt den Hash aus.
+PIN ab (8 bis 12 Ziffern – sie öffnet immer, auch ohne Buchung) und gibt den Hash aus.
 
 ## 4. Hallendienst: Datenmodell (SQLite, WAL)
 
@@ -225,6 +233,10 @@ Entitäten) und den Ereignistyp des Tastenfelds. Bei Verbindungsverlust verbinde
 Backoff (1 s bis 60 s) neu. Sind 2 min ohne Verbindung vergangen, meldet er einmal
 `ha_nicht_erreichbar`. Nach der Wiederverbindung liest er alle Zustände neu ein und stößt die
 Steuerung an.
+Lehnt HA das Abo des Tastenfeld-Ereignistyps wegen fehlender Rechte ab (Token ohne
+Administratorrechte), ist das kein Ausfall: Der Dienst loggt einen Fehler („HA-Token braucht
+Administratorrechte“) und arbeitet mit `state_changed` weiter; ein eigenes Ereignis dafür gibt es
+nicht.
 
 **PIN-Prüfung** (auf das Tastenfeld-Ereignis):
 
@@ -247,8 +259,11 @@ Aufgaben weiterlaufen.
 
 **Tür öffnen.** Bei `lock.*` ruft der Dienst `lock.unlock` auf (die Wiederverriegelung übernimmt das
 Schloss bzw. eine HA-Automation). Bei `switch.*` schaltet er ein und nach `impuls_sekunden` wieder
-aus. Meldet der Türkontakt „offen“, während keine Buchung ein Zutrittsfenster hat und kein
-Master-PIN in den letzten 5 min akzeptiert wurde, entsteht `tuer_offen_ausserhalb`.
+aus. Meldet der Türkontakt „offen“, entsteht `tuer_offen_ausserhalb` nur, wenn zugleich
+(1) keine Buchung ein Fenster `[beginn − zutritt_vorlauf, ende + licht_nachlauf)` hat – weiter als
+das Zutrittsfenster der PIN, weil die Spieler die Halle nach dem Ende verlassen –, (2) kein
+Master-PIN in den letzten 5 min akzeptiert wurde und (3) kein Feld gerade Präsenz meldet. Das
+Zutrittsfenster für die PIN-Prüfung bleibt `[beginn − zutritt_vorlauf, ende)`.
 
 **Präsenz.** Wechselt ein Präsenzsensor auf `on`, entsteht `praesenz_start` (mit `buchung_id`, wenn
 eine Buchung dieses Felds gerade im Intervall `[beginn, ende)` liegt). Beim Wechsel auf `off`
@@ -287,9 +302,17 @@ ersten Sekunde aus dem gespeicherten Plan, noch bevor Hauptsystem oder HA erreic
 
 Die Dokumentation `docs/betrieb/hallendienst.md` beschreibt:
 
-- einen Long-Lived Access Token für einen eigenen HA-Benutzer „beachhub“ (kein Administrator
-  nötig, sofern die Dienste freigegeben sind),
+- einen Long-Lived Access Token für einen eigenen HA-Benutzer „beachhub“ **mit
+  Administratorrechten**: HA erlaubt Nicht-Administratoren per WebSocket nur Ereignistypen aus
+  seiner `SUBSCRIBE_ALLOWLIST` (der eigene Tastenfeld-Typ gehört nicht dazu) und
+  `POST /api/states/<entity_id>` (Status-Sensoren) gar nicht; der Token ist deshalb sicher zu
+  verwahren,
 - den Helfer `input_boolean.beachhub_handbetrieb`,
+- bei `lock.*` die Wiederverriegelung als Pflicht (Auto-Lock des Schlosses oder Beispiel-Automation
+  „`unlocked` seit 10 s → `lock.lock`“) samt Prüfpunkt in der Checkliste vor der Inbetriebnahme,
+- das Entprellen der Präsenzsensoren (`delay_off`),
+- dass `hall.sqlite` nie aus einer Sicherung zurückgespielt, sondern gelöscht wird (sonst gleiche
+  Dienst-ID mit altem `seq`-Stand, neue Ereignisse würden als Duplikate verworfen),
 - ein Beispiel-Dashboard mit den `beachhub`-Sensoren und dem Handbetrieb-Schalter,
 - die Rückfall-Automation aus Hauptspec § 8.2 (Licht aus außerhalb der Betriebszeit, falls der
   Dienst ausfällt),

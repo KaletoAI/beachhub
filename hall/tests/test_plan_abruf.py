@@ -102,6 +102,13 @@ async def test_plan_verworfen_wird_nur_bei_aenderung_erneut_gemeldet(a: Aufbau) 
     assert len(verworfen) == 1
     assert verworfen[0].daten == {"grund": "version_alt", "version": 1}
 
+    # Neue, aber weiterhin zu alte Version (Hauptsystem mit nachgehender Uhr) → kein weiterer
+    # Alarm, sonst Ping-Pong über Melder und plan_neu.
+    a.core.veroeffentliche(baue_plan([]), version=0)
+    assert await a.abruf.einmal() is False
+    verworfen = [e for e in a.ereignisse.unbestaetigt() if e.typ == "plan_verworfen"]
+    assert len(verworfen) == 1
+
     # Anderer Grund (falsche Signatur), ebenfalls veraltete Version → neues Ereignis.
     fremd, _ = erzeuge_schluesselpaar()
     a.core.veroeffentliche(baue_plan([]), version=1, privat=fremd)

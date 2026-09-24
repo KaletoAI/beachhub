@@ -10,7 +10,9 @@ from beachhub_core.database import SessionLocal
 from beachhub_core.models import AppSetting, Rechnung
 from beachhub_core.services import (
     benachrichtigung,
+    halle,
     konfiguration,
+    lesestand,
     online_buchung,
     rechnung_pdf,
     rechnungen,
@@ -93,8 +95,6 @@ def _job_monatslauf() -> None:
 
 
 def _job_lesestand() -> None:
-    from beachhub_core.services import lesestand  # Task 19
-
     with SessionLocal() as db:
         try:
             lesestand.verarbeite_geaenderte(db)
@@ -110,6 +110,30 @@ def _job_verfall() -> None:
             logger.exception("Verfall der Reservierungen fehlgeschlagen")
 
 
+def hallenplan_nachts(db: Session) -> None:
+    """Das 7-Tage-Fenster wandert jede Nacht einen Tag weiter. Ohne neue Version fehlte der
+    Halle nach und nach der letzte Tag, auch wenn sich keine Buchung ändert."""
+    lesestand.markiere_geaendert(db, "hallenplan")
+    db.commit()
+    lesestand.verarbeite_geaenderte(db)
+
+
+def _job_hallenplan() -> None:
+    with SessionLocal() as db:
+        try:
+            hallenplan_nachts(db)
+        except Exception:
+            logger.exception("Nächtlicher Hallenplan fehlgeschlagen")
+
+
+def _job_halle_kontakt() -> None:
+    with SessionLocal() as db:
+        try:
+            halle.pruefe_kontakt(db, clock.now(db))
+        except Exception:
+            logger.exception("Prüfung des Hallenkontakts fehlgeschlagen")
+
+
 def starte_scheduler() -> BackgroundScheduler:
     global _scheduler
     s = BackgroundScheduler(timezone="Europe/Berlin")
@@ -118,6 +142,15 @@ def starte_scheduler() -> BackgroundScheduler:
     )
     s.add_job(_job_lesestand, IntervalTrigger(minutes=5), id="lesestand", replace_existing=True)
     s.add_job(_job_verfall, IntervalTrigger(minutes=1), id="verfall", replace_existing=True)
+    s.add_job(
+        _job_halle_kontakt, IntervalTrigger(minutes=5), id="halle_kontakt", replace_existing=True
+    )
+    s.add_job(
+        _job_hallenplan,
+        CronTrigger(hour=0, minute=5),
+        id="hallenplan_nachts",
+        replace_existing=True,
+    )
     s.start()
     _scheduler = s
     return s

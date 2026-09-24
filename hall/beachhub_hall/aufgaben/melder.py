@@ -1,9 +1,9 @@
 """Melder: liefert Ereignisse und Status ans Hauptsystem (Hauptspec § 8.2).
 
 Neue Ereignisse wecken ihn sofort, sonst läuft er alle 60 s. Ist das Hauptsystem nicht
-erreichbar, wartet er nach der Uhr 1, 2, 4 … höchstens 60 s, bevor er es wieder versucht –
-neue Ereignisse wecken ihn in dieser Zeit nicht. Nichts geht verloren: Erst die Bestätigung
-des Hauptsystems markiert ein Ereignis als zugestellt.
+erreichbar oder bestätigt es von einer Lieferung nichts, wartet er nach der Uhr 1, 2, 4 …
+höchstens 60 s, bevor er es wieder versucht – neue Ereignisse wecken ihn in dieser Zeit nicht.
+Nichts geht verloren: Erst die Bestätigung des Hauptsystems markiert ein Ereignis als zugestellt.
 """
 
 import asyncio
@@ -100,23 +100,38 @@ class Melder:
         try:
             antwort = await self._core.sende_ereignisse(lieferung)
         except CoreNichtErreichbar as e:
-            self._backoff = min(MAX_BACKOFF, max(1.0, self._backoff * 2))
-            self._naechster_versuch = jetzt + timedelta(seconds=self._backoff)
+            self._verschiebe(jetzt)
             logger.warning(
                 "Hauptsystem nicht erreichbar (%s), nächster Versuch in %.0f s", e, self._backoff
             )
             return None
-        self._backoff = 0.0
-        self._naechster_versuch = None
-        self._ereignisse.bestaetige_bis(antwort.bestaetigt_bis)
+        neu_bestaetigt = self._ereignisse.bestaetige_bis(antwort.bestaetigt_bis)
         with self._sitzungen() as db:
             schreibe(db, "letzter_kontakt", jetzt.isoformat())
             db.commit()
         if antwort.plan_neu:
             self._plan_wecker.set()
-        if self._ereignisse.offen() > 0:
+        if lieferung.ereignisse and neu_bestaetigt == 0:
+            # Geliefert, aber nichts davon bestätigt – z. B. steht die Marke des Hauptsystems
+            # nach einer Wiederherstellung aus einem Backup hinter dem Stand der Halle. Sofort
+            # erneut zu liefern änderte nichts und liefe ohne Pause im Kreis (die Dauerschleife
+            # wartet auf `ereignisse.neu`); daher wie bei einem Fehler mit Backoff warten.
+            self._verschiebe(jetzt)
+            logger.warning(
+                "Hauptsystem bestätigt nur bis seq %s, nächster Versuch in %.0f s",
+                antwort.bestaetigt_bis,
+                self._backoff,
+            )
+            return antwort
+        self._backoff = 0.0
+        self._naechster_versuch = None
+        if neu_bestaetigt > 0 and self._ereignisse.offen() > 0:
             self._ereignisse.neu.set()
         return antwort
+
+    def _verschiebe(self, jetzt: datetime) -> None:
+        self._backoff = min(MAX_BACKOFF, max(1.0, self._backoff * 2))
+        self._naechster_versuch = jetzt + timedelta(seconds=self._backoff)
 
     async def leeren(self) -> None:
         vorher = -1

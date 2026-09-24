@@ -1,0 +1,72 @@
+{% extends "base.html" %}{% block title %}Halle{% endblock %}
+{% block content %}
+<h1>Halle</h1>
+
+{% if empfangen_am is none %}
+<div class="karte schmal">
+  <p class="hinweis">Die Halle hat sich noch nie gemeldet. Sobald der Hallendienst läuft und
+  verbunden ist, erscheint hier sein Zustand.</p>
+</div>
+{% else %}
+<div class="karte schmal">
+  <h2>Verbindung</h2>
+  <p>Letzter Kontakt: {{ empfangen_am|lokal }}
+  {% if ohne_kontakt %}<span class="fehler"> – seit über 60 Minuten keine Meldung</span>{% endif %}</p>
+  {% if status %}
+  <p>Plan der Halle: Version {{ status.planversion }} · aktuell: Version {{ aktuelle_version }}</p>
+  {% if status.planversion < aktuelle_version %}
+  <p class="fehler">Die Halle hat noch nicht den aktuellen Plan – neue Buchungen seit Version
+  {{ status.planversion }} kennt sie nicht. Betroffenen Kunden bei Bedarf mit dem Master-PIN
+  Zutritt verschaffen.</p>
+  {% endif %}
+  <p>Home Assistant: {{ "erreichbar" if status.ha_erreichbar else "nicht erreichbar" }}
+  · {{ "Handbetrieb ist an" if status.handbetrieb else "Automatik" }}
+  · nicht zugestellte Ereignisse: {{ status.warteschlange }}
+  · Dienst {{ status.version_dienst }}</p>
+  <p class="hinweis">Den Handbetrieb schalten Sie in Home Assistant, nicht hier.</p>
+  {% endif %}
+</div>
+
+{% if status %}
+<div class="karte schmal">
+  <h2>Geräte</h2>
+  <table>
+    <tr><th>Feld</th><th>Licht</th><th>Anwesenheit</th></tr>
+    {% for f in status.felder %}<tr>
+      <td>{{ felder.get(f.feld_id, f.feld_id) }}</td>
+      <td>{{ "an" if f.licht_ist else ("aus" if f.licht_ist is not none else "–") }}</td>
+      <td>{{ "ja" if f.praesenz else ("nein" if f.praesenz is not none else "–") }}</td>
+    </tr>{% endfor %}
+  </table>
+  <p>Heizung: Soll {{ status.heizung.soll|wert if status.heizung.soll is not none else "–" }} °C
+  · Ist {{ status.heizung.ist|wert if status.heizung.ist is not none else "–" }} °C</p>
+  <p>Tür: {{ "verriegelt" if status.tuer.verriegelt else ("entriegelt" if status.tuer.verriegelt is not none else "–") }}
+  {% if status.tuer.offen %} · offen{% endif %}</p>
+</div>
+{% endif %}
+{% endif %}
+
+<div class="karte">
+  <h2>Ereignisse</h2>
+  <form method="get" action="/admin/halle" class="zeile">
+    <label>Typ
+      <select name="typ">
+        <option value="">alle</option>
+        {% for t in typen %}<option value="{{ t }}"{% if t == typ %} selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </label>
+    <button>Filtern</button>
+  </form>
+  <table>
+    <tr><th>Zeit</th><th>Typ</th><th>Feld</th><th>Details</th></tr>
+    {% for e, daten in ereignisse %}<tr>
+      <td>{{ e.zeitpunkt|lokal }}</td>
+      <td>{{ e.typ }}</td>
+      <td>{{ felder.get(e.feld_id|string, "–") if e.feld_id else "–" }}</td>
+      <td>{% for k, v in daten|dictsort %}{{ k }}: {{ v }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+    </tr>{% else %}
+    <tr><td colspan="4" class="leer">Keine Ereignisse.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

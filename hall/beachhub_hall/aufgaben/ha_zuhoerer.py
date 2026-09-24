@@ -26,10 +26,10 @@ from beachhub_hall.clock import Uhr
 from beachhub_hall.config import Zuordnung
 from beachhub_hall.db import lies, schreibe
 from beachhub_hall.ereignisse import Ereignisse
-from beachhub_hall.ha import HaClient, HaFehler
+from beachhub_hall.ha import HaClient, HaFehler, HaKeineRechte, HaWebSocket
 from beachhub_hall.lage import Lage
 from beachhub_hall.pin import PinPruefer
-from beachhub_hall.soll import laufende_buchung, zutritt_offen
+from beachhub_hall.soll import laufende_buchung, tuer_erwartet
 
 logger = logging.getLogger(__name__)
 AUSFALL_MELDEN_NACH = timedelta(minutes=2)
@@ -80,7 +80,7 @@ class HaZuhoerer:
                 ws = await self._ha.websocket()
                 try:
                     await ws.abonniere("state_changed")
-                    await ws.abonniere(self._z.tastenfeld.ereignis)
+                    await self._abonniere_tastenfeld(ws)
                     await self.verbunden()
                     backoff = self._backoff_start
                     while True:
@@ -110,6 +110,20 @@ class HaZuhoerer:
             # nächsten Verbindungsversuch – sonst könnte `ha_nicht_erreichbar` bei großem
             # Backoff verspätet gemeldet werden.
             self.pruefe_ausfall()
+
+    async def _abonniere_tastenfeld(self, ws: HaWebSocket) -> None:
+        """Abonniert den Tastenfeld-Ereignistyp. Lehnt HA das wegen fehlender Rechte ab (der
+        HA-Benutzer ist kein Administrator, eigene Ereignistypen stehen nicht in HAs
+        SUBSCRIBE_ALLOWLIST), ist das kein HA-Ausfall: laut als Fehler loggen, aber mit
+        state_changed weiterarbeiten – Licht, Heizung, Handbetrieb und Präsenz laufen weiter,
+        nur das Tastenfeld bleibt bis zur Korrektur des Benutzers taub. Ein Neuverbinden
+        änderte daran nichts und ließe nach 2 min fälschlich `ha_nicht_erreichbar` melden. Ein
+        Ereignis dafür gibt es bewusst nicht (neuer Typ wäre eine Vertragsänderung); beim
+        nächsten Verbindungsaufbau wird es erneut versucht."""
+        try:
+            await ws.abonniere(self._z.tastenfeld.ereignis)
+        except HaKeineRechte as e:
+            logger.error("Tastenfeld abgeschaltet: %s", e)
 
     def _naechster_schlaf(self, backoff: float) -> float:
         """Begrenzt die Backoff-Schlafzeit auf die Restzeit bis zur 2-min-Ausfallmeldung, damit
@@ -288,11 +302,20 @@ class HaZuhoerer:
         )
 
     def _tuer_geoeffnet(self) -> None:
+        """`tuer_offen_ausserhalb` nur, wenn kein Buchungsfenster die Tür erwartet
+        (`soll.tuer_erwartet`, bis ende + licht_nachlauf – Verlassen nach dem Spiel), kein
+        Master-PIN in den letzten 5 min akzeptiert wurde und kein Feld gerade Präsenz meldet
+        (dann ist jemand in der Halle, etwa beim späten Verlassen)."""
         jetzt = self._uhr.jetzt()
         with self._sitzungen() as db:
             gespeichert = plan.lade(db)
             letzter_master = lies(db, "letzter_master")
-        if zutritt_offen(gespeichert.inhalt if gespeichert else None, jetzt):
+            praesenz = lies(db, "praesenz", {})
+        if tuer_erwartet(gespeichert.inhalt if gespeichert else None, jetzt):
+            return
+        # Nur konfigurierte Felder zählen – ein aus hall.toml entferntes Feld mit altem
+        # Präsenz-Eintrag darf den Tür-Alarm nicht dauerhaft abschalten.
+        if any(feld_id in self._z.felder for feld_id in praesenz):
             return
         if letzter_master and jetzt - datetime.fromisoformat(letzter_master) < MASTER_TUER_KULANZ:
             return

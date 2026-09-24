@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import logging
+import re
 import signal
 from getpass import getpass
 
@@ -11,14 +12,18 @@ from argon2 import PasswordHasher
 from beachhub_hall.config import KonfigFehler, Umgebung
 from beachhub_hall.dienst import Dienst
 from beachhub_hall.health import starte_health
-from beachhub_hall.pin import ZIFFERN
+
+# Nur ASCII-Ziffern wie am Tastenfeld (pin.ZIFFERN), aber mindestens 8 statt 4 Stellen: Der
+# Master-PIN öffnet immer, auch ohne Buchung und ohne Plan – er muss deutlich schwerer zu erraten
+# sein als eine Buchungs-PIN. Höchstens 12 Stellen, mehr nimmt das Tastenfeld nicht an.
+MASTER_ZIFFERN = re.compile(r"[0-9]{8,12}")
 
 
 def _master_pin() -> None:
-    erste = getpass("Master-PIN (4–12 Ziffern): ")
+    erste = getpass("Master-PIN (8–12 Ziffern): ")
     zweite = getpass("Master-PIN wiederholen: ")
-    if erste != zweite or not ZIFFERN.fullmatch(erste):
-        raise SystemExit("Die PINs stimmen nicht überein oder sind nicht 4 bis 12 Ziffern lang.")
+    if erste != zweite or not MASTER_ZIFFERN.fullmatch(erste):
+        raise SystemExit("Die PINs stimmen nicht überein oder sind nicht 8 bis 12 Ziffern lang.")
     print(PasswordHasher().hash(erste))  # noqa: T201 – Ausgabe für hall.toml
 
 

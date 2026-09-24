@@ -91,6 +91,16 @@ def _zahl(wert: Any, schluessel: str) -> float:
         raise KonfigFehler(f"{schluessel} muss eine Zahl sein") from e
 
 
+def _tabelle(roh: dict[str, Any], schluessel: str, pfad: str = "") -> dict[str, Any]:
+    """Eine (optionale) TOML-Tabelle; ist der Schlüssel ein einfacher Wert (z. B. `tuer =
+    "lock.eingang"` statt `[tuer]`), ein lesbarer KonfigFehler statt eines AttributeError."""
+    wert = roh.get(schluessel, {})
+    if not isinstance(wert, dict):
+        name = f"{pfad}.{schluessel}" if pfad else schluessel
+        raise KonfigFehler(f"{name} muss eine Tabelle sein (z. B. [{name}])")
+    return wert
+
+
 def lade_zuordnung(pfad: Path) -> Zuordnung:
     try:
         roh = tomllib.loads(pfad.read_text(encoding="utf-8"))
@@ -108,22 +118,23 @@ def lade_zuordnung(pfad: Path) -> Zuordnung:
             "master_pin_hash fehlt oder ist kein argon2id-Hash – mit "
             "`beachhub-hall master-pin` erzeugen"
         ) from e
-    tuer = roh.get("tuer", {})
+    tuer = _tabelle(roh, "tuer")
     tuer_entity = _text(tuer.get("entity"))
     if tuer_entity and not tuer_entity.startswith(("lock.", "switch.")):
         raise KonfigFehler("tuer.entity muss eine lock.*- oder switch.*-Entität sein")
     heizung, tasten, hand = (
-        roh.get("heizung", {}),
-        roh.get("tastenfeld", {}),
-        roh.get("handbetrieb", {}),
+        _tabelle(roh, "heizung"),
+        _tabelle(roh, "tastenfeld"),
+        _tabelle(roh, "handbetrieb"),
     )
+    felder = _tabelle(roh, "felder")
     return Zuordnung(
         master_pin_hash=master,
         felder={
             str(feld_id): FeldZuordnung(
                 licht=_text(z.get("licht")), praesenz=_text(z.get("praesenz"))
             )
-            for feld_id, z in roh.get("felder", {}).items()
+            for feld_id, z in ((f, _tabelle(felder, f, "felder")) for f in felder)
         },
         heizung=HeizungKonfig(
             entity=_text(heizung.get("entity")), ist_sensor=_text(heizung.get("ist_sensor"))

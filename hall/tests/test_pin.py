@@ -6,6 +6,7 @@ from datetime import timedelta
 from pathlib import Path
 
 import pytest
+from beachhub_hall import tuer as tuer_modul
 from beachhub_hall.clock import SimulierteUhr
 from beachhub_hall.config import TuerKonfig
 from beachhub_hall.db import lies, schreibe
@@ -254,6 +255,8 @@ async def test_tuer_turn_off_mit_wiederholung_erfolgreich(
     ]
     assert ha.zustaende["switch.tueroeffner"]["state"] == "off"
     assert not [e for e in aufbau.ereignisse.unbestaetigt() if e.typ == "aktor_fehler"]
+    # Impuls 5 s, danach je 1 s Pause zwischen den turn_off-Versuchen (nicht direkt hintereinander).
+    assert aufbau.schlaf.aufrufe == [5.0, 1.0, 1.0]
     await aufbau.client.schliesse()
 
 
@@ -266,6 +269,34 @@ async def test_tuer_turn_off_alle_versuche_scheitern_meldet_aktor_fehler(
     ha.fehler_verbleibend = 3  # alle drei turn_off-Versuche schlagen fehl
     await aufbau.tuer.warte()
     assert [x[:2] for x in ha.aufrufe].count(("switch", "turn_off")) == 3
+    fehler = [e for e in aufbau.ereignisse.unbestaetigt() if e.typ == "aktor_fehler"]
+    assert [f.daten["grund"] for f in fehler] == ["tuer_impuls_nicht_beendet"]
+    assert aufbau.schlaf.aufrufe == [5.0, 1.0, 1.0]  # keine Pause nach dem letzten Versuch
+    await aufbau.client.schliesse()
+
+
+async def test_tuer_turn_off_haengender_aufruf_wird_abgebrochen(
+    sitzungen: sessionmaker[Session],
+    uhr: SimulierteUhr,
+    ha: HaSimulator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hängt HA bei turn_off, darf ein Versuch nicht die ganzen 15 s des HTTP-Timeouts
+    blockieren – sonst reichte die Kulanzfrist beim Herunterfahren nicht für drei Versuche.
+    Jeder Versuch hat eine eigene Frist (TURN_OFF_TIMEOUT)."""
+    monkeypatch.setattr(tuer_modul, "TURN_OFF_TIMEOUT", 0.05)
+    ha.entitaet("switch.tueroeffner", "on")
+    aufbau = Aufbau(sitzungen, uhr, ha, TuerKonfig("switch.tueroeffner", impuls_sekunden=5))
+    versuche = 0
+
+    async def haengt(domain: str, service: str, daten: dict[str, object]) -> None:
+        nonlocal versuche
+        versuche += 1
+        await asyncio.sleep(60)
+
+    monkeypatch.setattr(aufbau.client, "dienst", haengt)
+    await asyncio.wait_for(aufbau.tuer.schliesse(), timeout=2)
+    assert versuche == 3
     fehler = [e for e in aufbau.ereignisse.unbestaetigt() if e.typ == "aktor_fehler"]
     assert [f.daten["grund"] for f in fehler] == ["tuer_impuls_nicht_beendet"]
     await aufbau.client.schliesse()

@@ -2,6 +2,13 @@
 
 Läuft als httpx.MockTransport im selben Prozess – ohne Netz, ohne Wartezeit. `offline = True`
 simuliert den Internetausfall, `ersatzantwort` eine Fehlerseite des Reverse Proxys.
+
+`bestaetigt_bis` ist per Vorgabe einfach die höchste empfangene seq. Mit `marke` (nicht None)
+bildet der Simulator stattdessen die Lückenlogik des echten Hauptsystems nach
+(`core/beachhub_core/services/halle.py`, `speichere_ereignisse`): bestätigt wird lückenlos ab der
+gespeicherten Marke. `marke_nachziehen = False` bildet ein Hauptsystem ohne das Nachziehen der
+Marke auf „kleinste gelieferte seq − 1“ nach – dann bleibt die Marke nach einer
+Wiederherstellung aus einem Backup dauerhaft stehen.
 """
 
 import httpx
@@ -31,6 +38,8 @@ class CoreSimulator:
         self.plan_neu = False
         self.ersatzantwort: httpx.Response | None = None
         self.anfragen = 0
+        self.marke: int | None = None
+        self.marke_nachziehen = True
 
     def veroeffentliche(
         self,
@@ -66,8 +75,16 @@ class CoreSimulator:
             if lieferung.status is not None:
                 self.status.append(lieferung.status)
             neu, self.plan_neu = self.plan_neu, False
-            hoechste = max((e.seq for e in self.empfangen), default=0)
-            return httpx.Response(200, json={"bestaetigt_bis": hoechste, "plan_neu": neu})
+            if self.marke is None:
+                bestaetigt = max((e.seq for e in self.empfangen), default=0)
+            else:
+                if self.marke_nachziehen and lieferung.ereignisse:
+                    self.marke = max(self.marke, min(e.seq for e in lieferung.ereignisse) - 1)
+                gespeichert = {e.seq for e in self.empfangen}
+                while self.marke + 1 in gespeichert:
+                    self.marke += 1
+                bestaetigt = self.marke
+            return httpx.Response(200, json={"bestaetigt_bis": bestaetigt, "plan_neu": neu})
         return httpx.Response(404)
 
     def transport(self) -> httpx.MockTransport:
