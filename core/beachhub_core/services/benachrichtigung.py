@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import mail
 from beachhub_core.config import settings
-from beachhub_core.models import Buchung, Dauerbuchung, Rechnung, Storno
+from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, Storno
 from beachhub_core.services import konfiguration, pin
 from beachhub_core.templating import templates
 
@@ -51,6 +51,18 @@ def dauerbuchung_angelegt(db: Session, d: Dauerbuchung) -> None:
             vorlauf=vorlauf,
         ),
     )
+
+
+def mitgliedschaft_freigeschaltet(db: Session, k: Kunde) -> None:
+    mail.sende(
+        k.email,
+        "Ihre Mitgliedschaft ist freigeschaltet",
+        _text("mitgliedschaft_freigeschaltet", k=k),
+    )
+
+
+def mitgliedschaft_beendet(db: Session, k: Kunde) -> None:
+    mail.sende(k.email, "Ihre Mitgliedschaft wurde beendet", _text("mitgliedschaft_beendet", k=k))
 
 
 def rechnung(db: Session, r: Rechnung) -> None:

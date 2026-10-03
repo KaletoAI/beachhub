@@ -42,6 +42,37 @@
 </div>
 
 <div class="karte">
+  <h2>Mitgliedschaft</h2>
+  {% if mitgliedschaft == "mitglied" %}
+  <p>Mitglied bis <strong>{{ kunde.mitglied_bis|datum }}</strong>{% if kunde.mitglied_freigeschaltet_am %} · freigeschaltet am {{ kunde.mitglied_freigeschaltet_am|datum }}{% endif %}</p>
+  {% elif mitgliedschaft == "beantragt" %}
+  <p><span class="badge">Antrag offen</span> seit {{ kunde.mitglied_antrag_am|lokal }}</p>
+  {% else %}
+  <p>Kein Mitglied{% if kunde.mitglied_bis %} (zuletzt bis {{ kunde.mitglied_bis|datum }}){% endif %}{% if kunde.mitglied_beendet_am %} · beendet am {{ kunde.mitglied_beendet_am|datum }}{% if kunde.mitglied_beendet_grund %}: {{ kunde.mitglied_beendet_grund }}{% endif %}{% endif %}</p>
+  {% endif %}
+  {% if kunde.mitglied_antrag_hinweis %}<p>Angaben im Antrag: {{ kunde.mitglied_antrag_hinweis }}</p>{% endif %}
+  <p class="small">Prüfen Sie die Angaben gegen die Mitgliederliste des Vereins. Mitglied können nur Privatpersonen sein.</p>
+  <form method="post" action="/admin/kunden/{{ kunde.id }}/mitgliedschaft">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Mitglied bis <input type="date" name="bis" value="{{ vorschlag_bis.isoformat() }}" required></label>
+    <button>{{ "Verlängern" if mitgliedschaft == "mitglied" else "Freischalten" }}</button>
+  </form>
+  {% if mitgliedschaft == "beantragt" %}
+  <form method="post" action="/admin/kunden/{{ kunde.id }}/mitgliedschaft/antrag-verwerfen">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="gefahr">Antrag verwerfen</button>
+  </form>
+  {% endif %}
+  {% if mitgliedschaft == "mitglied" %}
+  <form method="post" action="/admin/kunden/{{ kunde.id }}/mitgliedschaft/beenden">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Grund <input name="grund" required></label>
+    <button class="gefahr">Mitgliedschaft beenden</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="karte">
   <h2>Buchungen</h2>
   <table>
     <tr><th>Datum</th><th>Feld</th><th>Status</th><th>Preis</th><th></th></tr>

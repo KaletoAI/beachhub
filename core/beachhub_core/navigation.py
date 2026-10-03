@@ -33,7 +33,14 @@ NAVIGATION: list[Bereich] = [
             Punkt("Sperre anlegen", "/admin/belegung/sperre/neu"),
         ],
     ),
-    Bereich("Kunden", "/admin/kunden"),
+    Bereich(
+        "Kunden",
+        "/admin/kunden",
+        [
+            Punkt("Kundenliste", "/admin/kunden"),
+            Punkt("Mitgliedsanträge", "/admin/kunden/antraege"),
+        ],
+    ),
     Bereich("Rechnungen", "/admin/rechnungen"),
     Bereich(
         "Stammdaten",

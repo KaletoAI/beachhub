@@ -272,3 +272,15 @@ def test_einstellungen_seite(eingeloggt: TestClient) -> None:
     text = eingeloggt.get("/admin/konfiguration").text
     assert "<h1>Einstellungen</h1>" in text
     assert "Steuersatz für Betreiberbuchungen" in text
+
+
+def test_einstellungen_ungueltiger_stichtag_zeigt_meldung(
+    eingeloggt: TestClient, db: Session
+) -> None:
+    c = eingeloggt
+    r = c.post(
+        "/admin/konfiguration", data={"csrf_token": c.csrf, "mitgliedschaft_ablauf": "31.02."}
+    )
+    assert r.status_code == 200
+    assert "Ablauf der Mitgliedschaft" in r.text and "nicht in jedem Jahr" in r.text
+    assert db.query(Konfiguration).filter_by(schluessel="mitgliedschaft_ablauf").first() is None

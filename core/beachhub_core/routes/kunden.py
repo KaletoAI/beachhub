@@ -18,10 +18,17 @@ from beachhub_core.models import (
     Kunde,
     Rechnung,
 )
-from beachhub_core.routes._form import fehlertext, pflicht, t_betrag
-from beachhub_core.services import guthaben, kunden, kundengruppen
+from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_datum
+from beachhub_core.services import (
+    benachrichtigung,
+    guthaben,
+    kunden,
+    kundengruppen,
+    mitgliedschaft,
+)
 from beachhub_core.services.guthaben import GuthabenFehler
 from beachhub_core.services.kunden import KundenFehler
+from beachhub_core.services.mitgliedschaft import MitgliedschaftsFehler
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
@@ -32,6 +39,10 @@ FEHLERTEXT = {
     "betrag_muss_negativ_sein": "Auszahlung muss negativ sein",
     "art_unbekannt": "Art unbekannt",
     "unique": "E-Mail-Adresse ist bereits vergeben",
+    "bis_vergangen": "Das Datum liegt in der Vergangenheit",
+    "kein_mitglied": "Der Kunde ist kein Mitglied",
+    "kein_antrag": "Es liegt kein Antrag vor",
+    "kunde_anonymisiert": "Der Kunde ist anonymisiert",
 }
 
 # Alle vom Admin-Formular her erwartbaren Fehler: Domänenvalidierung (KundenFehler/GuthabenFehler),
@@ -39,7 +50,20 @@ FEHLERTEXT = {
 # (InvalidOperation, wird von t_betrag zwar schon in ValueError gewandelt, hier zur Sicherheit
 # trotzdem mitgefangen) sowie DB-Constraint-Verletzungen (IntegrityError, z. B. doppelte E-Mail
 # bei einem Wettlauf zweier gleichzeitiger Anfragen).
-FORM_FEHLER = (KundenFehler, GuthabenFehler, ValueError, InvalidOperation, IntegrityError)
+FORM_FEHLER = (
+    KundenFehler,
+    GuthabenFehler,
+    MitgliedschaftsFehler,
+    ValueError,
+    InvalidOperation,
+    IntegrityError,
+)
+
+
+def _nicht_gefunden() -> RedirectResponse:
+    return mit_flash(
+        RedirectResponse("/admin/kunden", status_code=303), "Kunde nicht gefunden", "fehler"
+    )
 
 
 def _liste_ctx(db: Session, q: str) -> dict:  # type: ignore[type-arg]
@@ -95,11 +119,25 @@ def anlegen(
     return mit_flash(RedirectResponse(f"/admin/kunden/{k.id}", status_code=303), "Kunde angelegt")
 
 
+@router.get("/kunden/antraege", response_class=HTMLResponse)
+def antraege(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    return render(
+        request, "kunden/antraege.html", admin=admin, kunden=mitgliedschaft.offene_antraege(db)
+    )
+
+
 def _detail_ctx(db: Session, k: Kunde) -> dict:  # type: ignore[type-arg]
+    heute = clock.today(db)
     seit = clock.now(db) - timedelta(days=365)
     return {
         "kunde": k,
-        "gruppe_heute": kundengruppen.effektive_gruppe(db, k, clock.today(db)),
+        "gruppe_heute": kundengruppen.effektive_gruppe(db, k, heute),
+        "mitgliedschaft": mitgliedschaft.status(k, heute),
+        "vorschlag_bis": mitgliedschaft.naechster_ablauf(db, heute),
         "buchungen": db.scalars(
             select(Buchung)
             .where(Buchung.kunde_id == k.id, Buchung.beginn >= seit)
@@ -247,3 +285,82 @@ def anonymisieren(
             **_detail_ctx(db, k),
         )
     return mit_flash(RedirectResponse("/admin/kunden", status_code=303), "Kunde anonymisiert")
+
+
+def _detail_mit_fehler(
+    request: Request, admin: AdminUser, db: Session, k: Kunde, e: BaseException
+) -> HTMLResponse:
+    db.rollback()
+    return render(
+        request,
+        "kunden/detail.html",
+        admin=admin,
+        fehler=fehlertext(e, FEHLERTEXT),
+        **_detail_ctx(db, k),
+    )
+
+
+@router.post("/kunden/{kunde_id}/mitgliedschaft", response_model=None)
+def mitgliedschaft_freischalten(
+    request: Request,
+    kunde_id: uuid.UUID,
+    bis: str = Form(...),
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    k = db.get(Kunde, kunde_id)
+    if k is None:
+        return _nicht_gefunden()
+    try:
+        mitgliedschaft.freischalten(
+            db, k, bis=pflicht(t_datum(bis), "Mitglied bis"), admin_user_id=admin.id
+        )
+        db.commit()
+    except FORM_FEHLER as e:
+        return _detail_mit_fehler(request, admin, db, k, e)
+    benachrichtigung.mitgliedschaft_freigeschaltet(db, k)
+    return mit_flash(
+        RedirectResponse(f"/admin/kunden/{k.id}", status_code=303),
+        f"Mitgliedschaft bis {k.mitglied_bis:%d.%m.%Y} freigeschaltet",
+    )
+
+
+@router.post("/kunden/{kunde_id}/mitgliedschaft/beenden", response_model=None)
+def mitgliedschaft_beenden(
+    request: Request,
+    kunde_id: uuid.UUID,
+    grund: str = Form(...),
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    k = db.get(Kunde, kunde_id)
+    if k is None:
+        return _nicht_gefunden()
+    try:
+        war_mitglied = mitgliedschaft.beende(db, k, grund=grund, admin_user_id=admin.id)
+        db.commit()
+    except FORM_FEHLER as e:
+        return _detail_mit_fehler(request, admin, db, k, e)
+    if war_mitglied:
+        benachrichtigung.mitgliedschaft_beendet(db, k)
+    return mit_flash(
+        RedirectResponse(f"/admin/kunden/{k.id}", status_code=303), "Mitgliedschaft beendet"
+    )
+
+
+@router.post("/kunden/{kunde_id}/mitgliedschaft/antrag-verwerfen", response_model=None)
+def antrag_verwerfen(
+    request: Request,
+    kunde_id: uuid.UUID,
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> HTMLResponse | RedirectResponse:
+    k = db.get(Kunde, kunde_id)
+    if k is None:
+        return _nicht_gefunden()
+    try:
+        mitgliedschaft.verwerfe_antrag(db, k, admin_user_id=admin.id)
+        db.commit()
+    except FORM_FEHLER as e:
+        return _detail_mit_fehler(request, admin, db, k, e)
+    return mit_flash(RedirectResponse(f"/admin/kunden/{k.id}", status_code=303), "Antrag verworfen")

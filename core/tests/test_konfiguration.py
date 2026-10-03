@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -60,3 +61,27 @@ def test_ungueltige_werte_mit_verstaendlicher_meldung(
 ) -> None:
     with pytest.raises(ValueError, match=meldung):
         konfiguration.setze(db, schluessel, roh)
+
+
+@pytest.mark.parametrize(
+    "roh,erwartet", [("30.04.", "30.04."), ("1.5", "01.05."), (" 31.08 ", "31.08.")]
+)
+def test_tagmonat_normalisiert(roh: str, erwartet: str) -> None:
+    tm = konfiguration.TagMonat(roh)
+    assert tm == erwartet
+    assert tm.im_jahr(2028) == date(2028, tm.monat, tm.tag)
+
+
+@pytest.mark.parametrize("roh", ["31.02.", "29.02.", "30-04", "", "13.13."])
+def test_tagmonat_lehnt_ungueltige_tage_ab(roh: str) -> None:
+    with pytest.raises(ValueError):
+        konfiguration.TagMonat(roh)
+
+
+def test_stichtag_speichern_und_lesen(db: Session) -> None:
+    assert konfiguration.hole(db, "mitgliedschaft_ablauf") == "30.04."
+    konfiguration.setze(db, "mitgliedschaft_ablauf", "1.5.")
+    db.commit()
+    wert = konfiguration.hole(db, "mitgliedschaft_ablauf")
+    assert isinstance(wert, konfiguration.TagMonat)
+    assert wert.im_jahr(2028) == date(2028, 5, 1)

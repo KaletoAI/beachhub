@@ -1,0 +1,8 @@
+Hallo {{ k.name }},
+
+Ihre Mitgliedschaft im Verein ist bei uns seit dem {{ k.mitglied_beendet_am|datum }} beendet.
+Für neue Buchungen gelten die Preise für Nicht-Mitglieder. Bereits bestätigte Buchungen behalten
+ihren Preis; falls zu einzelnen Terminen etwas zu klären ist, melden wir uns bei Ihnen.
+
+Viele Grüße
+{{ betreiber }}

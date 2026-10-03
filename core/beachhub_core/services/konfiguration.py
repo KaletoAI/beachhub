@@ -1,7 +1,9 @@
 """Konfigurationswerte: Defaults im Code, Überschreibung in der Tabelle `konfiguration`."""
 
+import re
 import uuid
 from dataclasses import dataclass
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -9,6 +11,36 @@ from sqlalchemy.orm import Session
 
 from beachhub_core.models import Konfiguration
 from beachhub_core.services import audit
+
+
+class TagMonat(str):
+    """Ein jährlicher Stichtag ohne Jahr, gespeichert als "TT.MM." (etwa "30.04.")."""
+
+    __slots__ = ()
+
+    def __new__(cls, roh: str) -> "TagMonat":
+        m = re.fullmatch(r"\s*(\d{1,2})\.(\d{1,2})\.?\s*", roh)
+        if m is None:
+            raise ValueError("Bitte als Tag und Monat angeben, etwa 30.04.")
+        tag, monat = int(m.group(1)), int(m.group(2))
+        try:
+            # 2027 ist kein Schaltjahr: Der 29.02. taugt nicht als jährlicher Stichtag.
+            date(2027, monat, tag)
+        except ValueError as e:
+            raise ValueError("Diesen Tag gibt es nicht in jedem Jahr") from e
+        return super().__new__(cls, f"{tag:02d}.{monat:02d}.")
+
+    @property
+    def tag(self) -> int:
+        return int(self[:2])
+
+    @property
+    def monat(self) -> int:
+        return int(self[3:5])
+
+    def im_jahr(self, jahr: int) -> date:
+        return date(jahr, self.monat, self.tag)
+
 
 DEFAULTS: dict[str, tuple[type, Any]] = {
     "fenster_tage": (int, 14),
@@ -18,6 +50,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "rechnung_tag_im_folgemonat": (int, 3),
     "rechnung_zahlungsziel_tage": (int, 14),
     "event_ust_satz": (Decimal, Decimal("19.00")),
+    "mitgliedschaft_ablauf": (TagMonat, TagMonat("30.04.")),
     "heiz_vorlauf_minuten": (int, 30),
     "licht_vorlauf_minuten": (int, 5),
     "licht_nachlauf_minuten": (int, 5),
@@ -40,7 +73,7 @@ HALLEN_KONFIG: tuple[str, ...] = (
     "praesenz_alarm_minuten",
 )
 
-_TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool"}
+_TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool", TagMonat: "tagmonat"}
 
 
 @dataclass(frozen=True)
@@ -96,6 +129,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Vorbelegung, wenn Sie eine Buchung oder ein Event selbst anlegen – auch wenn ein "
         "Mitglied bucht. Im Buchungsformular können Sie ihn im Einzelfall ändern.",
     ),
+    "mitgliedschaft_ablauf": Beschreibung(
+        "Mitgliedschaft",
+        "Ablauf der Mitgliedschaft",
+        "Tag und Monat",
+        "Bis zu diesem Tag gilt eine Freischaltung als Mitglied (Ende der Wintermitgliedschaft). "
+        "Beim Freischalten ist der nächste dieser Tage vorbelegt.",
+    ),
     "heiz_vorlauf_minuten": Beschreibung(
         "Halle",
         "Heizvorlauf",
@@ -135,7 +175,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
 }
 
 # Reihenfolge der Gruppen auf der Konfigurationsseite.
-GRUPPEN: list[str] = ["Buchung und Storno", "Zahlung und Rechnung", "Halle", "Portal und Zugang"]
+GRUPPEN: list[str] = [
+    "Buchung und Storno",
+    "Zahlung und Rechnung",
+    "Mitgliedschaft",
+    "Halle",
+    "Portal und Zugang",
+]
 
 
 def gruppiert(werte: dict[str, Any]) -> list[tuple[str, list[tuple[str, Any, Beschreibung]]]]:
@@ -190,6 +236,7 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         zeile.wert = neu
     else:
         db.add(Konfiguration(schluessel=schluessel, wert=neu, typ=_TYP_NAME[typ]))
+        db.flush()  # damit `hole` den Wert noch vor dem Commit sieht
     audit.protokolliere(
         db,
         quelle="admin",
