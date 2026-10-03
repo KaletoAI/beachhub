@@ -18,6 +18,7 @@ SEITEN = [
     "/admin/belegung",
     "/admin/kunden",
     "/admin/kunden/antraege",
+    "/admin/kunden/abgleich",
     "/admin/rechnungen",
     "/admin/felder",
     "/admin/betriebszeiten",

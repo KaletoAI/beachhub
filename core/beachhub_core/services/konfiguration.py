@@ -51,6 +51,8 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "rechnung_zahlungsziel_tage": (int, 14),
     "event_ust_satz": (Decimal, Decimal("19.00")),
     "mitgliedschaft_ablauf": (TagMonat, TagMonat("30.04.")),
+    "mitglieder_abgleich": (TagMonat, TagMonat("31.08.")),
+    "mitglied_erinnerung_tage": (int, 14),
     "heiz_vorlauf_minuten": (int, 30),
     "licht_vorlauf_minuten": (int, 5),
     "licht_nachlauf_minuten": (int, 5),
@@ -136,6 +138,21 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Tag und Monat",
         "Bis zu diesem Tag gilt eine Freischaltung als Mitglied (Ende der Wintermitgliedschaft). "
         "Beim Freischalten ist der nächste dieser Tage vorbelegt.",
+    ),
+    "mitglieder_abgleich": Beschreibung(
+        "Mitgliedschaft",
+        "Jährlicher Abgleich",
+        "Tag und Monat",
+        "An diesem Tag bekommen Sie eine E-Mail mit der Prüfliste (Kunden → Mitglieder-Abgleich). "
+        "Er muss vor dem ersten Buchungsfenster der Saison liegen, sonst buchen Mitglieder die "
+        "ersten Termine zu Preisen für Nicht-Mitglieder.",
+    ),
+    "mitglied_erinnerung_tage": Beschreibung(
+        "Mitgliedschaft",
+        "Erinnerung vor Ablauf",
+        "Tage",
+        "So viele Tage vor Ablauf der Mitgliedschaft bekommt der Kunde eine Erinnerung. "
+        "0 schaltet die Erinnerung ab.",
     ),
     "heiz_vorlauf_minuten": Beschreibung(
         "Halle",

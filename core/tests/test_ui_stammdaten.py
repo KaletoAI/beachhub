@@ -1,6 +1,8 @@
+from datetime import date, time
 from decimal import Decimal
 
-from beachhub_core.models import Feld, Konfiguration, Tarif
+from beachhub_core import clock
+from beachhub_core.models import Betriebszeit, Feld, Konfiguration, Tarif
 from beachhub_core.services import konfiguration, kundengruppen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -296,3 +298,14 @@ def test_einstellung_ja_nein_als_auswahl(eingeloggt: TestClient, db: Session) ->
     )
     assert r.status_code == 303
     assert konfiguration.hole(db, "rechnungskunden_online_buchen") is True
+
+
+def test_einstellungen_warnen_vor_spaetem_abgleich(eingeloggt: TestClient, db: Session) -> None:
+    clock.set_override(db, date(2027, 6, 1))
+    db.add(
+        Betriebszeit(
+            wochentag=0, oeffnet=time(9), schliesst=time(23), gueltig_von=date(2027, 9, 10)
+        )
+    )
+    db.commit()
+    assert "liegt nach dem ersten Buchungsfenster" in eingeloggt.get("/admin/konfiguration").text

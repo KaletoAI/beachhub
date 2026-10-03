@@ -36,6 +36,8 @@ class Kunde(UUIDMixin, ZeitstempelMixin, Base):
     mitglied_freigeschaltet_von: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     mitglied_beendet_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     mitglied_beendet_grund: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    # Das mitglied_bis, an dessen Ablauf zuletzt erinnert wurde – je Ablauf höchstens eine Mail.
+    mitglied_erinnert_fuer: Mapped[date | None] = mapped_column(Date)
 
 
 class GuthabenBuchung(UUIDMixin, ZeitstempelMixin, Base):

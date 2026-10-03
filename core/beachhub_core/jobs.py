@@ -7,12 +7,13 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import clock
 from beachhub_core.database import SessionLocal
-from beachhub_core.models import AppSetting, Rechnung
+from beachhub_core.models import AppSetting, Kunde, Rechnung
 from beachhub_core.services import (
     benachrichtigung,
     halle,
     konfiguration,
     lesestand,
+    mitgliedschaft,
     online_buchung,
     rechnung_pdf,
     rechnungen,
@@ -102,6 +103,27 @@ def _job_lesestand() -> None:
             logger.exception("Lesestand-Aktualisierung fehlgeschlagen")
 
 
+def mitgliedschaft_ausfuehren(db: Session) -> None:
+    """Jahresabgleich melden und an den Ablauf der Mitgliedschaft erinnern (A-KUND-5, A-MAIL-2).
+    Erst committen, dann Mails – ein Rollback darf keine Mail zurücklassen."""
+    lauf = mitgliedschaft.tageslauf(db)
+    db.commit()
+    if lauf.abgleich is not None:
+        benachrichtigung.abgleich_faellig(lauf.abgleich)
+    for kunde_id in lauf.erinnert:
+        k = db.get(Kunde, kunde_id)
+        if k is not None:
+            benachrichtigung.mitgliedschaft_erinnerung(db, k)
+
+
+def _job_mitgliedschaft() -> None:
+    with SessionLocal() as db:
+        try:
+            mitgliedschaft_ausfuehren(db)
+        except Exception:
+            logger.exception("Tageslauf der Mitgliedschaft fehlgeschlagen")
+
+
 def _job_verfall() -> None:
     with SessionLocal() as db:
         try:
@@ -142,6 +164,12 @@ def starte_scheduler() -> BackgroundScheduler:
     )
     s.add_job(_job_lesestand, IntervalTrigger(minutes=5), id="lesestand", replace_existing=True)
     s.add_job(_job_verfall, IntervalTrigger(minutes=1), id="verfall", replace_existing=True)
+    s.add_job(
+        _job_mitgliedschaft,
+        CronTrigger(hour=7, minute=0),
+        id="mitgliedschaft",
+        replace_existing=True,
+    )
     s.add_job(
         _job_halle_kontakt, IntervalTrigger(minutes=5), id="halle_kontakt", replace_existing=True
     )

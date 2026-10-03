@@ -3,7 +3,7 @@ from datetime import timedelta
 from decimal import InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_datum
 from beachhub_core.services import (
     benachrichtigung,
     guthaben,
+    konfiguration,
     kunden,
     kundengruppen,
     mitgliedschaft,
@@ -117,6 +118,71 @@ def anlegen(
             **_liste_ctx(db, ""),
         )
     return mit_flash(RedirectResponse(f"/admin/kunden/{k.id}", status_code=303), "Kunde angelegt")
+
+
+@router.get("/kunden/abgleich", response_class=HTMLResponse)
+def abgleich(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    heute = clock.today(db)
+    return render(
+        request,
+        "kunden/abgleich.html",
+        admin=admin,
+        kunden=mitgliedschaft.pruefliste(db, heute),
+        letzter=mitgliedschaft.letzter_ablauf(db, heute),
+        naechster=mitgliedschaft.naechster_ablauf(db, heute),
+        stichtag=konfiguration.hole(db, "mitglieder_abgleich"),
+        warnung=mitgliedschaft.abgleich_warnung(db, heute),
+    )
+
+
+@router.get("/kunden/abgleich.csv")
+def abgleich_csv(
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> Response:
+    heute = clock.today(db)
+    return Response(
+        mitgliedschaft.pruefliste_csv(mitgliedschaft.pruefliste(db, heute)),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="mitglieder_abgleich_{heute}.csv"'},
+    )
+
+
+@router.post("/kunden/abgleich", response_model=None)
+async def abgleich_aktion(
+    request: Request,
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    form = await request.form()
+    zurueck = RedirectResponse("/admin/kunden/abgleich", status_code=303)
+    try:
+        ids = [uuid.UUID(str(v)) for v in form.getlist("kunde_ids")]
+        if not ids:
+            raise ValueError("Bitte mindestens einen Kunden auswählen")
+        aktion = str(form.get("aktion", ""))
+        if aktion == "verlaengern":
+            verlaengert = mitgliedschaft.verlaengere_alle(db, ids, admin_user_id=admin.id)
+            mails = [(benachrichtigung.mitgliedschaft_freigeschaltet, k) for k in verlaengert]
+            text = f"{len(verlaengert)} Mitgliedschaften verlängert"
+        elif aktion == "beenden":
+            grund = str(form.get("grund", "")).strip() or "Jahresabgleich"
+            ergebnis = mitgliedschaft.beende_alle(db, ids, grund=grund, admin_user_id=admin.id)
+            mails = [(benachrichtigung.mitgliedschaft_beendet, k) for k, galt in ergebnis if galt]
+            text = f"{len(ergebnis)} Mitgliedschaften beendet"
+        else:
+            raise ValueError("Aktion unbekannt")
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        return mit_flash(zurueck, fehlertext(e, FEHLERTEXT), "fehler")
+    for senden, k in mails:
+        senden(db, k)
+    return mit_flash(zurueck, text)
 
 
 @router.get("/kunden/antraege", response_class=HTMLResponse)

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from beachhub_core import auth
+from beachhub_core import auth, clock
 from beachhub_core.database import get_db
 from beachhub_core.models import (
     AdminUser,
@@ -28,7 +28,7 @@ from beachhub_core.routes._form import (
     t_uuid,
     t_zeit,
 )
-from beachhub_core.services import konfiguration, kundengruppen, stammdaten
+from beachhub_core.services import konfiguration, kundengruppen, mitgliedschaft, stammdaten
 from beachhub_core.services.kundengruppen import GruppenFehler
 from beachhub_core.services.stammdaten import StammdatenFehler
 from beachhub_core.templating import mit_flash, render
@@ -464,6 +464,7 @@ def _einstellungen(
         gruppen=konfiguration.gruppiert(werte),
         defaults=konfiguration.DEFAULTS,
         fehler=fehler,
+        warnung=mitgliedschaft.abgleich_warnung(db, clock.today(db)),
     )
 
 

@@ -118,3 +118,35 @@ def test_klaerungsliste(eingeloggt: TestClient, db: Session) -> None:
     )
     assert r.status_code == 303
     assert "Nichts zu klären" in c.get("/admin/system/klaerung").text
+
+
+def test_abgleich_seite_csv_und_verlaengern(
+    eingeloggt: TestClient, db: Session, mail_ausgang: list
+) -> None:
+    c = eingeloggt
+    clock.set_override(db, date(2027, 8, 31))
+    k = kunden.lege_an(db, name="Anna", email="anna@x.de")
+    k.mitglied_bis = date(2027, 4, 30)
+    k.mitglied_antrag_hinweis = "Nr. 4711"
+    db.commit()
+    seite = c.get("/admin/kunden/abgleich")
+    assert "Anna" in seite.text and "30.04.2027" in seite.text
+    assert "bis 30.04.2028 verlängern" in seite.text
+    csv = c.get("/admin/kunden/abgleich.csv")
+    assert csv.headers["content-type"].startswith("text/csv")
+    assert "Anna;anna@x.de;2027-04-30;Nr. 4711" in csv.text
+    r = c.post(
+        "/admin/kunden/abgleich",
+        data={"csrf_token": c.csrf, "aktion": "verlaengern", "kunde_ids": [str(k.id)]},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.refresh(k)
+    assert k.mitglied_bis == date(2028, 4, 30)
+    assert [m["betreff"] for m in mail_ausgang] == ["Ihre Mitgliedschaft ist freigeschaltet"]
+
+
+def test_abgleich_ohne_auswahl_meldet_fehler(eingeloggt: TestClient) -> None:
+    c = eingeloggt
+    seite = c.post("/admin/kunden/abgleich", data={"csrf_token": c.csrf, "aktion": "beenden"})
+    assert "mindestens einen Kunden" in seite.text

@@ -5,17 +5,22 @@ die Gruppe der Mitglieder, danach läuft die Mitgliedschaft von selbst aus
 (services/kundengruppen.effektive_gruppe). Es gibt keinen Job, der Gruppen umschreibt.
 """
 
+import csv
+import io
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import Any, Literal
 
 from beachhub_shared.zeit import lokales_datum
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Buchung, Kunde, utcnow
+from beachhub_core.models import AppSetting, Betriebszeit, Buchung, Kunde, utcnow
 from beachhub_core.services import audit, konfiguration, kundengruppen
+from beachhub_core.services.rechnungen import csv_sicher
 
 Status = Literal["mitglied", "beantragt", "nicht_mitglied"]
 MITGLIED: Status = "mitglied"
@@ -177,3 +182,159 @@ def klaere(db: Session, buchung: Buchung, *, admin_user_id: uuid.UUID | None) ->
         nachher={**audit.als_dict(buchung), "aktion": "gruppe_geklaert"},
         admin_user_id=admin_user_id,
     )
+
+
+ABGLEICH_MARKER = "mitglieder_abgleich_letzter"
+
+
+def pruefliste(db: Session, heute: date) -> list[Kunde]:
+    """Prüfliste des Jahresabgleichs (A-KUND-5, Abweichung A-10): Mitgliedschaften, die seit dem
+    Jahr vor dem letzten Ablauftag geendet haben oder bis zum nächsten Ablauftag enden – ohne
+    ausdrücklich beendete."""
+    letzter = letzter_ablauf(db, heute)
+    von = letzter.replace(year=letzter.year - 1)
+    bis = naechster_ablauf(db, heute)
+    return list(
+        db.scalars(
+            select(Kunde)
+            .where(
+                Kunde.anonymisiert_am.is_(None),
+                Kunde.mitglied_beendet_am.is_(None),
+                Kunde.mitglied_bis > von,
+                Kunde.mitglied_bis <= bis,
+            )
+            .order_by(Kunde.name)
+        ).all()
+    )
+
+
+def pruefliste_csv(kunden: Sequence[Kunde]) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf, delimiter=";", lineterminator="\n")
+    w.writerow(["name", "email", "mitglied_bis", "angaben_im_antrag"])
+    for k in kunden:
+        w.writerow(
+            [
+                csv_sicher(k.name),
+                csv_sicher(k.email),
+                k.mitglied_bis.isoformat() if k.mitglied_bis else "",
+                csv_sicher(k.mitglied_antrag_hinweis),
+            ]
+        )
+    return buf.getvalue()
+
+
+def verlaengere_alle(
+    db: Session, kunden_ids: Sequence[uuid.UUID], *, admin_user_id: uuid.UUID | None
+) -> list[Kunde]:
+    """Sammelaktion „bis zum nächsten Ablauftag verlängern“. Wer schon so lange freigeschaltet
+    ist, bleibt unberührt und bekommt keine Mail."""
+    bis = naechster_ablauf(db, clock.today(db))
+    verlaengert = []
+    for k in db.scalars(
+        select(Kunde)
+        .where(Kunde.id.in_(kunden_ids), Kunde.anonymisiert_am.is_(None))
+        .order_by(Kunde.name)
+    ).all():
+        if k.mitglied_bis is not None and k.mitglied_bis >= bis:
+            continue
+        freischalten(db, k, bis=bis, admin_user_id=admin_user_id)
+        verlaengert.append(k)
+    return verlaengert
+
+
+def beende_alle(
+    db: Session,
+    kunden_ids: Sequence[uuid.UUID],
+    *,
+    grund: str,
+    admin_user_id: uuid.UUID | None,
+) -> list[tuple[Kunde, bool]]:
+    """Sammelaktion „beenden“. Liefert je Kunde, ob die Mitgliedschaft bis heute galt – nur
+    diese Kunden bekommen eine Mail."""
+    return [
+        (k, beende(db, k, grund=grund, admin_user_id=admin_user_id))
+        for k in db.scalars(
+            select(Kunde)
+            .where(
+                Kunde.id.in_(kunden_ids),
+                Kunde.anonymisiert_am.is_(None),
+                Kunde.mitglied_bis.is_not(None),
+            )
+            .order_by(Kunde.name)
+        ).all()
+    ]
+
+
+def abgleich_warnung(db: Session, heute: date) -> str | None:
+    """Warnt, wenn der Stichtag des Abgleichs nach dem ersten Buchungsfenster der nächsten Saison
+    liegt (A-KUND-5). Saisonstart ist das früheste künftige `betriebszeit.gueltig_von`
+    (Abweichung A-12)."""
+    saisonstart = db.scalar(
+        select(func.min(Betriebszeit.gueltig_von)).where(Betriebszeit.gueltig_von > heute)
+    )
+    if saisonstart is None:
+        return None
+    tag_monat = konfiguration.hole(db, "mitglieder_abgleich")
+    stichtag: date = tag_monat.im_jahr(saisonstart.year)
+    if stichtag > saisonstart:
+        stichtag = tag_monat.im_jahr(saisonstart.year - 1)
+    fenster_beginn = saisonstart - timedelta(days=konfiguration.hole(db, "fenster_tage"))
+    if stichtag <= fenster_beginn:
+        return None
+    return (
+        f"Der Mitglieder-Abgleich am {stichtag:%d.%m.%Y} liegt nach dem ersten Buchungsfenster "
+        f"der Saison ab {saisonstart:%d.%m.%Y} (gebucht wird ab {fenster_beginn:%d.%m.%Y}). "
+        "Mitglieder würden die ersten Termine zu Preisen für Nicht-Mitglieder buchen. Bitte den "
+        "Stichtag in den Einstellungen vorziehen."
+    )
+
+
+@dataclass
+class Tageslauf:
+    # Anzahl Kunden auf der Prüfliste, wenn der Stichtag in diesem Jahr erreicht und noch nicht
+    # gemeldet war; sonst None.
+    abgleich: int | None = None
+    erinnert: list[uuid.UUID] = field(default_factory=list)
+
+
+def tageslauf(db: Session) -> Tageslauf:
+    """Täglich: den Abgleich einmal im Jahr melden (auch nachträglich, falls der Lauf am Stichtag
+    ausfiel), vor Ablauf an die Mitgliedschaft erinnern und das Konto im Portal am Tag nach dem
+    Ablauf neu veröffentlichen. Committet nicht; die Mails verschickt
+    jobs.mitgliedschaft_ausfuehren nach dem Commit."""
+    heute = clock.today(db)
+    lauf = Tageslauf()
+    stichtag = konfiguration.hole(db, "mitglieder_abgleich").im_jahr(heute.year)
+    marker = db.get(AppSetting, ABGLEICH_MARKER)
+    if heute >= stichtag and (marker is None or marker.value != str(heute.year)):
+        lauf.abgleich = len(pruefliste(db, heute))
+        if marker is None:
+            db.add(AppSetting(key=ABGLEICH_MARKER, value=str(heute.year)))
+        else:
+            marker.value = str(heute.year)
+    tage = konfiguration.hole(db, "mitglied_erinnerung_tage")
+    if tage > 0:
+        for k in db.scalars(
+            select(Kunde).where(
+                Kunde.anonymisiert_am.is_(None),
+                Kunde.mitglied_bis >= heute,
+                Kunde.mitglied_bis <= heute + timedelta(days=tage),
+            )
+        ).all():
+            if k.mitglied_erinnert_fuer != k.mitglied_bis:
+                k.mitglied_erinnert_fuer = k.mitglied_bis
+                lauf.erinnert.append(k.id)
+    # Das Konto-Dokument zeigt Mitgliedschaft und Gruppe „Stand heute“: Am Tag nach dem Ablauf
+    # muss es neu entstehen, sonst zeigt das Portal weiter die abgelaufene Mitgliedschaft.
+    abgelaufen = db.scalars(
+        select(Kunde.id).where(
+            Kunde.anonymisiert_am.is_(None), Kunde.mitglied_bis == heute - timedelta(days=1)
+        )
+    ).all()
+    if abgelaufen:
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_geaendert(db, *(f"konto:{i}" for i in abgelaufen))
+    db.flush()
+    return lauf

@@ -186,3 +186,101 @@ def test_storno_nimmt_buchung_aus_der_klaerung(db: Session, welt) -> None:
     storno.storniere(db, b, durch="betreiber", kostenfrei=True, grund="Mitgliedschaft beendet")
     db.commit()
     assert mitgliedschaft.klaerungsfaelle(db) == []
+
+
+def _mitglied(db: Session, name: str, bis: date, beendet: bool = False):
+    k = kunden.lege_an(db, name=name, email=f"{name.lower()}@x.de")
+    k.mitglied_bis = bis
+    if beendet:
+        k.mitglied_beendet_am = utcnow()
+    return k
+
+
+def test_pruefliste_umfasst_auslaufende_und_ausgelaufene(db: Session, welt) -> None:
+    heute = date(2027, 8, 31)
+    clock.set_override(db, heute)
+    ausgelaufen = _mitglied(db, "Alt", date(2027, 4, 30))
+    laufend = _mitglied(db, "Neu", date(2028, 4, 30))
+    _mitglied(db, "Uralt", date(2026, 4, 30))  # vorletzte Saison: schon abgeglichen
+    _mitglied(db, "Weg", date(2027, 4, 30), beendet=True)  # ausdrücklich beendet
+    db.commit()
+    assert mitgliedschaft.pruefliste(db, heute) == [ausgelaufen, laufend]
+
+
+def test_sammelaktionen(db: Session, welt) -> None:
+    heute = date(2027, 8, 31)
+    clock.set_override(db, heute)
+    a = _mitglied(db, "A", date(2027, 4, 30))
+    b = _mitglied(db, "B", date(2028, 4, 30))
+    db.commit()
+    assert mitgliedschaft.verlaengere_alle(db, [a.id, b.id], admin_user_id=None) == [a]
+    db.commit()
+    assert a.mitglied_bis == date(2028, 4, 30)  # b war schon bis dahin freigeschaltet
+    c = _mitglied(db, "C", date(2027, 4, 30))
+    db.commit()
+    ergebnis = mitgliedschaft.beende_alle(
+        db, [b.id, c.id], grund="kein Mitglied mehr", admin_user_id=None
+    )
+    db.commit()
+    assert [(k.name, galt) for k, galt in ergebnis] == [("B", True), ("C", False)]
+    assert mitgliedschaft.pruefliste(db, heute) == [a]
+
+
+def test_pruefliste_csv(db: Session, welt) -> None:
+    k = _mitglied(db, "=Anna", date(2027, 4, 30))
+    k.mitglied_antrag_hinweis = "Nr. 4711"
+    db.commit()
+    zeilen = mitgliedschaft.pruefliste_csv([k]).strip().splitlines()
+    # Werte, die mit = beginnen, entschärft csv_sicher mit einem Hochkomma (Formel-Injection).
+    assert zeilen == [
+        "name;email;mitglied_bis;angaben_im_antrag",
+        "'=Anna;'=anna@x.de;2027-04-30;Nr. 4711",
+    ]
+
+
+@pytest.mark.parametrize(
+    "saisonstart,warnt", [(date(2027, 9, 15), False), (date(2027, 9, 10), True)]
+)
+def test_abgleich_warnung(db: Session, saisonstart: date, warnt: bool) -> None:
+    db.add(Betriebszeit(wochentag=0, oeffnet=time(9), schliesst=time(23), gueltig_von=saisonstart))
+    db.commit()
+    assert (mitgliedschaft.abgleich_warnung(db, date(2027, 6, 1)) is not None) is warnt
+
+
+def test_ohne_befristete_betriebszeiten_keine_warnung(db: Session, welt) -> None:
+    assert mitgliedschaft.abgleich_warnung(db, date(2027, 6, 1)) is None
+
+
+def test_tageslauf_meldet_abgleich_einmal_und_erinnert_einmal(db: Session, welt) -> None:
+    _, k = welt
+    k.mitglied_bis = date(2028, 4, 30)
+    db.commit()
+    clock.set_override(db, date(2027, 8, 30))
+    lauf = mitgliedschaft.tageslauf(db)
+    db.commit()
+    assert lauf.abgleich is None and lauf.erinnert == []
+    clock.set_override(db, date(2027, 8, 31))
+    assert mitgliedschaft.tageslauf(db).abgleich == 1
+    db.commit()
+    assert mitgliedschaft.tageslauf(db).abgleich is None  # nur einmal im Jahr
+    db.commit()
+    clock.set_override(db, date(2028, 4, 16))  # 14 Tage vor Ablauf
+    assert mitgliedschaft.tageslauf(db).erinnert == [k.id]
+    db.commit()
+    assert mitgliedschaft.tageslauf(db).erinnert == []  # je Ablaufdatum nur einmal
+    assert k.mitglied_erinnert_fuer == date(2028, 4, 30)
+
+
+def test_tageslauf_markiert_konto_nach_ablauf(db: Session, welt) -> None:
+    abgelaufen = _mitglied(db, "Abgelaufen", date(2028, 4, 30))
+    laufend = _mitglied(db, "Laufend", date(2029, 4, 30))
+    db.commit()
+    for k in (abgelaufen, laufend):
+        db.merge(LesestandVersion(dokument=f"konto:{k.id}", version=1, geaendert=False))
+    db.commit()
+    clock.set_override(db, date(2028, 5, 1))
+    mitgliedschaft.tageslauf(db)
+    db.commit()
+    db.expire_all()
+    assert db.get(LesestandVersion, f"konto:{abgelaufen.id}").geaendert is True
+    assert db.get(LesestandVersion, f"konto:{laufend.id}").geaendert is False

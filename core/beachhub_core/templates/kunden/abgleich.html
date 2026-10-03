@@ -1,0 +1,31 @@
+{% extends "base.html" %}{% block title %}Mitglieder-Abgleich{% endblock %}
+{% block content %}
+<h1>Mitglieder-Abgleich</h1>
+<p class="hinweis">Einmal im Jahr (Stichtag {{ stichtag }}, siehe Einstellungen) gleichen Sie die freigeschalteten Mitglieder mit der Mitgliederliste des Vereins ab. Hier stehen alle Kunden, deren Mitgliedschaft zum {{ letzter|datum }} ausgelaufen ist oder bis zum {{ naechster|datum }} ausläuft.</p>
+{% if warnung %}<p class="fehler">{{ warnung }}</p>{% endif %}
+<p><a class="aktion" href="/admin/kunden/abgleich.csv">Als CSV herunterladen</a></p>
+<form method="post" action="/admin/kunden/abgleich" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <table>
+    <thead><tr><th></th><th>Name</th><th>E-Mail</th><th>Mitglied bis</th><th>Angaben im Antrag</th></tr></thead>
+    <tbody>
+    {% for k in kunden %}<tr>
+      <td><input type="checkbox" name="kunde_ids" value="{{ k.id }}" aria-label="{{ k.name }} auswählen"></td>
+      <td><a href="/admin/kunden/{{ k.id }}">{{ k.name }}</a></td>
+      <td>{{ k.email }}</td>
+      <td>{{ k.mitglied_bis|datum }}</td>
+      <td>{{ k.mitglied_antrag_hinweis }}</td>
+    </tr>{% else %}
+      <tr><td colspan="5" class="leer">Niemand zu prüfen.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if kunden %}
+  <div class="zeile">
+    <button name="aktion" value="verlaengern">Ausgewählte bis {{ naechster|datum }} verlängern</button>
+    <label>Grund <input name="grund" placeholder="Jahresabgleich"></label>
+    <button name="aktion" value="beenden" class="gefahr">Ausgewählte beenden</button>
+  </div>
+  {% endif %}
+</form>
+{% endblock %}

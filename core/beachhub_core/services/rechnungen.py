@@ -324,7 +324,7 @@ def _de(v: Decimal) -> str:
     return f"{v:.2f}".replace(".", ",")
 
 
-def _csv_sicher(wert: str) -> str:
+def csv_sicher(wert: str) -> str:
     """Verhindert CSV-/Formel-Injection (Excel & Co. interpretieren Zellen, die mit
     =, +, - oder @ beginnen, als Formel): eine führende einzelne Anführung entschärft das,
     ohne den sichtbaren Wert zu verändern."""
@@ -362,7 +362,7 @@ def csv_export(db: Session, von: date, bis: date) -> str:
                 [
                     r.nummer,
                     r.datum.isoformat(),
-                    _csv_sicher(r.adresse_snapshot.get("name", "")),
+                    csv_sicher(r.adresse_snapshot.get("name", "")),
                     r.art,
                     r.status,
                     _de(z.ust_satz),

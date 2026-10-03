@@ -39,6 +39,7 @@ NAVIGATION: list[Bereich] = [
         [
             Punkt("Kundenliste", "/admin/kunden"),
             Punkt("Mitgliedsanträge", "/admin/kunden/antraege"),
+            Punkt("Mitglieder-Abgleich", "/admin/kunden/abgleich"),
         ],
     ),
     Bereich("Rechnungen", "/admin/rechnungen"),

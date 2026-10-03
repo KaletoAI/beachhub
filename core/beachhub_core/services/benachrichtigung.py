@@ -65,6 +65,21 @@ def mitgliedschaft_beendet(db: Session, k: Kunde) -> None:
     mail.sende(k.email, "Ihre Mitgliedschaft wurde beendet", _text("mitgliedschaft_beendet", k=k))
 
 
+def mitgliedschaft_erinnerung(db: Session, k: Kunde) -> None:
+    mail.sende(
+        k.email, "Ihre Mitgliedschaft läuft bald ab", _text("mitgliedschaft_erinnerung", k=k)
+    )
+
+
+def abgleich_faellig(anzahl: int) -> None:
+    betreiber_alarm(
+        "Jahresabgleich der Mitglieder",
+        "Der Stichtag für den jährlichen Abgleich der Mitglieder ist erreicht. Auf der Prüfliste "
+        f"stehen {anzahl} Kunden.\n\nBitte in der Verwaltung unter Kunden → Mitglieder-Abgleich "
+        "gegen die Mitgliederliste des Vereins prüfen und verlängern oder beenden.",
+    )
+
+
 def rechnung(db: Session, r: Rechnung) -> None:
     if not r.pdf_pfad:
         from beachhub_core.services import rechnung_pdf  # Zyklus vermeiden
