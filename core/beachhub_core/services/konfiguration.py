@@ -27,7 +27,6 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "grund_temperatur": (Decimal, Decimal("0.0")),
     "antwort_hinweis_sekunden": (int, 120),
     "pin_laenge": (int, 6),
-    "portal_kundengruppe": (str, ""),
 }
 
 # Werte, die in den Plan der Halle eingehen (shared.hallenplan.PlanKonfig).
@@ -132,13 +131,6 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "um Geduld bittet.",
     ),
     "pin_laenge": Beschreibung("Portal und Zugang", "Länge des Zahlencodes", "Stellen"),
-    "portal_kundengruppe": Beschreibung(
-        "Portal und Zugang",
-        "Kundengruppe neuer Portalkunden",
-        "",
-        "Name der Kundengruppe, die ein im Portal angelegter Kunde bekommt. Leer: die erste "
-        "Gruppe in alphabetischer Reihenfolge.",
-    ),
 }
 
 # Reihenfolge der Gruppen auf der Konfigurationsseite.

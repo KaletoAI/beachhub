@@ -16,11 +16,10 @@ from beachhub_core.models import (
     Buchung,
     GuthabenBuchung,
     Kunde,
-    Kundengruppe,
     Rechnung,
 )
-from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_uuid
-from beachhub_core.services import guthaben, kunden
+from beachhub_core.routes._form import fehlertext, pflicht, t_betrag
+from beachhub_core.services import guthaben, kunden, kundengruppen
 from beachhub_core.services.guthaben import GuthabenFehler
 from beachhub_core.services.kunden import KundenFehler
 from beachhub_core.templating import mit_flash, render
@@ -29,7 +28,6 @@ router = APIRouter()
 
 FEHLERTEXT = {
     "email_vergeben": "E-Mail-Adresse ist bereits vergeben",
-    "gruppe_unbekannt": "Kundengruppe unbekannt",
     "nicht_gedeckt": "Guthaben nicht gedeckt",
     "betrag_muss_negativ_sein": "Auszahlung muss negativ sein",
     "art_unbekannt": "Art unbekannt",
@@ -48,11 +46,7 @@ def _liste_ctx(db: Session, q: str) -> dict:  # type: ignore[type-arg]
     stmt = select(Kunde).where(Kunde.anonymisiert_am.is_(None)).order_by(Kunde.name)
     if q:
         stmt = stmt.where(or_(Kunde.name.ilike(f"%{q}%"), Kunde.email.ilike(f"%{q}%")))
-    return {
-        "kunden": db.scalars(stmt.limit(200)).all(),
-        "q": q,
-        "gruppen": db.scalars(select(Kundengruppe).order_by(Kundengruppe.name)).all(),
-    }
+    return {"kunden": db.scalars(stmt.limit(200)).all(), "q": q}
 
 
 @router.get("/kunden", response_class=HTMLResponse)
@@ -70,8 +64,7 @@ def anlegen(
     request: Request,
     name: str = Form(...),
     email: str = Form(...),
-    kundengruppe_id: str = Form(...),
-    zahlungsart: str = Form(""),
+    rechnungskunde: str = Form(""),
     adresse_strasse: str = Form(""),
     adresse_plz: str = Form(""),
     adresse_ort: str = Form(""),
@@ -83,8 +76,7 @@ def anlegen(
             db,
             name=pflicht(name.strip() or None, "Name"),
             email=email,
-            kundengruppe_id=pflicht(t_uuid(kundengruppe_id), "Kundengruppe"),
-            zahlungsart=zahlungsart or None,
+            rechnungskunde=rechnungskunde == "1",
             adresse_strasse=adresse_strasse,
             adresse_plz=adresse_plz,
             adresse_ort=adresse_ort,
@@ -107,7 +99,7 @@ def _detail_ctx(db: Session, k: Kunde) -> dict:  # type: ignore[type-arg]
     seit = clock.now(db) - timedelta(days=365)
     return {
         "kunde": k,
-        "gruppen": db.scalars(select(Kundengruppe).order_by(Kundengruppe.name)).all(),
+        "gruppe_heute": kundengruppen.effektive_gruppe(db, k, clock.today(db)),
         "buchungen": db.scalars(
             select(Buchung)
             .where(Buchung.kunde_id == k.id, Buchung.beginn >= seit)
@@ -151,8 +143,7 @@ def aendern(
     kunde_id: uuid.UUID,
     name: str = Form(...),
     email: str = Form(...),
-    kundengruppe_id: str = Form(...),
-    zahlungsart: str = Form(...),
+    rechnungskunde: str = Form(""),
     adresse_strasse: str = Form(""),
     adresse_plz: str = Form(""),
     adresse_ort: str = Form(""),
@@ -171,8 +162,7 @@ def aendern(
             admin_user_id=admin.id,
             name=pflicht(name.strip() or None, "Name"),
             email=email,
-            kundengruppe_id=pflicht(t_uuid(kundengruppe_id), "Kundengruppe"),
-            zahlungsart=zahlungsart,
+            rechnungskunde=rechnungskunde == "1",
             adresse_strasse=adresse_strasse,
             adresse_plz=adresse_plz,
             adresse_ort=adresse_ort,

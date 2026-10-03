@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from beachhub_core.models import Feld, Konfiguration, Tarif
+from beachhub_core.services import kundengruppen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -245,7 +246,23 @@ def test_stammdaten_unternavigation_auf_jeder_seite(eingeloggt: TestClient) -> N
             assert f'href="{ziel}"' in text, f"{seite} verlinkt {ziel} nicht"
 
 
-def test_kundenseite_verweist_ohne_gruppen_auf_kundengruppen(eingeloggt: TestClient) -> None:
-    text = eingeloggt.get("/admin/kunden").text
-    assert 'href="/admin/kundengruppen"' in text
-    assert "Kundengruppe" in text
+def test_kundengruppen_name_und_satz_aendern(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    seite = c.get("/admin/kundengruppen")
+    assert "Nicht-Mitglied" in seite.text and "DJK-Mitglied" in seite.text
+    g = kundengruppen.mitglied(db)
+    r = c.post(
+        f"/admin/kundengruppen/{g.id}",
+        data={"csrf_token": c.csrf, "name": "DJK", "ust_satz": "7,5"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.refresh(g)
+    assert g.name == "DJK" and g.ust_satz == Decimal("7.50")
+    r = c.post(
+        f"/admin/kundengruppen/{g.id}",
+        data={"csrf_token": c.csrf, "name": "DJK", "ust_satz": "120"},
+    )
+    assert r.status_code == 200 and "Steuersatz ungültig" in r.text
+    # Eine dritte Gruppe lässt sich nicht anlegen.
+    assert c.post("/admin/kundengruppen", data={"csrf_token": c.csrf}).status_code == 405

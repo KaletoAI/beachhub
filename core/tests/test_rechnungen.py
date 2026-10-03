@@ -8,7 +8,6 @@ from beachhub_core.models import (
     Betriebszeit,
     Feld,
     FeldRaster,
-    Kundengruppe,
     Rechnung,
     RechnungPosition,
     Tarif,
@@ -23,9 +22,7 @@ from sqlalchemy.orm import Session
 def welt(db: Session):
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    p = Kundengruppe(name="Privat")
-    v = Kundengruppe(name="Verein", standard_zahlungsart="rechnung")
-    db.add_all([f, p, v, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
@@ -33,12 +30,11 @@ def welt(db: Session):
         db,
         name="A",
         email="a@x.de",
-        kundengruppe_id=p.id,
         adresse_strasse="Weg 1",
         adresse_plz="12345",
         adresse_ort="Ort",
     )
-    v1 = kunden.lege_an(db, name="TSV", email="v@x.de", kundengruppe_id=v.id)
+    v1 = kunden.lege_an(db, name="TSV", email="v@x.de", rechnungskunde=True)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     konfiguration.setze(

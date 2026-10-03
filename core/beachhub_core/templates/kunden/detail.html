@@ -8,13 +8,8 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>Name <input name="name" value="{{ kunde.name }}" required></label>
   <label>E-Mail <input name="email" type="email" value="{{ kunde.email }}" required></label>
-  <label>Kundengruppe <select name="kundengruppe_id" required>
-    {% for g in gruppen %}<option value="{{ g.id }}" {% if g.id == kunde.kundengruppe_id %}selected{% endif %}>{{ g.name }}</option>{% endfor %}
-  </select></label>
-  <label>Zahlungsart <select name="zahlungsart">
-    <option value="online" {% if kunde.zahlungsart == "online" %}selected{% endif %}>online</option>
-    <option value="rechnung" {% if kunde.zahlungsart == "rechnung" %}selected{% endif %}>Rechnung</option>
-  </select></label>
+  <p>Gruppe heute: <strong>{{ gruppe_heute.name }}</strong></p>
+  <label><input type="checkbox" name="rechnungskunde" value="1" {% if kunde.rechnungskunde %}checked{% endif %}> Rechnungskunde – bucht nicht online</label>
   <label>Straße <input name="adresse_strasse" value="{{ kunde.adresse_strasse }}"></label>
   <label>PLZ <input name="adresse_plz" value="{{ kunde.adresse_plz }}"></label>
   <label>Ort <input name="adresse_ort" value="{{ kunde.adresse_ort }}"></label>

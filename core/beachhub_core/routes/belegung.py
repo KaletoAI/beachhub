@@ -213,8 +213,10 @@ def buchung_anlegen(
             ende=_lokal(ende),
             quelle="admin",
             admin_user_id=admin.id,
+            zahlungsart="manuell",
         )
-        if b.zahlungsart == "online":
+        # Rechnungskunden rechnet der Monatslauf ab; alle anderen bekommen sofort eine Rechnung.
+        if not b.kunde.rechnungskunde:
             r = rechnungen.erzeuge_einzelrechnung(db, b)
         db.commit()
     except FORM_FEHLER as e:

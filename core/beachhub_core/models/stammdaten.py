@@ -53,9 +53,13 @@ class Ausnahmetag(UUIDMixin, ZeitstempelMixin, Base):
 
 
 class Kundengruppe(UUIDMixin, ZeitstempelMixin, Base):
+    """Genau zwei Zeilen: DJK-Mitglied und Nicht-Mitglied (A-KUND-2). Der Betreiber ändert Name
+    und Steuersatz; eine dritte Gruppe verhindert der eindeutige Index auf `ist_mitglied`."""
+
     __tablename__ = "kundengruppe"
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    standard_zahlungsart: Mapped[str] = mapped_column(String(10), default="online", nullable=False)
+    ust_satz: Mapped[Decimal] = mapped_column(DECIMAL(5, 2), nullable=False)
+    ist_mitglied: Mapped[bool] = mapped_column(Boolean, nullable=False, unique=True)
 
 
 class Tarif(UUIDMixin, ZeitstempelMixin, Base):

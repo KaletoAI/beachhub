@@ -16,10 +16,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beachhub_core.config import settings
-from beachhub_core.models import AnfrageVerarbeitet, Kunde, Kundengruppe, Rechnung
+from beachhub_core.models import AnfrageVerarbeitet, Kunde, Rechnung
 from beachhub_core.services import (
     audit,
-    konfiguration,
     kunden,
     lesestand,
     online_buchung,
@@ -44,16 +43,6 @@ def _kunde_zum_konto(db: Session, konto_id: Any) -> Kunde | None:
     return db.scalar(select(Kunde).where(Kunde.portal_konto_id == konto_id))
 
 
-def _portal_gruppe(db: Session) -> Kundengruppe | None:
-    name = str(konfiguration.hole(db, "portal_kundengruppe")).strip()
-    if name:
-        gruppe = db.scalar(select(Kundengruppe).where(Kundengruppe.name == name))
-        if gruppe is not None:
-            return gruppe
-        logger.warning("Kundengruppe %r aus portal_kundengruppe fehlt – nehme die erste", name)
-    return db.scalar(select(Kundengruppe).order_by(Kundengruppe.name).limit(1))
-
-
 def _konto_angelegt(db: Session, anfrage: kanal.Anfrage, n: kanal.KontoAngelegt) -> Ergebnis:
     if anfrage.konto_id is None:
         return abgelehnt("ungueltig")
@@ -69,17 +58,8 @@ def _konto_angelegt(db: Session, anfrage: kanal.Anfrage, n: kanal.KontoAngelegt)
             .with_for_update()
         )
         if k is None:
-            gruppe = _portal_gruppe(db)
-            if gruppe is None:
-                return abgelehnt("keine_kundengruppe")
-            k = kunden.lege_an(
-                db,
-                name=n.anzeigename.strip(),
-                email=email,
-                kundengruppe_id=gruppe.id,
-                zahlungsart="online",
-                quelle="portal",
-            )
+            # Neue Portalkonten sind Nicht-Mitglied und kein Rechnungskunde (A-KUND-3, A-KUND-7).
+            k = kunden.lege_an(db, name=n.anzeigename.strip(), email=email, quelle="portal")
         vorher = audit.als_dict(k)
         # Das Portal hat die Adresse per Login-Code bestätigt. Eine abweichende alte Verknüpfung
         # stammt aus einem gelöschten oder wiederhergestellten Portal und wird ersetzt.

@@ -12,7 +12,6 @@ from beachhub_core.models import (
     Buchung,
     Feld,
     FeldRaster,
-    Kundengruppe,
     LesestandVersion,
     Tarif,
     Zahlung,
@@ -31,18 +30,17 @@ def welt(db: Session):
     lesestand.erzeuge_schluessel()
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    v = Kundengruppe(name="Verein", standard_zahlungsart="rechnung")
-    db.add_all([f, v, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    k = kunden.lege_an(db, name="V", email="v@x.de", kundengruppe_id=v.id)
+    k = kunden.lege_an(db, name="V", email="v@x.de", rechnungskunde=True)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     return f, k
 
 
-def test_lege_an_mit_abweichender_zahlungsart(db: Session, welt) -> None:
+def test_zahlungsart_steht_an_der_buchung(db: Session, welt) -> None:
     f, k = welt
     b = buchungen.lege_an(
         db,
@@ -52,7 +50,7 @@ def test_lege_an_mit_abweichender_zahlungsart(db: Session, welt) -> None:
         ende=kombiniere(D, time(20)),
         zahlungsart="online",
     )
-    assert k.zahlungsart == "rechnung"
+    assert k.rechnungskunde is True
     assert b.zahlungsart == "online"
 
 
@@ -77,14 +75,6 @@ def test_anfrage_verarbeitet_und_zahlung_eindeutig(db: Session, welt) -> None:
     with pytest.raises(IntegrityError):
         db.commit()
     db.rollback()
-
-
-def test_portal_kundengruppe_ist_konfigurierbar(db: Session) -> None:
-    assert konfiguration.hole(db, "portal_kundengruppe") == ""
-    konfiguration.setze(db, "portal_kundengruppe", "Privat")
-    db.commit()
-    assert konfiguration.hole(db, "portal_kundengruppe") == "Privat"
-    assert konfiguration.BESCHREIBUNGEN["portal_kundengruppe"].gruppe == "Portal und Zugang"
 
 
 def test_belegung_enthaelt_storno_frist_und_hinweis(db: Session, welt) -> None:

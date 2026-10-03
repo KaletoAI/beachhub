@@ -140,6 +140,11 @@ def erzeuge_einzelrechnung(db: Session, buchung: Buchung, *, quelle: str = "syst
     )
 
 
+# Zahlungsarten, die der Monatslauf sammelt. Plan 1a-II ersetzt den Monatslauf durch die
+# Saisonrechnung (A-RECH-3).
+MONATSLAUF_ZAHLUNGSARTEN: tuple[str, ...] = ("saison", "manuell")
+
+
 def abrechenbare_buchungen(
     db: Session, kunde: Kunde, jahr: int, monat: int
 ) -> list[tuple[Buchung, Decimal]]:
@@ -148,7 +153,7 @@ def abrechenbare_buchungen(
         select(Buchung)
         .where(
             Buchung.kunde_id == kunde.id,
-            Buchung.zahlungsart == "rechnung",
+            Buchung.zahlungsart.in_(MONATSLAUF_ZAHLUNGSARTEN),
             Buchung.rechnung_position_id.is_(None),
             Buchung.status.in_(
                 (
@@ -201,9 +206,15 @@ def erzeuge_sammelrechnung(db: Session, kunde: Kunde, jahr: int, monat: int) -> 
 
 
 def monatslauf(db: Session, jahr: int, monat: int) -> list[Rechnung]:
+    offen = select(Buchung.kunde_id).where(
+        Buchung.zahlungsart.in_(MONATSLAUF_ZAHLUNGSARTEN),
+        Buchung.rechnung_position_id.is_(None),
+    )
     erzeugt = []
     for kunde in db.scalars(
-        select(Kunde).where(Kunde.zahlungsart == "rechnung", Kunde.anonymisiert_am.is_(None))
+        select(Kunde)
+        .where(Kunde.id.in_(offen), Kunde.anonymisiert_am.is_(None))
+        .order_by(Kunde.name)
     ).all():
         r = erzeuge_sammelrechnung(db, kunde, jahr, monat)
         if r:

@@ -16,7 +16,6 @@ from beachhub_core.models import (
     Feld,
     FeldRaster,
     Kunde,
-    Kundengruppe,
     LesestandVersion,
     Tarif,
     utcnow,
@@ -24,8 +23,8 @@ from beachhub_core.models import (
 from beachhub_core.services import (
     anfragen,
     buchungen,
-    konfiguration,
     kunden,
+    kundengruppen,
     lesestand,
     rechnung_pdf,
     rechnungen,
@@ -52,13 +51,13 @@ def anfrage(typ: str, konto_id: uuid.UUID | None = None, **nutzlast) -> kanal.An
 def welt(db: Session):
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    p, v = Kundengruppe(name="Privat"), Kundengruppe(name="Verein")
-    db.add_all([f, p, v, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
+    gruppen = kundengruppen.nicht_mitglied(db), kundengruppen.mitglied(db)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
-    return f, p, v
+    return f, *gruppen
 
 
 def _angelegt(db: Session, konto_id: uuid.UUID, email: str = "anna@x.de") -> Kunde:
@@ -70,28 +69,17 @@ def _angelegt(db: Session, konto_id: uuid.UUID, email: str = "anna@x.de") -> Kun
 
 
 def test_konto_angelegt_legt_kunden_an(db: Session, welt) -> None:
-    _, p, _ = welt
     konto = uuid.uuid4()
     k = _angelegt(db, konto, email="  Anna@X.de ")
     assert k.email == "anna@x.de" and k.name == "Anna"
-    assert k.portal_konto_id == konto and k.zahlungsart == "online"
-    assert k.kundengruppe_id == p.id  # erste Gruppe nach Name: "Privat" < "Verein"
+    # Neue Portalkonten sind Nicht-Mitglied und kein Rechnungskunde (A-KUND-3, A-KUND-7).
+    assert k.portal_konto_id == konto and k.rechnungskunde is False and k.mitglied_bis is None
     assert db.get(LesestandVersion, f"konto:{k.id}").geaendert
-
-
-def test_konto_angelegt_nutzt_konfigurierte_gruppe(db: Session, welt) -> None:
-    _, _, v = welt
-    konfiguration.setze(db, "portal_kundengruppe", "Verein")
-    db.commit()
-    assert _angelegt(db, uuid.uuid4()).kundengruppe_id == v.id
-    konfiguration.setze(db, "portal_kundengruppe", "Gibtsnicht")
-    db.commit()
-    assert _angelegt(db, uuid.uuid4(), "b@x.de").kundengruppe.name == "Privat"
 
 
 def test_konto_angelegt_verknuepft_bestehenden_kunden(db: Session, welt) -> None:
     _, _, v = welt
-    alt = kunden.lege_an(db, name="Anna Abo", email="anna@x.de", kundengruppe_id=v.id)
+    alt = kunden.lege_an(db, name="Anna Abo", email="anna@x.de")
     db.commit()
     k = _angelegt(db, uuid.uuid4())
     assert k.id == alt.id and k.name == "Anna Abo"
@@ -110,7 +98,7 @@ def test_konto_angelegt_ignoriert_anonymisierten_kunden_mit_gleicher_email(
     # `alt.portal_konto_id` setzen und einen Audit-Eintrag mit quelle="portal" auf den bereits
     # gelöschten Kunden schreiben.
     _, p, _ = welt
-    alt = kunden.lege_an(db, name="Anna Alt", email="anna@x.de", kundengruppe_id=p.id)
+    alt = kunden.lege_an(db, name="Anna Alt", email="anna@x.de")
     alt.anonymisiert_am = utcnow()
     db.commit()
     antwort, _ = anfragen.bearbeite(
@@ -133,13 +121,6 @@ def test_konto_angelegt_zweimal_gleicher_kunde(db: Session, welt) -> None:
     konto = uuid.uuid4()
     assert _angelegt(db, konto).id == _angelegt(db, konto).id
     assert len(db.scalars(select(Kunde)).all()) == 1
-
-
-def test_ohne_kundengruppe(db: Session) -> None:
-    antwort, _ = anfragen.bearbeite(
-        db, anfrage("konto_angelegt", uuid.uuid4(), email="a@x.de", anzeigename="A")
-    )
-    assert antwort.status == "abgelehnt" and antwort.grund == "keine_kundengruppe"
 
 
 def test_unbekannt_ungueltig_und_konto_unbekannt(db: Session, welt) -> None:
@@ -251,7 +232,7 @@ def test_rechnung_nur_eigene(db: Session, welt) -> None:
     f, p, _ = welt
     konto = uuid.uuid4()
     k = _angelegt(db, konto)
-    fremd = kunden.lege_an(db, name="B", email="b@x.de", kundengruppe_id=p.id)
+    fremd = kunden.lege_an(db, name="B", email="b@x.de")
     eigene = []
     for kunde, stunde in ((k, 19), (fremd, 20)):
         b = buchungen.lege_an(

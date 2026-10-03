@@ -27,7 +27,7 @@ from beachhub_core.models import (
     Zahlung,
     utcnow,
 )
-from beachhub_core.services import konfiguration, pin
+from beachhub_core.services import konfiguration, kundengruppen, pin
 
 logger = logging.getLogger(__name__)
 
@@ -194,10 +194,11 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
     rechnungen = db.scalars(
         select(Rechnung).where(Rechnung.kunde_id == kunde.id).order_by(Rechnung.datum.desc())
     ).all()
+    gruppe = kundengruppen.effektive_gruppe(db, kunde, clock.today(db))
     return schema.KontoInhalt(
         kunde_id=str(kunde.id),
-        kundengruppe=kunde.kundengruppe.name,
-        zahlungsart=kunde.zahlungsart,
+        kundengruppe=gruppe.name,
+        zahlungsart="rechnung" if kunde.rechnungskunde else "online",
         guthaben=kunde.guthaben,
         buchungen=out,
         rechnungen=[

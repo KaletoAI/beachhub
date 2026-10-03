@@ -4,7 +4,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Kunde, Kundengruppe, utcnow
+from beachhub_core.models import Kunde, utcnow
 from beachhub_core.services import audit
 
 
@@ -17,25 +17,21 @@ def lege_an(
     *,
     name: str,
     email: str,
-    kundengruppe_id: uuid.UUID,
-    zahlungsart: str | None = None,
+    rechnungskunde: bool = False,
     adresse_strasse: str = "",
     adresse_plz: str = "",
     adresse_ort: str = "",
     quelle: str = "admin",
     admin_user_id: uuid.UUID | None = None,
 ) -> Kunde:
+    """Neue Kunden sind Nicht-Mitglied (A-KUND-3); die Mitgliedschaft schaltet der Betreiber ein."""
     email = email.strip().lower()
     if db.scalar(select(Kunde).where(Kunde.email == email)):
         raise KundenFehler("email_vergeben")
-    gruppe = db.get(Kundengruppe, kundengruppe_id)
-    if gruppe is None:
-        raise KundenFehler("gruppe_unbekannt")
     k = Kunde(
         name=name.strip(),
         email=email,
-        kundengruppe_id=kundengruppe_id,
-        zahlungsart=zahlungsart or gruppe.standard_zahlungsart,
+        rechnungskunde=rechnungskunde,
         adresse_strasse=adresse_strasse,
         adresse_plz=adresse_plz,
         adresse_ort=adresse_ort,
@@ -76,6 +72,10 @@ def aendere(db: Session, kunde: Kunde, *, admin_user_id: uuid.UUID | None, **fel
         nachher=audit.als_dict(kunde),
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    # Das Konto-Dokument trägt Rechnungskunde und Gruppe.
+    lesestand.markiere_geaendert(db, f"konto:{kunde.id}")
     return kunde
 
 

@@ -8,12 +8,12 @@
 </form>
 <div class="karte">
 <table>
-  <tr><th>Name</th><th>E-Mail</th><th>Gruppe</th><th>Zahlungsart</th><th>Guthaben</th><th></th></tr>
+  <tr><th>Name</th><th>E-Mail</th><th>Mitglied bis</th><th>Rechnungskunde</th><th>Guthaben</th><th></th></tr>
   {% for k in kunden %}<tr>
     <td>{{ k.name }}</td>
     <td>{{ k.email }}</td>
-    <td>{{ k.kundengruppe.name }}</td>
-    <td>{{ k.zahlungsart }}</td>
+    <td>{{ k.mitglied_bis|datum if k.mitglied_bis else "–" }}</td>
+    <td>{{ "ja" if k.rechnungskunde else "" }}</td>
     <td>{{ k.guthaben|euro }}</td>
     <td><a class="aktion" href="/admin/kunden/{{ k.id }}">öffnen</a></td>
   </tr>{% endfor %}
@@ -21,20 +21,12 @@
 </div>
 <div class="karte schmal">
 <h2>Neuer Kunde</h2>
-{% if not gruppen %}<p class="fehler">Es gibt noch keine Kundengruppe. Bitte zuerst unter <a href="/admin/kundengruppen">Stammdaten → Kundengruppen</a> eine anlegen.</p>{% else %}<p class="small">Kundengruppen verwalten Sie unter <a href="/admin/kundengruppen">Stammdaten → Kundengruppen</a>.</p>{% endif %}
+<p class="small">Neue Kunden sind Nicht-Mitglieder. Eine Mitgliedschaft schalten Sie auf der Kundenseite frei.</p>
 <form method="post" action="/admin/kunden">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>Name <input name="name" required></label>
   <label>E-Mail <input name="email" type="email" required></label>
-  <label>Kundengruppe <select name="kundengruppe_id" required>
-    <option value="">bitte wählen</option>
-    {% for g in gruppen %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
-  </select></label>
-  <label>Zahlungsart <select name="zahlungsart">
-    <option value="">Standard der Gruppe</option>
-    <option value="online">online</option>
-    <option value="rechnung">Rechnung</option>
-  </select></label>
+  <label><input type="checkbox" name="rechnungskunde" value="1"> Rechnungskunde – bucht nicht online, Buchungen legen Sie an</label>
   <label>Straße <input name="adresse_strasse"></label>
   <label>PLZ <input name="adresse_plz"></label>
   <label>Ort <input name="adresse_ort"></label>

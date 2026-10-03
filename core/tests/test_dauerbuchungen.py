@@ -9,7 +9,6 @@ from beachhub_core.models import (
     Dauerbuchung,
     Feld,
     FeldRaster,
-    Kundengruppe,
     Sperre,
     Tarif,
 )
@@ -22,13 +21,12 @@ from sqlalchemy.orm import Session
 def welt(db: Session):
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    g = Kundengruppe(name="Verein", standard_zahlungsart="rechnung")
-    db.add_all([f, g, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    k = kunden.lege_an(db, name="TSV", email="tsv@x.de", kundengruppe_id=g.id)
-    k2 = kunden.lege_an(db, name="B", email="b@x.de", kundengruppe_id=g.id)
+    k = kunden.lege_an(db, name="TSV", email="tsv@x.de", rechnungskunde=True)
+    k2 = kunden.lege_an(db, name="B", email="b@x.de")
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     return f, k, k2
@@ -116,7 +114,7 @@ def test_anlegen_mit_auslassen_und_gemeinsamer_pin(db: Session, welt) -> None:
     assert len(dauer.buchungen) == 3
     assert {b.pin_hash for b in dauer.buchungen} == {dauer.pin_hash}
     assert db.get(Buchung, fremd.id).status == "storniert"
-    assert all(b.zahlungsart == "rechnung" and b.quelle == "dauer" for b in dauer.buchungen)
+    assert all(b.zahlungsart == "saison" and b.quelle == "dauer" for b in dauer.buchungen)
     assert pin.entschluessele(dauer.pin_verschluesselt) == pin.entschluessele(
         dauer.buchungen[0].pin_verschluesselt
     )

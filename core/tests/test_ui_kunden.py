@@ -1,32 +1,29 @@
 from decimal import Decimal
 
-from beachhub_core.models import Buchung, Feld, GuthabenBuchung, Kunde, Kundengruppe, Rechnung
+from beachhub_core.models import Buchung, Feld, GuthabenBuchung, Kunde, Rechnung
+from beachhub_core.services import kundengruppen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 
+def _neu(c: TestClient, **extra: str) -> dict[str, str]:
+    return {
+        "csrf_token": c.csrf,
+        "name": "Anna Müller",
+        "email": "Anna@X.de",
+        "adresse_strasse": "Weg 1",
+        "adresse_plz": "12345",
+        "adresse_ort": "Ort",
+        **extra,
+    }
+
+
 def test_kunde_anlegen_suchen_guthaben(eingeloggt: TestClient, db: Session) -> None:
     c = eingeloggt
-    g = Kundengruppe(name="Privat")
-    db.add(g)
-    db.commit()
-    r = c.post(
-        "/admin/kunden",
-        data={
-            "csrf_token": c.csrf,
-            "name": "Anna Müller",
-            "email": "Anna@X.de",
-            "kundengruppe_id": str(g.id),
-            "zahlungsart": "",
-            "adresse_strasse": "Weg 1",
-            "adresse_plz": "12345",
-            "adresse_ort": "Ort",
-        },
-        follow_redirects=False,
-    )
+    r = c.post("/admin/kunden", data=_neu(c), follow_redirects=False)
     assert r.status_code == 303
     k = db.query(Kunde).one()
-    assert k.email == "anna@x.de" and k.zahlungsart == "online"
+    assert k.email == "anna@x.de" and k.rechnungskunde is False
     assert "Anna Müller" in c.get("/admin/kunden?q=müll").text
     assert "Anna Müller" not in c.get("/admin/kunden?q=zzz").text
     r = c.post(
@@ -48,19 +45,7 @@ def test_kunde_anlegen_suchen_guthaben(eingeloggt: TestClient, db: Session) -> N
 
 def test_doppelte_email_zeigt_fehler(eingeloggt: TestClient, db: Session) -> None:
     c = eingeloggt
-    g = Kundengruppe(name="Privat")
-    db.add(g)
-    db.commit()
-    daten = {
-        "csrf_token": c.csrf,
-        "name": "A",
-        "email": "a@x.de",
-        "kundengruppe_id": str(g.id),
-        "zahlungsart": "",
-        "adresse_strasse": "",
-        "adresse_plz": "",
-        "adresse_ort": "",
-    }
+    daten = _neu(c, name="A", email="a@x.de", adresse_strasse="", adresse_plz="", adresse_ort="")
     c.post("/admin/kunden", data=daten)
     r = c.post("/admin/kunden", data=daten)
     assert r.status_code == 200 and "bereits vergeben" in r.text
@@ -68,17 +53,12 @@ def test_doppelte_email_zeigt_fehler(eingeloggt: TestClient, db: Session) -> Non
 
 def test_kunde_aendern_und_anonymisieren(eingeloggt: TestClient, db: Session) -> None:
     c = eingeloggt
-    g = Kundengruppe(name="Privat")
-    db.add(g)
-    db.commit()
     c.post(
         "/admin/kunden",
         data={
             "csrf_token": c.csrf,
             "name": "Bea Schmidt",
             "email": "bea@x.de",
-            "kundengruppe_id": str(g.id),
-            "zahlungsart": "",
             "adresse_strasse": "",
             "adresse_plz": "",
             "adresse_ort": "",
@@ -91,8 +71,6 @@ def test_kunde_aendern_und_anonymisieren(eingeloggt: TestClient, db: Session) ->
             "csrf_token": c.csrf,
             "name": "Bea Schmidt-Neu",
             "email": "bea-neu@x.de",
-            "kundengruppe_id": str(g.id),
-            "zahlungsart": "rechnung",
             "adresse_strasse": "",
             "adresse_plz": "",
             "adresse_ort": "",
@@ -124,11 +102,10 @@ def test_detail_seite_mit_buchungen_rechnungen_guthaben(
     from datetime import UTC, date, datetime, timedelta
 
     c = eingeloggt
-    g = Kundengruppe(name="Privat")
     feld = Feld(name="Feld 1")
-    db.add_all([g, feld])
+    db.add(feld)
     db.commit()
-    k = Kunde(name="Carla Voss", email="carla@x.de", kundengruppe_id=g.id, zahlungsart="online")
+    k = Kunde(name="Carla Voss", email="carla@x.de")
     db.add(k)
     db.commit()
     jetzt = datetime.now(UTC)
@@ -140,7 +117,9 @@ def test_detail_seite_mit_buchungen_rechnungen_guthaben(
             ende=jetzt + timedelta(days=1, hours=1),
             status=Buchung.BESTAETIGT,
             preis=Decimal("30.00"),
-            zahlungsart="online",
+            ust_satz=Decimal("19.00"),
+            kundengruppe_id=kundengruppen.nicht_mitglied(db).id,
+            zahlungsart="manuell",
             quelle="admin",
         )
     )
@@ -169,3 +148,28 @@ def test_detail_seite_mit_buchungen_rechnungen_guthaben(
     assert "30,00 €" in seite.text
     assert "2026-000001" in seite.text
     assert f"/admin/rechnungen/{db.query(Rechnung).one().id}/pdf" in seite.text
+
+
+def test_rechnungskunde_anlegen_und_aendern(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    c.post("/admin/kunden", data=_neu(c, rechnungskunde="1"))
+    k = db.query(Kunde).one()
+    assert k.rechnungskunde is True
+    seite = c.get(f"/admin/kunden/{k.id}")
+    assert 'name="rechnungskunde" value="1" checked' in seite.text
+    assert "Gruppe heute: <strong>Nicht-Mitglied</strong>" in seite.text
+    r = c.post(
+        f"/admin/kunden/{k.id}",
+        data={
+            "csrf_token": c.csrf,
+            "name": k.name,
+            "email": k.email,
+            "adresse_strasse": "",
+            "adresse_plz": "",
+            "adresse_ort": "",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.refresh(k)
+    assert k.rechnungskunde is False
