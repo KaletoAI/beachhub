@@ -116,11 +116,15 @@ Betrieb beginnt:
 1. **Felder** anlegen (Name, Raster in Minuten je Feld).
 2. **Betriebszeiten** je Wochentag festlegen, inklusive Ausnahmetagen (z. B. Feiertage mit
    abweichenden Zeiten oder Schließung).
-3. **Kundengruppen** anlegen (z. B. Vereinsmitglieder, Externe).
-4. **Tarife** je Kundengruppe und Zeitfenster hinterlegen.
-5. **Konfiguration** prüfen/anpassen, u. a. `rechnung_tag_im_folgemonat` (Standard: 3 – Tag im
-   Folgemonat, ab dem Sammelrechnungen für den Vormonat erzeugt werden) und
-   `rechnung_zahlungsziel_tage` (Standard: 14 – Zahlungsziel ab Rechnungsdatum).
+3. **Kundengruppen** prüfen: Es gibt genau zwei feste Gruppen, „DJK-Mitglied“ (7 %) und
+   „Nicht-Mitglied“ (19 %). Name und Steuersatz lassen sich ändern, eine dritte Gruppe nicht.
+   Welche Gruppe für einen Kunden gilt, ergibt sich aus seiner Mitgliedschaft am Tag des Termins.
+4. **Tarife** hinterlegen – ohne Gruppe für alle, mit Gruppe für Mitglieder bzw. Nicht-Mitglieder.
+5. **Einstellungen** prüfen/anpassen, u. a. `rechnung_zahlungsziel_tage` (Standard: 14),
+   `event_ust_satz` (19 % – Vorbelegung für Buchungen, die der Betreiber anlegt),
+   `mitgliedschaft_ablauf` (30.04.), `mitglieder_abgleich` (31.08., muss vor dem ersten
+   Buchungsfenster der Saison liegen – die Seite warnt sonst), `mitglied_erinnerung_tage` (14)
+   und `rechnungskunden_online_buchen` (nein).
 6. Einen **Testkunden** anlegen.
 7. Eine **Testbuchung** für den Testkunden durchführen und die Bestätigungsmail (PIN) prüfen.
 8. Über den Monatslauf oder manuell eine **Testrechnung** erzeugen und das PDF prüfen.
@@ -130,11 +134,11 @@ Betrieb beginnt:
 
 ## 5. Laufender Betrieb
 
-Der Monatslauf (Erzeugung der Sammelrechnungen für den Vormonat) läuft automatisch: Der
-APScheduler-Job prüft **täglich um 06:00 Uhr**, ob der aktuelle Tag den in der Konfiguration
-hinterlegten Wert `rechnung_tag_im_folgemonat` erreicht oder überschritten hat, und erzeugt dann
-die fehlenden Sammelrechnungen für den Vormonat. Das Zahlungsziel jeder Rechnung ergibt sich aus
-`rechnung_zahlungsziel_tage` ab Rechnungsdatum.
+Der Monatslauf erzeugt bis zur Einführung der Saisonrechnung (Stufe 1a-II) Sammelrechnungen für
+die **Termine von Dauerbuchungen** des Vormonats: Der APScheduler-Job prüft **täglich um 06:00
+Uhr**, ob der aktuelle Tag den Wert `rechnung_tag_im_folgemonat` erreicht hat. Buchungen, die der
+Betreiber selbst anlegt, bekommen sofort eine eigene, offene Rechnung mit dem Zahlungsziel
+`rechnung_zahlungsziel_tage`.
 
 Der Monatslauf kann bei Bedarf auch manuell angestoßen werden (z. B. Nachlauf nach einem Ausfall):
 
@@ -151,6 +155,22 @@ Logs der laufenden Anwendung:
 ```bash
 docker compose logs -f app
 ```
+
+### Mitgliedschaft
+
+- **Anträge** aus dem Portal kommen per Mail und stehen unter Kunden → Mitgliedsanträge.
+  Freischalten, Verlängern, Beenden und Verwerfen geschieht auf der Kundenseite; der Kunde bekommt
+  jeweils eine Mail.
+- **Tageslauf um 07:00 Uhr:** Am Stichtag `mitglieder_abgleich` (einmal im Jahr, bei Ausfall am
+  nächsten Lauf nachgeholt) kommt eine Mail an den Betreiber; die Prüfliste steht unter Kunden →
+  Mitglieder-Abgleich (mit CSV und Sammelaktionen). Kunden, deren Mitgliedschaft in
+  `mitglied_erinnerung_tage` Tagen endet, bekommen eine Erinnerung – je Ablaufdatum höchstens eine.
+  Der Tageslauf markiert außerdem die Konto-Dokumente von Kunden, deren Mitgliedschaft gestern endete.
+- **Klärungsliste** (System → Klärung Mitgliedschaft): künftige Buchungen zum Mitgliedspreis, deren
+  Kunde am Termin kein Mitglied mehr ist. Die Buchungen behalten Preis und Steuersatz, bis sie
+  geklärt oder storniert sind.
+- **Rechnungskunden** buchen nicht online, solange `rechnungskunden_online_buchen` aus ist; ihre
+  Buchungen legt der Betreiber an.
 
 ## 5a. Kanal zum Portal
 
