@@ -1,0 +1,8 @@
+Hallo {{ k.name }},
+
+Ihre Mitgliedschaft im Verein ist bei uns bis zum {{ k.mitglied_bis|datum }} freigeschaltet.
+Für Termine bis zu diesem Tag gelten ab jetzt die Preise für Mitglieder. Bereits bestätigte
+Buchungen behalten ihren Preis.
+
+Viele Grüße
+{{ betreiber }}

@@ -1,16 +1,21 @@
-{% extends "base.html" %}{% block title %}Konfiguration{% endblock %}
+{% extends "base.html" %}{% block title %}Einstellungen{% endblock %}
 {% block content %}
-<h1>Konfiguration</h1>
-<p class="hinweis">Alle Fristen und Werte des Betriebs. Ein leeres Feld bedeutet: Es gilt der Vorgabewert, der als hellgrauer Text im Feld steht.</p>
+<h1>Einstellungen</h1>
+<p class="hinweis">Alle Fristen, Werte und Grundsatzentscheidungen des Betriebs. Ein leeres Feld bedeutet: Es gilt der Vorgabewert, der als hellgrauer Text im Feld steht. Jede Änderung wird protokolliert und gilt für Buchungen und Belege, die danach entstehen.</p>
 {% if fehler %}<p class="fehler">{{ fehler }}</p>{% endif %}
+{% if warnung %}<p class="fehler">{{ warnung }}</p>{% endif %}
 <form method="post" action="/admin/konfiguration" class="karte">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   {% for gruppe, eintraege in gruppen %}
   <fieldset>
     <legend>{{ gruppe }}</legend>
     <div class="raster">
-    {% for schluessel, wert, b in eintraege %}
+    {% for schluessel, wert, b, ist_bool in eintraege %}
+      {% if ist_bool %}
+      <label><span class="bezeichnung">{{ b.name }}</span><select name="{{ schluessel }}"><option value="ja" {% if wert %}selected{% endif %}>ja</option><option value="nein" {% if not wert %}selected{% endif %}>nein</option></select><span class="hinweis">Vorgabe: {{ "ja" if defaults[schluessel][1] else "nein" }}. {{ b.hilfe }}</span></label>
+      {% else %}
       <label><span class="bezeichnung">{{ b.name }}{% if b.einheit %} <span class="einheit">({{ b.einheit }})</span>{% endif %}</span><input name="{{ schluessel }}" value="{{ wert|wert }}" placeholder="{{ defaults[schluessel][1]|wert }}"><span class="hinweis">{{ b.hilfe }}</span></label>
+      {% endif %}
     {% endfor %}
     </div>
   </fieldset>

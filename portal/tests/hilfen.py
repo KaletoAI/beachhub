@@ -113,7 +113,7 @@ def konto(
     return {
         "kunde_id": str(KUNDE_ID),
         "kundengruppe": gruppe,
-        "zahlungsart": "online",
+        "rechnungskunde": False,
         "guthaben": guthaben,
         "buchungen": list(buchungen),
         "rechnungen": list(rechnungen),

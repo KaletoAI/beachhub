@@ -7,7 +7,6 @@ from beachhub_core.models import (
     Betriebszeit,
     Feld,
     FeldRaster,
-    Kundengruppe,
     Rechnung,
     Tarif,
 )
@@ -34,12 +33,11 @@ def test_monatslauf_faellig_nur_einmal_pro_monat(db: Session) -> None:
 def test_monatslauf_fuer_erzeugt_pdf_und_mail(db: Session) -> None:
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    v = Kundengruppe(name="Verein", standard_zahlungsart="rechnung")
-    db.add_all([f, v, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    k = kunden.lege_an(db, name="TSV", email="v@x.de", kundengruppe_id=v.id)
+    k = kunden.lege_an(db, name="TSV", email="v@x.de", rechnungskunde=True)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     buchungen.lege_an(
@@ -48,6 +46,7 @@ def test_monatslauf_fuer_erzeugt_pdf_und_mail(db: Session) -> None:
         kunde_id=k.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
 
@@ -57,3 +56,22 @@ def test_monatslauf_fuer_erzeugt_pdf_und_mail(db: Session) -> None:
     rechnung = db.query(Rechnung).one()
     assert rechnung.pdf_pfad
     assert any(m["betreff"] == f"Rechnung {rechnung.nummer}" for m in mail.TEST_AUSGANG)
+
+
+def test_mitgliedschaft_tageslauf_schickt_mails_nach_commit(
+    db: Session, mail_ausgang: list
+) -> None:
+    k = kunden.lege_an(db, name="Anna", email="anna@x.de")
+    k.mitglied_bis = date(2028, 4, 30)
+    db.commit()
+    clock.set_override(db, date(2028, 4, 20))
+    jobs.mitgliedschaft_ausfuehren(db)
+    assert [m["betreff"] for m in mail_ausgang] == ["Ihre Mitgliedschaft läuft bald ab"]
+    db.refresh(k)
+    assert k.mitglied_erinnert_fuer == date(2028, 4, 30)
+
+
+def test_mitgliedschaft_tageslauf_meldet_abgleich(db: Session, mail_ausgang: list) -> None:
+    clock.set_override(db, date(2027, 8, 31))
+    jobs.mitgliedschaft_ausfuehren(db)
+    assert [m["betreff"] for m in mail_ausgang] == ["[Beachhub] Jahresabgleich der Mitglieder"]

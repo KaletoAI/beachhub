@@ -27,7 +27,7 @@ from beachhub_core.models import (
     Zahlung,
     utcnow,
 )
-from beachhub_core.services import konfiguration, pin
+from beachhub_core.services import konfiguration, kunden, kundengruppen, mitgliedschaft, pin
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +148,9 @@ def baue_tarife(db: Session) -> schema.TarifeInhalt:
                 gueltig_bis=t.gueltig_bis,
             )
             for t in regeln
-        ]
+        ],
+        gruppe_mitglied=kundengruppen.mitglied(db).name,
+        gruppe_nichtmitglied=kundengruppen.nicht_mitglied(db).name,
     )
 
 
@@ -194,16 +196,21 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
     rechnungen = db.scalars(
         select(Rechnung).where(Rechnung.kunde_id == kunde.id).order_by(Rechnung.datum.desc())
     ).all()
+    heute = clock.today(db)
     return schema.KontoInhalt(
         kunde_id=str(kunde.id),
-        kundengruppe=kunde.kundengruppe.name,
-        zahlungsart=kunde.zahlungsart,
+        kundengruppe=kundengruppen.effektive_gruppe(db, kunde, heute).name,
         guthaben=kunde.guthaben,
         buchungen=out,
         rechnungen=[
             schema.KontoRechnung(nummer=r.nummer, datum=r.datum, brutto=r.brutto, status=r.status)
             for r in rechnungen
         ],
+        rechnungskunde=kunde.rechnungskunde,
+        online_buchen=kunden.darf_online_buchen(db, kunde),
+        mitgliedschaft=mitgliedschaft.status(kunde, heute),
+        mitglied_bis=kunde.mitglied_bis,
+        antrag_am=kunde.mitglied_antrag_am,
     )
 
 
@@ -322,6 +329,15 @@ def markiere_geaendert(db: Session, *namen: str) -> None:
         else:
             zeile.geaendert = True
     db.flush()
+
+
+def markiere_rechnungskunden(db: Session) -> None:
+    """Markiert die Konto-Dokumente aller Rechnungskunden – sie tragen online_buchen."""
+    ids = db.scalars(
+        select(Kunde.id).where(Kunde.rechnungskunde.is_(True), Kunde.anonymisiert_am.is_(None))
+    ).all()
+    if ids:
+        markiere_geaendert(db, *(f"konto:{i}" for i in ids))
 
 
 def verarbeite_geaenderte(db: Session) -> list[str]:

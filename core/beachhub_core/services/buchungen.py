@@ -1,6 +1,7 @@
 import uuid
 from collections.abc import Callable
 from datetime import datetime, timedelta
+from decimal import Decimal
 
 from beachhub_shared.slots import zeitraum_ist_slotfolge
 from beachhub_shared.zeit import lokales_datum
@@ -9,9 +10,14 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import clock
 from beachhub_core.models import Buchung, Feld, Kunde, Sperre
-from beachhub_core.services import audit, konfiguration, pin, slots_db, tarife
+from beachhub_core.services import audit, konfiguration, kundengruppen, pin, slots_db, tarife
 
 NACH_ANLAGE: list[Callable[[Session, Buchung], None]] = []
+
+# Zahlungsart je Buchung (A-ZAHL-1): online über den Zahlungsdienst, saison über die Saisonrechnung
+# einer Dauerbuchung, manuell vom Betreiber angelegt (Rechnung offen), gutschein vollständig durch
+# Gutscheine gedeckt.
+ZAHLUNGSARTEN: tuple[str, ...] = ("online", "saison", "manuell", "gutschein")
 
 
 class BuchungsFehler(Exception):  # noqa: N818 – Name wird von Task 9-11 als BuchungsFehler erwartet
@@ -80,8 +86,11 @@ def lege_an(
     anfrage_id: uuid.UUID | None = None,
     dauerbuchung_id: uuid.UUID | None = None,
     pin_klar: str | None = None,
-    zahlungsart: str | None = None,
+    zahlungsart: str = "manuell",
+    ust_satz: Decimal | None = None,
 ) -> Buchung:
+    if zahlungsart not in ZAHLUNGSARTEN:
+        raise BuchungsFehler("zahlungsart_unbekannt")
     feld = db.scalar(select(Feld).where(Feld.id == feld_id).with_for_update())
     if feld is None or not feld.aktiv:
         raise BuchungsFehler("feld_inaktiv")
@@ -91,8 +100,10 @@ def lege_an(
     _pruefe_zeitraum(db, feld, beginn, ende, pruefe_fenster)
     if finde_kollisionen(db, feld_id=feld_id, beginn=beginn, ende=ende):
         raise BuchungsFehler("belegt")
+    # Preis und Satz nach der Gruppe am Tag des Termins, nicht am Buchungstag (A-KUND-6).
+    gruppe = kundengruppen.effektive_gruppe(db, kunde, lokales_datum(beginn))
     preis = tarife.ermittle_preis(
-        db, feld_id=feld_id, beginn=beginn, ende=ende, kundengruppe_id=kunde.kundengruppe_id
+        db, feld_id=feld_id, beginn=beginn, ende=ende, kundengruppe_id=gruppe.id
     )
     if preis is None:
         raise BuchungsFehler("kein_tarif")
@@ -111,7 +122,9 @@ def lege_an(
         ende=ende,
         status=status,
         preis=preis,
-        zahlungsart=zahlungsart or kunde.zahlungsart,
+        zahlungsart=zahlungsart,
+        kundengruppe_id=gruppe.id,
+        ust_satz=gruppe.ust_satz if ust_satz is None else ust_satz,
         pin_hash=pin.hash(pin_klar),
         pin_verschluesselt=pin.verschluessele(pin_klar),
         anfrage_id=anfrage_id,

@@ -1,8 +1,8 @@
 from datetime import date, time
 from decimal import Decimal
 
-from beachhub_core.models import Buchung, Dauerbuchung, Feld, Kunde, Kundengruppe
-from beachhub_core.services import pin
+from beachhub_core.models import Buchung, Dauerbuchung, Feld, Kunde
+from beachhub_core.services import kundengruppen, pin
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
@@ -16,11 +16,10 @@ def test_erzeugen_hash_verschluesseln() -> None:
 
 
 def test_finde_freien_vermeidet_kollision(db: Session, monkeypatch) -> None:
-    g = Kundengruppe(name="Privat")
     f = Feld(name="F1", reihenfolge=1)
-    db.add_all([g, f])
+    db.add(f)
     db.flush()
-    k = Kunde(name="A", email="a@x.de", kundengruppe_id=g.id, zahlungsart="online")
+    k = Kunde(name="A", email="a@x.de")
     db.add(k)
     db.flush()
     d = date(2027, 12, 1)
@@ -32,7 +31,9 @@ def test_finde_freien_vermeidet_kollision(db: Session, monkeypatch) -> None:
             ende=kombiniere(d, time(20)),
             status="bestaetigt",
             preis=Decimal("30"),
-            zahlungsart="online",
+            ust_satz=Decimal("19.00"),
+            kundengruppe_id=kundengruppen.nicht_mitglied(db).id,
+            zahlungsart="manuell",
             pin_hash=pin.hash("123456"),
             quelle="admin",
         )
@@ -44,11 +45,10 @@ def test_finde_freien_vermeidet_kollision(db: Session, monkeypatch) -> None:
 
 
 def test_finde_freien_ignoriert_beendete_dauerbuchung(db: Session, monkeypatch) -> None:
-    g = Kundengruppe(name="Privat")
     f = Feld(name="F1", reihenfolge=1)
-    db.add_all([g, f])
+    db.add(f)
     db.flush()
-    k = Kunde(name="A", email="a@x.de", kundengruppe_id=g.id, zahlungsart="online")
+    k = Kunde(name="A", email="a@x.de")
     db.add(k)
     db.flush()
     db.add(

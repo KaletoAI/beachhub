@@ -1,8 +1,10 @@
 """Konfigurationswerte: Defaults im Code, Überschreibung in der Tabelle `konfiguration`."""
 
+import re
 import uuid
 from dataclasses import dataclass
-from decimal import Decimal
+from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -10,14 +12,47 @@ from sqlalchemy.orm import Session
 from beachhub_core.models import Konfiguration
 from beachhub_core.services import audit
 
+
+class TagMonat(str):
+    """Ein jährlicher Stichtag ohne Jahr, gespeichert als "TT.MM." (etwa "30.04.")."""
+
+    __slots__ = ()
+
+    def __new__(cls, roh: str) -> "TagMonat":
+        m = re.fullmatch(r"\s*(\d{1,2})\.(\d{1,2})\.?\s*", roh)
+        if m is None:
+            raise ValueError("Bitte als Tag und Monat angeben, etwa 30.04.")
+        tag, monat = int(m.group(1)), int(m.group(2))
+        try:
+            # 2027 ist kein Schaltjahr: Der 29.02. taugt nicht als jährlicher Stichtag.
+            date(2027, monat, tag)
+        except ValueError as e:
+            raise ValueError("Diesen Tag gibt es nicht in jedem Jahr") from e
+        return super().__new__(cls, f"{tag:02d}.{monat:02d}.")
+
+    @property
+    def tag(self) -> int:
+        return int(self[:2])
+
+    @property
+    def monat(self) -> int:
+        return int(self[3:5])
+
+    def im_jahr(self, jahr: int) -> date:
+        return date(jahr, self.monat, self.tag)
+
+
 DEFAULTS: dict[str, tuple[type, Any]] = {
     "fenster_tage": (int, 14),
     "mindestvorlauf_minuten": (int, 60),
     "storno_frist_stunden": (int, 24),
     "zahlungsfrist_minuten": (int, 15),
-    "ust_satz": (Decimal, Decimal("19.00")),
     "rechnung_tag_im_folgemonat": (int, 3),
     "rechnung_zahlungsziel_tage": (int, 14),
+    "event_ust_satz": (Decimal, Decimal("19.00")),
+    "mitgliedschaft_ablauf": (TagMonat, TagMonat("30.04.")),
+    "mitglieder_abgleich": (TagMonat, TagMonat("31.08.")),
+    "mitglied_erinnerung_tage": (int, 14),
     "heiz_vorlauf_minuten": (int, 30),
     "licht_vorlauf_minuten": (int, 5),
     "licht_nachlauf_minuten": (int, 5),
@@ -27,7 +62,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "grund_temperatur": (Decimal, Decimal("0.0")),
     "antwort_hinweis_sekunden": (int, 120),
     "pin_laenge": (int, 6),
-    "portal_kundengruppe": (str, ""),
+    "rechnungskunden_online_buchen": (bool, False),
 }
 
 # Werte, die in den Plan der Halle eingehen (shared.hallenplan.PlanKonfig).
@@ -41,7 +76,7 @@ HALLEN_KONFIG: tuple[str, ...] = (
     "praesenz_alarm_minuten",
 )
 
-_TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool"}
+_TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool", TagMonat: "tagmonat"}
 
 
 @dataclass(frozen=True)
@@ -80,12 +115,6 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Minuten",
         "So lange bleibt eine Reservierung nach der Buchung für die Online-Zahlung bestehen.",
     ),
-    "ust_satz": Beschreibung(
-        "Zahlung und Rechnung",
-        "Umsatzsteuersatz",
-        "Prozent",
-        "Gilt für alle Rechnungen.",
-    ),
     "rechnung_tag_im_folgemonat": Beschreibung(
         "Zahlung und Rechnung",
         "Tag des Rechnungslaufs",
@@ -95,6 +124,35 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Zahlung und Rechnung",
         "Zahlungsziel",
         "Tage",
+    ),
+    "event_ust_satz": Beschreibung(
+        "Zahlung und Rechnung",
+        "Steuersatz für Betreiberbuchungen",
+        "Prozent",
+        "Vorbelegung, wenn Sie eine Buchung oder ein Event selbst anlegen – auch wenn ein "
+        "Mitglied bucht. Im Buchungsformular können Sie ihn im Einzelfall ändern.",
+    ),
+    "mitgliedschaft_ablauf": Beschreibung(
+        "Mitgliedschaft",
+        "Ablauf der Mitgliedschaft",
+        "Tag und Monat",
+        "Bis zu diesem Tag gilt eine Freischaltung als Mitglied (Ende der Wintermitgliedschaft). "
+        "Beim Freischalten ist der nächste dieser Tage vorbelegt.",
+    ),
+    "mitglieder_abgleich": Beschreibung(
+        "Mitgliedschaft",
+        "Jährlicher Abgleich",
+        "Tag und Monat",
+        "An diesem Tag bekommen Sie eine E-Mail mit der Prüfliste (Kunden → Mitglieder-Abgleich). "
+        "Er muss vor dem ersten Buchungsfenster der Saison liegen, sonst buchen Mitglieder die "
+        "ersten Termine zu Preisen für Nicht-Mitglieder.",
+    ),
+    "mitglied_erinnerung_tage": Beschreibung(
+        "Mitgliedschaft",
+        "Erinnerung vor Ablauf",
+        "Tage",
+        "So viele Tage vor Ablauf der Mitgliedschaft bekommt der Kunde eine Erinnerung. "
+        "0 schaltet die Erinnerung ab.",
     ),
     "heiz_vorlauf_minuten": Beschreibung(
         "Halle",
@@ -132,26 +190,40 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "um Geduld bittet.",
     ),
     "pin_laenge": Beschreibung("Portal und Zugang", "Länge des Zahlencodes", "Stellen"),
-    "portal_kundengruppe": Beschreibung(
+    "rechnungskunden_online_buchen": Beschreibung(
         "Portal und Zugang",
-        "Kundengruppe neuer Portalkunden",
+        "Rechnungskunden buchen online",
         "",
-        "Name der Kundengruppe, die ein im Portal angelegter Kunde bekommt. Leer: die erste "
-        "Gruppe in alphabetischer Reihenfolge.",
+        "Nein: Rechnungskunden sehen im Portal ihre Termine, Zahlencodes und Rechnungen und "
+        "sagen Abo-Termine ab, buchen aber nicht selbst. Ihre Buchungen legen Sie an.",
     ),
 }
 
 # Reihenfolge der Gruppen auf der Konfigurationsseite.
-GRUPPEN: list[str] = ["Buchung und Storno", "Zahlung und Rechnung", "Halle", "Portal und Zugang"]
+GRUPPEN: list[str] = [
+    "Buchung und Storno",
+    "Zahlung und Rechnung",
+    "Mitgliedschaft",
+    "Halle",
+    "Portal und Zugang",
+]
 
 
-def gruppiert(werte: dict[str, Any]) -> list[tuple[str, list[tuple[str, Any, Beschreibung]]]]:
-    """Ordnet die Werte den Gruppen zu, in der Reihenfolge von GRUPPEN."""
+def gruppiert(
+    werte: dict[str, Any],
+) -> list[tuple[str, list[tuple[str, Any, Beschreibung, bool]]]]:
+    """Ordnet die Werte den Gruppen zu, in der Reihenfolge von GRUPPEN. Das vierte Element sagt,
+    ob der Wert ja/nein ist – die Seite zeigt dafür eine Auswahl statt eines Textfelds."""
     return [
         (
             gruppe,
             [
-                (schluessel, werte[schluessel], BESCHREIBUNGEN[schluessel])
+                (
+                    schluessel,
+                    werte[schluessel],
+                    BESCHREIBUNGEN[schluessel],
+                    DEFAULTS[schluessel][0] is bool,
+                )
                 for schluessel in DEFAULTS
                 if schluessel in werte and BESCHREIBUNGEN[schluessel].gruppe == gruppe
             ],
@@ -162,10 +234,26 @@ def gruppiert(werte: dict[str, Any]) -> list[tuple[str, list[tuple[str, Any, Bes
 
 def _parse(typ: type, roh: str) -> Any:
     if typ is bool:
-        return roh.lower() in ("1", "true", "ja")
+        wert = roh.strip().lower()
+        if wert in ("1", "true", "ja"):
+            return True
+        if wert in ("0", "false", "nein"):
+            return False
+        raise ValueError("Bitte ja oder nein wählen")
     if typ is Decimal:
         # Die Oberfläche zeigt Dezimalzahlen deutsch mit Komma und bekommt sie so zurück.
-        roh = roh.strip().replace(",", ".")
+        try:
+            zahl = Decimal(roh.strip().replace(",", "."))
+        except InvalidOperation as e:
+            raise ValueError("Bitte eine Zahl angeben") from e
+        if not zahl.is_finite():
+            raise ValueError("Bitte eine Zahl angeben")
+        return zahl
+    if typ is int:
+        try:
+            return int(roh.strip())
+        except ValueError as e:
+            raise ValueError("Bitte eine ganze Zahl angeben") from e
     return typ(roh)
 
 
@@ -179,11 +267,20 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
     typ, default = DEFAULTS[schluessel]
     zeile = db.get(Konfiguration, schluessel)
     vorher = zeile.wert if zeile else str(default)
-    neu = str(_parse(typ, str(wert)))
+    geparst = _parse(typ, str(wert))
+    if schluessel == "event_ust_satz" and not Decimal("0") <= geparst < Decimal("100"):
+        raise ValueError("Steuersatz ungültig")
+    neu = str(geparst)
+    aktuell = zeile.wert if zeile else str(_parse(typ, str(default)))
+    if neu == aktuell:
+        # Unverändert: keine Zeile, kein Audit-Eintrag. Ein leeres Formularfeld und der
+        # Vorgabewert bleiben dadurch gleichwertig.
+        return
     if zeile:
         zeile.wert = neu
     else:
         db.add(Konfiguration(schluessel=schluessel, wert=neu, typ=_TYP_NAME[typ]))
+        db.flush()  # damit `hole` den Wert noch vor dem Commit sieht
     audit.protokolliere(
         db,
         quelle="admin",
@@ -206,3 +303,8 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         from beachhub_core.services import lesestand
 
         lesestand.markiere_geaendert(db, "hallenplan")
+    if schluessel == "rechnungskunden_online_buchen":
+        from beachhub_core.services import lesestand
+
+        # Der Wert steht als online_buchen im Konto-Dokument jedes Rechnungskunden.
+        lesestand.markiere_rechnungskunden(db)

@@ -28,6 +28,13 @@ class Buchung(UUIDMixin, ZeitstempelMixin, Base):
     ende: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)
     preis: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
+    # Festgeschrieben bei der Anlage (A-TARIF-3): die Gruppe zum Leistungsdatum (A-KUND-6) und
+    # ihr Steuersatz – bei Betreiberbuchungen der im Formular gewählte Satz (A-RECH-9).
+    ust_satz: Mapped[Decimal] = mapped_column(DECIMAL(5, 2), nullable=False)
+    kundengruppe_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("kundengruppe.id"), nullable=False
+    )
+    # online|saison|manuell|gutschein
     zahlungsart: Mapped[str] = mapped_column(String(10), nullable=False)
     pin_hash: Mapped[str | None] = mapped_column(String(200))
     pin_verschluesselt: Mapped[str | None] = mapped_column(String(300))
@@ -42,6 +49,9 @@ class Buchung(UUIDMixin, ZeitstempelMixin, Base):
     )
     anwesenheit: Mapped[str] = mapped_column(String(20), default="unbekannt", nullable=False)
     quelle: Mapped[str] = mapped_column(String(10), nullable=False)  # admin | portal | dauer
+    # Mitgliedschaft endete vor dem Termin, der Betreiber belässt die Buchung zu ihren
+    # Konditionen (Klärungsliste, A-KUND-4).
+    gruppe_geklaert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     feld: Mapped[Feld] = relationship()
     kunde: Mapped[Kunde] = relationship()

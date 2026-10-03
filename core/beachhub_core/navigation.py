@@ -33,7 +33,15 @@ NAVIGATION: list[Bereich] = [
             Punkt("Sperre anlegen", "/admin/belegung/sperre/neu"),
         ],
     ),
-    Bereich("Kunden", "/admin/kunden"),
+    Bereich(
+        "Kunden",
+        "/admin/kunden",
+        [
+            Punkt("Kundenliste", "/admin/kunden"),
+            Punkt("Mitgliedsanträge", "/admin/kunden/antraege"),
+            Punkt("Mitglieder-Abgleich", "/admin/kunden/abgleich"),
+        ],
+    ),
     Bereich("Rechnungen", "/admin/rechnungen"),
     Bereich(
         "Stammdaten",
@@ -44,7 +52,7 @@ NAVIGATION: list[Bereich] = [
             Punkt("Ausnahmetage", "/admin/ausnahmetage"),
             Punkt("Kundengruppen", "/admin/kundengruppen"),
             Punkt("Tarife", "/admin/tarife"),
-            Punkt("Konfiguration", "/admin/konfiguration"),
+            Punkt("Einstellungen", "/admin/konfiguration"),
         ],
     ),
     Bereich(
@@ -53,6 +61,7 @@ NAVIGATION: list[Bereich] = [
         [
             Punkt("Übersicht", "/admin/system"),
             Punkt("Kostenpflichtige Stornos", "/admin/system/stornos"),
+            Punkt("Klärung Mitgliedschaft", "/admin/system/klaerung"),
             Punkt("Änderungsprotokoll", "/admin/system/audit"),
             Punkt("Halle", "/admin/halle"),
         ],

@@ -10,8 +10,8 @@ import httpx
 import pytest
 from beachhub_core import kanal
 from beachhub_core.config import settings
-from beachhub_core.models import Kunde, Kundengruppe, LesestandVersion
-from beachhub_core.services import anfragen, kunden, lesestand
+from beachhub_core.models import Kunde, LesestandVersion
+from beachhub_core.services import anfragen, kunden, kundengruppen, lesestand
 from beachhub_shared import kanal as vertrag
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -84,7 +84,7 @@ def k(portal: FakePortal, uhr: Uhr) -> kanal.Kanal:
 def welt(db: Session) -> None:
     Path(settings.signatur_privatschluessel_pfad).unlink(missing_ok=True)
     lesestand.erzeuge_schluessel()
-    db.add(Kundengruppe(name="Privat"))
+    kundengruppen.beide(db)
     db.commit()
 
 
@@ -239,8 +239,7 @@ def test_verteilen_erneut_aufgerufen_sendet_nicht_doppelt(
 def test_verteilen_ohne_portal_konto_wird_nicht_gesendet(
     db: Session, welt, portal: FakePortal, k
 ) -> None:
-    gruppe = db.scalar(select(Kundengruppe))
-    kunde = kunden.lege_an(db, name="Abo", email="abo@x.de", kundengruppe_id=gruppe.id)
+    kunde = kunden.lege_an(db, name="Abo", email="abo@x.de")
     db.commit()
     assert kunde.portal_konto_id is None
     lesestand.markiere_geaendert(db, f"konto:{kunde.id}")
@@ -252,8 +251,7 @@ def test_verteilen_ohne_portal_konto_wird_nicht_gesendet(
 def test_abgleich_ohne_portal_konto_wird_nicht_gesendet(
     db: Session, welt, portal: FakePortal, k
 ) -> None:
-    gruppe = db.scalar(select(Kundengruppe))
-    kunde = kunden.lege_an(db, name="Abo", email="abo@x.de", kundengruppe_id=gruppe.id)
+    kunde = kunden.lege_an(db, name="Abo", email="abo@x.de")
     db.commit()
     lesestand.markiere_geaendert(db, f"konto:{kunde.id}")
     db.commit()

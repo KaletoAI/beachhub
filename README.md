@@ -3,10 +3,12 @@
 Buchung, Abrechnung und Steuerung einer Beachvolleyballhalle im Winterbetrieb.
 Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`core/`), Hallendienst (`hall/`).
 
-Status: Stufe 1 (Hauptsystem) fertig; Portal-Kern (Stufe 2 ohne Mitgliedschaft, Gutscheine und
-echten Zahlungsanbieter) implementiert; Stufe 3 (Hallendienst) implementiert und gegen simuliertes
-Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald der
-Hallenhersteller die Schnittstellen festlegt.
+Status: Stufe 1 (Hauptsystem) fertig; Stufe 1a-I (feste Kundengruppen mit Steuersatz,
+Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) umgesetzt, 1a-II
+(Saisonrechnung) und 1a-III (Gutscheine) folgen; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
+Gutscheine und echten Zahlungsanbieter) implementiert; Stufe 3 (Hallendienst) implementiert und
+gegen simuliertes Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald
+der Hallenhersteller die Schnittstellen festlegt.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`

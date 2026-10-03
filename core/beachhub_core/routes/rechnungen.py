@@ -97,6 +97,7 @@ def detail(
         "rechnungen/detail.html",
         admin=admin,
         r=r,
+        steuer=rechnungen.steuer_je_satz(r),
         integritaet=rechnung_pdf.pruefe_integritaet(r),
     )
 

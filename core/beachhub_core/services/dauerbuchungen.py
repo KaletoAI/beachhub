@@ -7,7 +7,15 @@ from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
 from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Sperre, utcnow
-from beachhub_core.services import audit, buchungen, konfiguration, pin, sperren, tarife
+from beachhub_core.services import (
+    audit,
+    buchungen,
+    konfiguration,
+    kundengruppen,
+    pin,
+    sperren,
+    tarife,
+)
 
 
 class DauerbuchungsFehler(Exception):  # noqa: N818
@@ -56,7 +64,11 @@ def plane(
                 ende=e,
                 kollisionen=buchungen.finde_kollisionen(db, feld_id=feld_id, beginn=b, ende=e),
                 preis=tarife.ermittle_preis(
-                    db, feld_id=feld_id, beginn=b, ende=e, kundengruppe_id=kunde.kundengruppe_id
+                    db,
+                    feld_id=feld_id,
+                    beginn=b,
+                    ende=e,
+                    kundengruppe_id=kundengruppen.effektive_gruppe(db, kunde, d).id,
                 ),
             )
         )
@@ -141,6 +153,7 @@ def lege_an(
             admin_user_id=admin_user_id,
             dauerbuchung_id=dauer.id,
             pin_klar=pin_klar,
+            zahlungsart="saison",
         )
     db.flush()
     db.refresh(dauer)

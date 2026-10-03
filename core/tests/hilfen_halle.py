@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from beachhub_core import clock
 from beachhub_core.config import settings
-from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Tarif
+from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Tarif
 from beachhub_core.services import kunden, lesestand
 from sqlalchemy.orm import Session
 
@@ -18,12 +18,11 @@ def welt(db: Session):
     lesestand.erzeuge_schluessel()
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    p = Kundengruppe(name="Privat")
-    db.add_all([f, p, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    k = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=p.id)
+    k = kunden.lege_an(db, name="A", email="a@x.de")
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     return f, k

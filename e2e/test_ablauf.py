@@ -21,12 +21,11 @@ from beachhub_core.models import (
     Feld,
     FeldRaster,
     Kunde,
-    Kundengruppe,
     Rechnung,
     Tarif,
     Zahlung,
 )
-from beachhub_core.services import lesestand, pin
+from beachhub_core.services import kundengruppen, lesestand, pin
 from beachhub_portal import uhr as portal_uhr
 from beachhub_shared import kanal as vertrag
 from beachhub_shared.zeit import kombiniere, lokal, lokales_datum
@@ -43,7 +42,7 @@ def feld_id(hauptsystem: Kanal) -> uuid.UUID:
     with CoreSession() as db:
         f = Feld(name="Feld 1", reihenfolge=1)
         f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-        db.add_all([f, Kundengruppe(name="Privat"), Tarif(name="Std", preis=Decimal("30.00"))])
+        db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
         for wt in range(7):
             db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
         db.commit()
@@ -258,9 +257,9 @@ def test_preis_gleichlauf_portal_hauptsystem(
         feld2.raster.append(
             FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[])
         )
-        privat = Kundengruppe(name="Privat")
-        verein = Kundengruppe(name="Verein")
-        db.add_all([f, feld2, privat, verein])
+        privat = kundengruppen.nicht_mitglied(db)
+        verein = kundengruppen.mitglied(db)
+        db.add_all([f, feld2])
         for wt in range(7):
             db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
         # Review-Fix 1: erst flushen, damit f.id/feld2.id/privat.id/verein.id unten echte UUIDs

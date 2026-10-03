@@ -11,12 +11,11 @@ from beachhub_core.models import (
     Betriebszeit,
     Feld,
     FeldRaster,
-    Kundengruppe,
     LesestandVersion,
     Sperre,
     Tarif,
 )
-from beachhub_core.services import buchungen, kunden, lesestand, storno
+from beachhub_core.services import buchungen, konfiguration, kunden, lesestand, storno
 from beachhub_shared.signatur import pruefe
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy import select
@@ -30,13 +29,12 @@ def welt(db: Session):
     lesestand.erzeuge_schluessel()
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    p = Kundengruppe(name="Privat")
-    db.add_all([f, p, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    a = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=p.id)
-    b = kunden.lege_an(db, name="B", email="b@x.de", kundengruppe_id=p.id)
+    a = kunden.lege_an(db, name="A", email="a@x.de")
+    b = kunden.lege_an(db, name="B", email="b@x.de")
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     return f, a, b
@@ -183,3 +181,29 @@ def test_verarbeite_geaenderte_ueberspringt_fehlerhaftes_dokument(db: Session, w
     assert sorted(lesestand.verarbeite_geaenderte(db)) == ["belegung", "hallenplan"]
     assert Path(settings.data_dir, "lesestand", "belegung.json").exists()
     assert db.get(LesestandVersion, "konto:not-a-uuid") is None
+
+
+def test_konto_zeigt_mitgliedschaft_und_rechnungskunde(db: Session, welt) -> None:
+    _, a, _ = welt
+    a.mitglied_bis = date(2028, 4, 30)
+    a.rechnungskunde = True
+    db.commit()
+    k = lesestand.baue_konto(db, a)
+    assert (k.kundengruppe, k.mitgliedschaft) == ("DJK-Mitglied", "mitglied")
+    assert k.mitglied_bis == date(2028, 4, 30)
+    assert k.rechnungskunde is True and k.online_buchen is False
+    t = lesestand.baue_tarife(db)
+    assert (t.gruppe_mitglied, t.gruppe_nichtmitglied) == ("DJK-Mitglied", "Nicht-Mitglied")
+
+
+def test_umschalten_markiert_konten_der_rechnungskunden(db: Session, welt) -> None:
+    _, a, b = welt
+    a.rechnungskunde = True
+    db.commit()
+    lesestand.verarbeite_geaenderte(db)
+    konfiguration.setze(db, "rechnungskunden_online_buchen", "ja")
+    db.commit()
+    assert db.get(LesestandVersion, f"konto:{a.id}").geaendert
+    zeile_b = db.get(LesestandVersion, f"konto:{b.id}")
+    assert zeile_b is None or not zeile_b.geaendert
+    assert lesestand.baue_konto(db, a).online_buchen is True

@@ -7,6 +7,7 @@ from weasyprint import HTML
 
 from beachhub_core.config import settings
 from beachhub_core.models import Rechnung
+from beachhub_core.services import rechnungen
 from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_core.templating import templates
 
@@ -20,6 +21,13 @@ def _betreiber() -> dict[str, str]:
     }
 
 
+def html(rechnung: Rechnung) -> str:
+    """Das HTML der Rechnung, aus dem `erzeuge` das PDF macht."""
+    return templates.env.get_template("rechnung_pdf.html").render(
+        r=rechnung, steuer=rechnungen.steuer_je_satz(rechnung), betreiber=_betreiber()
+    )
+
+
 def erzeuge(db: Session, rechnung: Rechnung) -> Path:
     # Zeile sperren und frisch lesen, damit ein gleichzeitiger Aufruf für dieselbe Rechnung
     # nicht zweimal an `pdf_pfad is None` vorbeikommt (TOCTOU).
@@ -27,10 +35,7 @@ def erzeuge(db: Session, rechnung: Rechnung) -> Path:
     db.refresh(rechnung)
     if rechnung.pdf_pfad:
         raise RechnungsFehler("pdf_vorhanden")
-    html = templates.env.get_template("rechnung_pdf.html").render(
-        r=rechnung, betreiber=_betreiber()
-    )
-    daten = HTML(string=html).write_pdf()
+    daten = HTML(string=html(rechnung)).write_pdf()
     ordner = settings.data_dir / "rechnungen"
     ordner.mkdir(parents=True, exist_ok=True)
     pfad = ordner / f"{rechnung.nummer}.pdf"

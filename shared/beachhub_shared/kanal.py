@@ -21,6 +21,7 @@ ANFRAGETYPEN: tuple[str, ...] = (
     "buchung_stornieren",
     "zahlung_eingegangen",
     "rechnung_anfordern",
+    "mitgliedschaft_beantragen",
 )
 
 # Allowlist: Ein Dokument geht nur ans Portal, wenn es hier ausdrücklich steht. Neue Dokumente
@@ -78,6 +79,11 @@ class RechnungAnfordern(BaseModel):
     rechnung_nr: str = Field(min_length=1, max_length=20)
 
 
+class MitgliedschaftBeantragen(BaseModel):
+    # Mitgliedsnummer oder Name in der Mitgliederliste des Vereins (A-KUND-4).
+    hinweis_text: str = Field(min_length=1, max_length=500)
+
+
 NUTZLAST: dict[str, type[BaseModel]] = {
     "konto_angelegt": KontoAngelegt,
     "konto_geaendert": KontoGeaendert,
@@ -86,6 +92,7 @@ NUTZLAST: dict[str, type[BaseModel]] = {
     "buchung_stornieren": BuchungStornieren,
     "zahlung_eingegangen": ZahlungEingegangen,
     "rechnung_anfordern": RechnungAnfordern,
+    "mitgliedschaft_beantragen": MitgliedschaftBeantragen,
 }
 
 

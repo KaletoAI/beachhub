@@ -1,6 +1,9 @@
+from datetime import date, time
 from decimal import Decimal
 
-from beachhub_core.models import Feld, Konfiguration, Tarif
+from beachhub_core import clock
+from beachhub_core.models import Betriebszeit, Feld, Konfiguration, Tarif
+from beachhub_core.services import konfiguration, kundengruppen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -86,7 +89,6 @@ def test_tarif_und_konfiguration(eingeloggt: TestClient, db: Session) -> None:
         data={
             "csrf_token": c.csrf,
             "storno_frist_stunden": "48",
-            "ust_satz": "19.00",
             **{k: "" for k in ("fenster_tage",)},
         },
         follow_redirects=False,
@@ -174,6 +176,7 @@ def test_konfiguration_ungueltiger_wert(eingeloggt: TestClient, db: Session) -> 
     r = c.post("/admin/konfiguration", data={"csrf_token": c.csrf, "storno_frist_stunden": "abc"})
     assert r.status_code == 200
     assert "storno_frist_stunden" in r.text
+    assert "Stornofrist" in r.text and "ganze Zahl" in r.text
     assert db.query(Konfiguration).filter_by(schluessel="storno_frist_stunden").first() is None
 
 
@@ -245,7 +248,64 @@ def test_stammdaten_unternavigation_auf_jeder_seite(eingeloggt: TestClient) -> N
             assert f'href="{ziel}"' in text, f"{seite} verlinkt {ziel} nicht"
 
 
-def test_kundenseite_verweist_ohne_gruppen_auf_kundengruppen(eingeloggt: TestClient) -> None:
-    text = eingeloggt.get("/admin/kunden").text
-    assert 'href="/admin/kundengruppen"' in text
-    assert "Kundengruppe" in text
+def test_kundengruppen_name_und_satz_aendern(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    seite = c.get("/admin/kundengruppen")
+    assert "Nicht-Mitglied" in seite.text and "DJK-Mitglied" in seite.text
+    g = kundengruppen.mitglied(db)
+    r = c.post(
+        f"/admin/kundengruppen/{g.id}",
+        data={"csrf_token": c.csrf, "name": "DJK", "ust_satz": "7,5"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.refresh(g)
+    assert g.name == "DJK" and g.ust_satz == Decimal("7.50")
+    r = c.post(
+        f"/admin/kundengruppen/{g.id}",
+        data={"csrf_token": c.csrf, "name": "DJK", "ust_satz": "120"},
+    )
+    assert r.status_code == 200 and "Steuersatz ungültig" in r.text
+    # Eine dritte Gruppe lässt sich nicht anlegen.
+    assert c.post("/admin/kundengruppen", data={"csrf_token": c.csrf}).status_code == 405
+
+
+def test_einstellungen_seite(eingeloggt: TestClient) -> None:
+    text = eingeloggt.get("/admin/konfiguration").text
+    assert "<h1>Einstellungen</h1>" in text
+    assert "Steuersatz für Betreiberbuchungen" in text
+
+
+def test_einstellungen_ungueltiger_stichtag_zeigt_meldung(
+    eingeloggt: TestClient, db: Session
+) -> None:
+    c = eingeloggt
+    r = c.post(
+        "/admin/konfiguration", data={"csrf_token": c.csrf, "mitgliedschaft_ablauf": "31.02."}
+    )
+    assert r.status_code == 200
+    assert "Ablauf der Mitgliedschaft" in r.text and "nicht in jedem Jahr" in r.text
+    assert db.query(Konfiguration).filter_by(schluessel="mitgliedschaft_ablauf").first() is None
+
+
+def test_einstellung_ja_nein_als_auswahl(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    assert '<select name="rechnungskunden_online_buchen">' in c.get("/admin/konfiguration").text
+    r = c.post(
+        "/admin/konfiguration",
+        data={"csrf_token": c.csrf, "rechnungskunden_online_buchen": "ja"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert konfiguration.hole(db, "rechnungskunden_online_buchen") is True
+
+
+def test_einstellungen_warnen_vor_spaetem_abgleich(eingeloggt: TestClient, db: Session) -> None:
+    clock.set_override(db, date(2027, 6, 1))
+    db.add(
+        Betriebszeit(
+            wochentag=0, oeffnet=time(9), schliesst=time(23), gueltig_von=date(2027, 9, 10)
+        )
+    )
+    db.commit()
+    assert "liegt nach dem ersten Buchungsfenster" in eingeloggt.get("/admin/konfiguration").text

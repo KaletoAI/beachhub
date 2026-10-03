@@ -8,7 +8,6 @@ from beachhub_core.models import (
     Buchung,
     Feld,
     FeldRaster,
-    Kundengruppe,
     Rechnung,
     Tarif,
 )
@@ -21,12 +20,11 @@ from sqlalchemy.orm import Session
 def welt(db: Session):
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    v = Kundengruppe(name="Verein", standard_zahlungsart="rechnung")
-    db.add_all([f, v, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    v1 = kunden.lege_an(db, name="TSV", email="v@x.de", kundengruppe_id=v.id)
+    v1 = kunden.lege_an(db, name="TSV", email="v@x.de", rechnungskunde=True)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     from beachhub_shared.zeit import kombiniere
@@ -37,6 +35,7 @@ def welt(db: Session):
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
     return f, v1
@@ -102,6 +101,7 @@ def test_rechnungen_detail_zeigt_positionen_und_integritaet(
     assert "TSV" in seite.text
     assert "F1" in seite.text
     assert "PDF unverändert" in seite.text
+    assert "19 %" in seite.text
 
 
 def test_pdf_get_ohne_pdf_redirect_und_post_erzeugt(

@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from beachhub_core import auth
+from beachhub_core import auth, clock
 from beachhub_core.database import get_db
 from beachhub_core.models import (
     AdminUser,
@@ -28,7 +28,8 @@ from beachhub_core.routes._form import (
     t_uuid,
     t_zeit,
 )
-from beachhub_core.services import konfiguration, stammdaten
+from beachhub_core.services import konfiguration, kundengruppen, mitgliedschaft, stammdaten
+from beachhub_core.services.kundengruppen import GruppenFehler
 from beachhub_core.services.stammdaten import StammdatenFehler
 from beachhub_core.templating import mit_flash, render
 
@@ -38,7 +39,7 @@ router = APIRouter()
 # fehlerhafte/​leere Formularwerte (ValueError aus routes._form), ungültige Decimal-Literale
 # (InvalidOperation, wird von t_betrag zwar schon in ValueError gewandelt, hier zur Sicherheit
 # trotzdem mitgefangen) sowie DB-Constraint-Verletzungen (IntegrityError, z. B. doppelter Name).
-FORM_FEHLER = (StammdatenFehler, ValueError, InvalidOperation, IntegrityError)
+FORM_FEHLER = (StammdatenFehler, GruppenFehler, ValueError, InvalidOperation, IntegrityError)
 
 
 def _redirect(url: str, text: str, art: str = "ok") -> RedirectResponse:
@@ -289,35 +290,17 @@ def ausnahmetag_loeschen(
 
 # ---- Kundengruppen ----
 @router.get("/kundengruppen", response_class=HTMLResponse)
-def kundengruppen(
+def kundengruppen_seite(
     request: Request,
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
     fehler: str | None = None,
 ) -> HTMLResponse:
-    liste = db.scalars(select(Kundengruppe).order_by(Kundengruppe.name)).all()
+    gruppen = kundengruppen.beide(db)
+    db.commit()  # legt fehlende Gruppen dauerhaft an (Abweichung A-2)
     return render(
-        request, "stammdaten/kundengruppen.html", admin=admin, gruppen=liste, fehler=fehler
+        request, "stammdaten/kundengruppen.html", admin=admin, gruppen=gruppen, fehler=fehler
     )
-
-
-@router.post("/kundengruppen", response_model=None)
-def kundengruppe_anlegen(
-    request: Request,
-    name: str = Form(...),
-    standard_zahlungsart: str = Form(...),
-    admin: AdminUser = Depends(auth.nur_admin_rolle),
-    db: Session = Depends(get_db),
-) -> HTMLResponse | RedirectResponse:
-    try:
-        stammdaten.kundengruppe_anlegen(
-            db, admin_user_id=admin.id, name=name, standard_zahlungsart=standard_zahlungsart
-        )
-        db.commit()
-    except FORM_FEHLER as e:
-        db.rollback()
-        return kundengruppen(request, admin, db, fehler=fehlertext(e))
-    return _redirect("/admin/kundengruppen", "Kundengruppe angelegt")
 
 
 @router.post("/kundengruppen/{gruppe_id}", response_model=None)
@@ -325,7 +308,7 @@ def kundengruppe_aendern(
     request: Request,
     gruppe_id: uuid.UUID,
     name: str = Form(...),
-    standard_zahlungsart: str = Form(...),
+    ust_satz: str = Form(...),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
@@ -333,24 +316,24 @@ def kundengruppe_aendern(
     if g is None:
         return _redirect("/admin/kundengruppen", "Gruppe nicht gefunden", "fehler")
     try:
-        stammdaten.kundengruppe_aendern(
+        kundengruppen.aendere(
             db,
             g,
+            name=name,
+            ust_satz=pflicht(t_betrag(ust_satz), "Steuersatz"),
             admin_user_id=admin.id,
-            name=name.strip(),
-            standard_zahlungsart=standard_zahlungsart,
         )
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
-        return kundengruppen(request, admin, db, fehler=fehlertext(e))
+        return kundengruppen_seite(request, admin, db, fehler=fehlertext(e))
     return _redirect("/admin/kundengruppen", "Gespeichert")
 
 
 # ---- Tarife ----
 def _tarif_ctx(db: Session) -> dict[str, object]:
     felder = db.scalars(select(Feld).order_by(Feld.reihenfolge)).all()
-    gruppen = db.scalars(select(Kundengruppe).order_by(Kundengruppe.name)).all()
+    gruppen = kundengruppen.beide(db)
     return {
         "tarife": db.scalars(select(Tarif).order_by(Tarif.aktiv.desc(), Tarif.name)).all(),
         "felder": felder,
@@ -469,12 +452,9 @@ def tarif_deaktivieren(
     return _redirect("/admin/tarife", "Tarif deaktiviert")
 
 
-# ---- Konfiguration ----
-@router.get("/konfiguration", response_class=HTMLResponse)
-def konfiguration_seite(
-    request: Request,
-    admin: AdminUser = Depends(auth.aktueller_admin),
-    db: Session = Depends(get_db),
+# ---- Einstellungen (A-ADM-9) ----
+def _einstellungen(
+    request: Request, admin: AdminUser, db: Session, fehler: str | None = None
 ) -> HTMLResponse:
     werte = {k: konfiguration.hole(db, k) for k in konfiguration.DEFAULTS}
     return render(
@@ -483,7 +463,18 @@ def konfiguration_seite(
         admin=admin,
         gruppen=konfiguration.gruppiert(werte),
         defaults=konfiguration.DEFAULTS,
+        fehler=fehler,
+        warnung=mitgliedschaft.abgleich_warnung(db, clock.today(db)),
     )
+
+
+@router.get("/konfiguration", response_class=HTMLResponse)
+def konfiguration_seite(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    return _einstellungen(request, admin, db)
 
 
 @router.post("/konfiguration", response_model=None)
@@ -498,17 +489,10 @@ async def konfiguration_speichern(
         for schluessel in konfiguration.DEFAULTS:
             wert = str(form.get(schluessel, "")).strip()
             if wert:
-                konfiguration.setze(db, schluessel, wert.replace(",", "."), admin_user_id=admin.id)
+                konfiguration.setze(db, schluessel, wert, admin_user_id=admin.id)
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
-        werte = {k: konfiguration.hole(db, k) for k in konfiguration.DEFAULTS}
-        return render(
-            request,
-            "stammdaten/konfiguration.html",
-            admin=admin,
-            werte=werte,
-            defaults=konfiguration.DEFAULTS,
-            fehler=f"{schluessel}: {fehlertext(e)}",
-        )
-    return _redirect("/admin/konfiguration", "Konfiguration gespeichert")
+        name = konfiguration.BESCHREIBUNGEN[schluessel].name
+        return _einstellungen(request, admin, db, fehler=f"{name}: {fehlertext(e)}")
+    return _redirect("/admin/konfiguration", "Einstellungen gespeichert")

@@ -1,0 +1,11 @@
+Hallo {{ k.name }},
+
+Ihre Mitgliedschaft im Verein ist bei uns bis zum {{ k.mitglied_bis|datum }} freigeschaltet.
+Danach gelten für neue Termine die Preise für Nicht-Mitglieder.
+
+Beim jährlichen Abgleich mit der Mitgliederliste des Vereins verlängern wir die Freischaltung.
+Möchten Sie vorher Termine nach diesem Tag buchen und sind weiterhin Mitglied, können Sie die
+Verlängerung im Portal beantragen.
+
+Viele Grüße
+{{ betreiber }}

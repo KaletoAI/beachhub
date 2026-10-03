@@ -2,7 +2,7 @@
 
 from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -75,6 +75,10 @@ class TarifInfo(BaseModel):
 
 class TarifeInhalt(BaseModel):
     regeln: list[TarifInfo]
+    # Namen der beiden festen Gruppen (A-KUND-2), damit das Portal die Gruppe eines Termins aus
+    # mitglied_bis ableiten kann. Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
+    gruppe_mitglied: str | None = None
+    gruppe_nichtmitglied: str | None = None
 
 
 class StornoInfo(BaseModel):
@@ -109,8 +113,16 @@ class KontoRechnung(BaseModel):
 
 class KontoInhalt(BaseModel):
     kunde_id: str
+    # Gruppe am heutigen Tag. Für künftige Termine gilt die Gruppe an deren Tag (A-KUND-6):
+    # Mitglied, solange mitglied_bis den Tag einschließt.
     kundengruppe: str
-    zahlungsart: str
     guthaben: Decimal
     buchungen: list[KontoBuchung]
     rechnungen: list[KontoRechnung]
+    # Seit Stufe 1a; mit Vorgaben, damit ältere gespeicherte Dokumente gültig bleiben. Das frühere
+    # Feld zahlungsart entfällt (die Zahlungsart steht an der Buchung, A-ZAHL-1).
+    rechnungskunde: bool = False
+    online_buchen: bool = True
+    mitgliedschaft: Literal["mitglied", "beantragt", "nicht_mitglied"] = "nicht_mitglied"
+    mitglied_bis: date | None = None
+    antrag_am: datetime | None = None

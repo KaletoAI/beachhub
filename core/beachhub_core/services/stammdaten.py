@@ -5,7 +5,7 @@ from typing import Any, TypeVar
 
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Ausnahmetag, Betriebszeit, Feld, FeldRaster, Kundengruppe, Tarif
+from beachhub_core.models import Ausnahmetag, Betriebszeit, Feld, FeldRaster, Tarif
 from beachhub_core.services import audit
 
 T = TypeVar("T")
@@ -15,7 +15,8 @@ class StammdatenFehler(Exception):  # noqa: N818
     pass
 
 
-# Betroffenes Lesestand-Dokument je Objekttyp (Kundengruppen gehen in keins ein).
+# Betroffenes Lesestand-Dokument je Objekttyp (Gruppennamen speisen das Tarif-Dokument über
+# kundengruppen.aendere, nicht über diese Tabelle).
 _LESESTAND_DOKUMENT = {
     "feld": "belegung",
     "feld_raster": "belegung",
@@ -188,30 +189,6 @@ def ausnahmetag_anlegen(
 
 def ausnahmetag_loeschen(db: Session, a: Ausnahmetag, *, admin_user_id: uuid.UUID | None) -> None:
     _loeschen(db, "ausnahmetag", a, admin_user_id)
-
-
-def kundengruppe_anlegen(
-    db: Session, *, admin_user_id: uuid.UUID | None, name: str, standard_zahlungsart: str
-) -> Kundengruppe:
-    if standard_zahlungsart not in ("online", "rechnung"):
-        raise StammdatenFehler("Zahlungsart ungültig")
-    return _anlegen(
-        db,
-        "kundengruppe",
-        Kundengruppe(name=name.strip(), standard_zahlungsart=standard_zahlungsart),
-        admin_user_id,
-    )
-
-
-def kundengruppe_aendern(
-    db: Session, g: Kundengruppe, *, admin_user_id: uuid.UUID | None, **felder: Any
-) -> Kundengruppe:
-    if "standard_zahlungsart" in felder and felder["standard_zahlungsart"] not in (
-        "online",
-        "rechnung",
-    ):
-        raise StammdatenFehler("Zahlungsart ungültig")
-    return _aendern(db, "kundengruppe", g, admin_user_id, **felder)
 
 
 def _pruefe_tarif(preis: Decimal, uhrzeit_von: time | None, uhrzeit_bis: time | None) -> None:

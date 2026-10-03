@@ -1,6 +1,7 @@
 import logging
 import uuid
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 from beachhub_shared.zeit import BERLIN, kombiniere
@@ -21,12 +22,13 @@ from beachhub_core.models import (
     RechnungPosition,
     Sperre,
 )
-from beachhub_core.routes._form import fehlertext, pflicht, t_datum, t_zeit
+from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_datum, t_zeit
 from beachhub_core.services import (
     belegung,
     benachrichtigung,
     buchungen,
     dauerbuchungen,
+    konfiguration,
     pin,
     rechnung_pdf,
     rechnungen,
@@ -50,6 +52,7 @@ GRUND = {
     "ausserhalb_fenster": "Außerhalb des Buchungsfensters",
     "kein_tarif": "Kein Tarif hinterlegt",
     "kunde_unbekannt": "Kunde unbekannt",
+    "zahlungsart_unbekannt": "Zahlungsart unbekannt",
     "feld_inaktiv": "Feld inaktiv",
     "vergangenheit": "Zeitpunkt liegt in der Vergangenheit",
     "zu_spaet": "Buchung hat bereits begonnen",
@@ -107,6 +110,16 @@ def _kunden_liste(db: Session) -> list[Kunde]:
     return list(
         db.scalars(select(Kunde).where(Kunde.anonymisiert_am.is_(None)).order_by(Kunde.name)).all()
     )
+
+
+def _satz(db: Session, roh: str) -> Decimal:
+    """Steuersatz aus dem Buchungsformular; leer heißt Vorgabe für Betreiberbuchungen."""
+    satz = t_betrag(roh)
+    if satz is None:
+        satz = Decimal(konfiguration.hole(db, "event_ust_satz"))
+    if not satz.is_finite() or not Decimal("0") <= satz < Decimal("100"):
+        raise ValueError("Steuersatz ungültig")
+    return satz
 
 
 # ---- Woche ----
@@ -183,6 +196,7 @@ def buchung_neu(
     return render(
         request,
         "belegung/buchung_neu.html",
+        ust_vorgabe=konfiguration.hole(db, "event_ust_satz"),
         admin=admin,
         feld=f,
         beginn=start,
@@ -200,6 +214,7 @@ def buchung_anlegen(
     kunde_id: str = Form(...),
     beginn: str = Form(...),
     ende: str = Form(...),
+    ust_satz: str = Form(""),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
 ) -> HTMLResponse | RedirectResponse:
@@ -213,9 +228,11 @@ def buchung_anlegen(
             ende=_lokal(ende),
             quelle="admin",
             admin_user_id=admin.id,
+            zahlungsart="manuell",
+            ust_satz=_satz(db, ust_satz),
         )
-        if b.zahlungsart == "online":
-            r = rechnungen.erzeuge_einzelrechnung(db, b)
+        # Betreiberbuchungen werden nicht online bezahlt: sofort eine offene Rechnung (A-ZAHL-1).
+        r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()

@@ -4,8 +4,8 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Kunde, Kundengruppe, utcnow
-from beachhub_core.services import audit
+from beachhub_core.models import Kunde, utcnow
+from beachhub_core.services import audit, konfiguration
 
 
 class KundenFehler(Exception):  # noqa: N818
@@ -17,25 +17,21 @@ def lege_an(
     *,
     name: str,
     email: str,
-    kundengruppe_id: uuid.UUID,
-    zahlungsart: str | None = None,
+    rechnungskunde: bool = False,
     adresse_strasse: str = "",
     adresse_plz: str = "",
     adresse_ort: str = "",
     quelle: str = "admin",
     admin_user_id: uuid.UUID | None = None,
 ) -> Kunde:
+    """Neue Kunden sind Nicht-Mitglied (A-KUND-3); die Mitgliedschaft schaltet der Betreiber ein."""
     email = email.strip().lower()
     if db.scalar(select(Kunde).where(Kunde.email == email)):
         raise KundenFehler("email_vergeben")
-    gruppe = db.get(Kundengruppe, kundengruppe_id)
-    if gruppe is None:
-        raise KundenFehler("gruppe_unbekannt")
     k = Kunde(
         name=name.strip(),
         email=email,
-        kundengruppe_id=kundengruppe_id,
-        zahlungsart=zahlungsart or gruppe.standard_zahlungsart,
+        rechnungskunde=rechnungskunde,
         adresse_strasse=adresse_strasse,
         adresse_plz=adresse_plz,
         adresse_ort=adresse_ort,
@@ -76,6 +72,10 @@ def aendere(db: Session, kunde: Kunde, *, admin_user_id: uuid.UUID | None, **fel
         nachher=audit.als_dict(kunde),
         admin_user_id=admin_user_id,
     )
+    from beachhub_core.services import lesestand
+
+    # Das Konto-Dokument trägt Rechnungskunde und Gruppe.
+    lesestand.markiere_geaendert(db, f"konto:{kunde.id}")
     return kunde
 
 
@@ -95,6 +95,11 @@ def anonymisiere(
     kunde.adresse_strasse = kunde.adresse_plz = kunde.adresse_ort = ""
     kunde.portal_konto_id = None
     kunde.stripe_customer_id = None
+    # Alles zur Mitgliedschaft, auch die vom Kunden getippte Mitgliedsnummer.
+    kunde.mitglied_bis = kunde.mitglied_erinnert_fuer = None
+    kunde.mitglied_antrag_am = kunde.mitglied_freigeschaltet_am = kunde.mitglied_beendet_am = None
+    kunde.mitglied_freigeschaltet_von = None
+    kunde.mitglied_antrag_hinweis = kunde.mitglied_beendet_grund = ""
     kunde.anonymisiert_am = utcnow()
     db.flush()
     audit.protokolliere(
@@ -106,3 +111,8 @@ def anonymisiere(
         nachher=audit.als_dict(kunde),
         admin_user_id=admin_user_id,
     )
+
+
+def darf_online_buchen(db: Session, kunde: Kunde) -> bool:
+    """Rechnungskunden buchen nur online, wenn der Betreiber es erlaubt (A-KUND-7)."""
+    return not kunde.rechnungskunde or bool(konfiguration.hole(db, "rechnungskunden_online_buchen"))

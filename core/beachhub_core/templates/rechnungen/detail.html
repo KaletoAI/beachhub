@@ -38,18 +38,29 @@
 <div class="karte">
   <h2>Positionen</h2>
   <table>
-    <tr><th>Text</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
+    <tr><th>Text</th><th class="rechts">USt</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
     {% for p in r.positionen %}<tr>
       <td>{{ p.text }}</td>
+      <td class="rechts">{{ p.ust_satz|prozent }}</td>
       <td class="rechts">{{ p.menge }}</td>
       <td class="rechts">{{ p.brutto|euro }}</td>
     </tr>{% endfor %}
   </table>
-  <p class="rechts">
-    Netto: {{ r.netto|euro }}<br>
-    USt ({{ r.ust_satz|prozent }}): {{ r.ust|euro }}<br>
-    <strong>Brutto: {{ r.brutto|euro }}</strong>
-  </p>
+  <table>
+    <tr><th>Steuersatz</th><th class="rechts">Netto</th><th class="rechts">USt</th><th class="rechts">Brutto</th></tr>
+    {% for z in steuer %}<tr>
+      <td>{{ z.ust_satz|prozent }}</td>
+      <td class="rechts">{{ z.netto|euro }}</td>
+      <td class="rechts">{{ z.ust|euro }}</td>
+      <td class="rechts">{{ z.brutto|euro }}</td>
+    </tr>{% endfor %}
+    <tr>
+      <td><strong>Gesamt</strong></td>
+      <td class="rechts">{{ r.netto|euro }}</td>
+      <td class="rechts">{{ r.ust|euro }}</td>
+      <td class="rechts"><strong>{{ r.brutto|euro }}</strong></td>
+    </tr>
+  </table>
 </div>
 
 <div class="zeile">

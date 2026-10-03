@@ -24,12 +24,14 @@ td.r, th.r { text-align: right; }
 <p>Rechnungsdatum: {{ r.datum|datum }} · Leistungszeitraum: {{ r.leistung_von|datum }}{% if r.leistung_bis != r.leistung_von %} – {{ r.leistung_bis|datum }}{% endif %}
 {% if r.status == "offen" %}· Zahlbar bis {{ r.faellig_am|datum }}{% endif %}</p>
 <table>
-  <thead><tr><th>Pos.</th><th>Leistung</th><th class="r">Betrag</th></tr></thead>
-  <tbody>{% for p in r.positionen %}<tr><td>{{ p.reihenfolge }}</td><td>{{ p.text }}</td><td class="r">{{ p.brutto|euro }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th>Pos.</th><th>Leistung</th><th class="r">USt</th><th class="r">Betrag</th></tr></thead>
+  <tbody>{% for p in r.positionen %}<tr><td>{{ p.reihenfolge }}</td><td>{{ p.text }}</td><td class="r">{{ p.ust_satz|prozent }}</td><td class="r">{{ p.brutto|euro }}</td></tr>{% endfor %}</tbody>
 </table>
 <table class="summe">
-  <tr><td></td><td class="r">Nettobetrag</td><td class="r">{{ r.netto|euro }}</td></tr>
-  <tr><td></td><td class="r">zzgl. {{ r.ust_satz|prozent }} USt</td><td class="r">{{ r.ust|euro }}</td></tr>
+  {% for z in steuer %}
+  <tr><td></td><td class="r">Nettobetrag {{ z.ust_satz|prozent }}</td><td class="r">{{ z.netto|euro }}</td></tr>
+  <tr><td></td><td class="r">zzgl. {{ z.ust_satz|prozent }} USt</td><td class="r">{{ z.ust|euro }}</td></tr>
+  {% endfor %}
   <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
 </table>
 {% if r.art == "storno" %}<p>Diese Stornorechnung hebt die ursprüngliche Rechnung auf.</p>

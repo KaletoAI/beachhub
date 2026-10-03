@@ -12,7 +12,6 @@ from beachhub_core.models import (
     Feld,
     FeldRaster,
     GuthabenBuchung,
-    Kundengruppe,
     Rechnung,
     Tarif,
     Zahlung,
@@ -21,6 +20,7 @@ from beachhub_core.services import (
     buchungen,
     dauerbuchungen,
     guthaben,
+    konfiguration,
     kunden,
     lesestand,
     online_buchung,
@@ -39,13 +39,12 @@ RUECK = "/zahlung/zurueck?anfrage=x"
 def welt(db: Session):
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    p = Kundengruppe(name="Privat")
-    db.add_all([f, p, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
-    k = kunden.lege_an(db, name="A", email="a@x.de", kundengruppe_id=p.id)
-    andere = kunden.lege_an(db, name="B", email="b@x.de", kundengruppe_id=p.id)
+    k = kunden.lege_an(db, name="A", email="a@x.de")
+    andere = kunden.lege_an(db, name="B", email="b@x.de")
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     return f, k, andere
@@ -367,7 +366,7 @@ def test_storno_dauerbuchungstermin_nicht_stornierbar(db: Session, welt) -> None
     )
     db.commit()
     termin = dauer.buchungen[0]
-    assert termin.zahlungsart == "online"
+    assert termin.zahlungsart == "saison"
     erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=termin.id)
     db.commit()
     assert erg.antwort.status == "abgelehnt" and erg.antwort.grund == "nicht_stornierbar"
@@ -460,3 +459,17 @@ def test_verfall_job_bucht_zurueck_und_mailt(db: Session, welt, mail_ausgang) ->
     assert k.guthaben == Decimal("10.00")
     assert any(m["betreff"] == "Reservierung verfallen" for m in mail_ausgang)
     assert jobs.verfall_ausfuehren(db) == 0
+
+
+def test_rechnungskunde_wird_abgelehnt(db: Session, welt) -> None:
+    f, k, _ = welt
+    guthaben.buche(db, kunde=k, betrag=Decimal("30.00"), art="manuell")
+    k.rechnungskunde = True  # nach dem Buchen: guthaben.buche lädt den Kunden neu
+    db.commit()
+    a = _anfragen(db, f, k).antwort
+    db.commit()
+    assert a.status == "abgelehnt" and a.grund == "rechnungskunde"
+    assert db.query(Buchung).count() == 0 and k.guthaben == Decimal("30.00")
+    konfiguration.setze(db, "rechnungskunden_online_buchen", "ja")
+    db.commit()
+    assert _anfragen(db, f, k).antwort.status == "bestaetigt"

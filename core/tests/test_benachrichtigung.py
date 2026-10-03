@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from beachhub_core import clock
-from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Tarif
+from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Tarif
 from beachhub_core.services import benachrichtigung, buchungen, kunden, rechnungen
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
@@ -13,8 +13,7 @@ from sqlalchemy.orm import Session
 def buchung(db: Session) -> object:
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    p = Kundengruppe(name="Privat")
-    db.add_all([f, p, Tarif(name="Std", preis=Decimal("30.00"))])
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
@@ -22,7 +21,6 @@ def buchung(db: Session) -> object:
         db,
         name="Anna Müller",
         email="a@x.de",
-        kundengruppe_id=p.id,
         adresse_strasse="Weg 1",
         adresse_plz="12345",
         adresse_ort="Ort",

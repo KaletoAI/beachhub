@@ -16,12 +16,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beachhub_core.config import settings
-from beachhub_core.models import AnfrageVerarbeitet, Kunde, Kundengruppe, Rechnung
+from beachhub_core.models import AnfrageVerarbeitet, Kunde, Rechnung
 from beachhub_core.services import (
     audit,
-    konfiguration,
+    benachrichtigung,
     kunden,
     lesestand,
+    mitgliedschaft,
     online_buchung,
     rechnung_pdf,
 )
@@ -44,16 +45,6 @@ def _kunde_zum_konto(db: Session, konto_id: Any) -> Kunde | None:
     return db.scalar(select(Kunde).where(Kunde.portal_konto_id == konto_id))
 
 
-def _portal_gruppe(db: Session) -> Kundengruppe | None:
-    name = str(konfiguration.hole(db, "portal_kundengruppe")).strip()
-    if name:
-        gruppe = db.scalar(select(Kundengruppe).where(Kundengruppe.name == name))
-        if gruppe is not None:
-            return gruppe
-        logger.warning("Kundengruppe %r aus portal_kundengruppe fehlt – nehme die erste", name)
-    return db.scalar(select(Kundengruppe).order_by(Kundengruppe.name).limit(1))
-
-
 def _konto_angelegt(db: Session, anfrage: kanal.Anfrage, n: kanal.KontoAngelegt) -> Ergebnis:
     if anfrage.konto_id is None:
         return abgelehnt("ungueltig")
@@ -69,17 +60,8 @@ def _konto_angelegt(db: Session, anfrage: kanal.Anfrage, n: kanal.KontoAngelegt)
             .with_for_update()
         )
         if k is None:
-            gruppe = _portal_gruppe(db)
-            if gruppe is None:
-                return abgelehnt("keine_kundengruppe")
-            k = kunden.lege_an(
-                db,
-                name=n.anzeigename.strip(),
-                email=email,
-                kundengruppe_id=gruppe.id,
-                zahlungsart="online",
-                quelle="portal",
-            )
+            # Neue Portalkonten sind Nicht-Mitglied und kein Rechnungskunde (A-KUND-3, A-KUND-7).
+            k = kunden.lege_an(db, name=n.anzeigename.strip(), email=email, quelle="portal")
         vorher = audit.als_dict(k)
         # Das Portal hat die Adresse per Login-Code bestätigt. Eine abweichende alte Verknüpfung
         # stammt aus einem gelöschten oder wiederhergestellten Portal und wird ersetzt.
@@ -183,12 +165,33 @@ def _rechnung_anfordern(
     return ok(pdf_base64=base64.b64encode(daten).decode(), dateiname=f"Rechnung-{r.nummer}.pdf")
 
 
+def _antrag_mail(kunde_id: Any) -> Nachlauf:
+    def lauf(db: Session) -> None:
+        k = db.get(Kunde, kunde_id)
+        if k is not None:
+            benachrichtigung.mitgliedsantrag(db, k)
+
+    return lauf
+
+
+def _mitgliedschaft_beantragen(
+    db: Session, kunde: Kunde, anfrage: kanal.Anfrage, n: kanal.MitgliedschaftBeantragen
+) -> Ergebnis:
+    if kunde.anonymisiert_am is not None:
+        return abgelehnt("konto_gesperrt")
+    if not n.hinweis_text.strip():
+        return abgelehnt("ungueltig")
+    mitgliedschaft.beantrage(db, kunde, hinweis=n.hinweis_text)
+    return Ergebnis(kanal.Antwort(status="ok"), [_antrag_mail(kunde.id)])
+
+
 _MIT_KUNDE: dict[str, Verarbeiter] = {
     "konto_geaendert": _konto_geaendert,
     "konto_loeschen": _konto_loeschen,
     "buchung_anfragen": _buchung_anfragen,
     "buchung_stornieren": _buchung_stornieren,
     "rechnung_anfordern": _rechnung_anfordern,
+    "mitgliedschaft_beantragen": _mitgliedschaft_beantragen,
 }
 
 

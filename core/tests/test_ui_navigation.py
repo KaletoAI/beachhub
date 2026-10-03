@@ -17,6 +17,8 @@ SEITEN = [
     "/admin",
     "/admin/belegung",
     "/admin/kunden",
+    "/admin/kunden/antraege",
+    "/admin/kunden/abgleich",
     "/admin/rechnungen",
     "/admin/felder",
     "/admin/betriebszeiten",
@@ -26,6 +28,7 @@ SEITEN = [
     "/admin/konfiguration",
     "/admin/system",
     "/admin/system/stornos",
+    "/admin/system/klaerung",
     "/admin/system/audit",
     "/admin/halle",
 ]
@@ -75,7 +78,7 @@ def test_aktiver_bereich_und_unterpunkt_sind_markiert(eingeloggt: TestClient) ->
 
 
 def test_bereich_ohne_unterpunkte_zeigt_keine_zweite_zeile(eingeloggt: TestClient) -> None:
-    assert 'class="unternav"' not in eingeloggt.get("/admin/kunden").text
+    assert 'class="unternav"' not in eingeloggt.get("/admin/rechnungen").text
 
 
 def test_kundengruppen_gehoert_zu_stammdaten_nicht_zu_kunden() -> None:

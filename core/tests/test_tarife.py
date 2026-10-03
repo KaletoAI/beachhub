@@ -3,7 +3,7 @@ from decimal import Decimal
 
 import pytest
 from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kundengruppe, Tarif
-from beachhub_core.services import tarife
+from beachhub_core.services import kundengruppen, tarife
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
@@ -14,11 +14,8 @@ MI = date(2027, 12, 1)
 def basis(db: Session) -> tuple[Feld, Kundengruppe, Kundengruppe]:
     f = Feld(name="Feld 1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
-    privat, verein = (
-        Kundengruppe(name="Privat"),
-        Kundengruppe(name="Verein", standard_zahlungsart="rechnung"),
-    )
-    db.add_all([f, privat, verein])
+    privat, verein = kundengruppen.nicht_mitglied(db), kundengruppen.mitglied(db)
+    db.add(f)
     for wt in range(7):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.commit()

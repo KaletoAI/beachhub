@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 
 from beachhub_shared.hallenplan import DOKUMENT, EREIGNISTYPEN, HallenStatus
@@ -20,7 +21,7 @@ from beachhub_core.models import (
     Storno,
 )
 from beachhub_core.routes._form import fehlertext, t_datum
-from beachhub_core.services import halle, lesestand
+from beachhub_core.services import halle, lesestand, mitgliedschaft
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
@@ -177,3 +178,27 @@ def halle_seite(
         typ=typ,
         typen=sorted(EREIGNISTYPEN),
     )
+
+
+@router.get("/system/klaerung", response_class=HTMLResponse)
+def klaerung(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    return render(
+        request, "system/klaerung.html", admin=admin, faelle=mitgliedschaft.klaerungsfaelle(db)
+    )
+
+
+@router.post("/system/klaerung/{buchung_id}")
+def klaerung_erledigt(
+    buchung_id: uuid.UUID,
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    b = db.get(Buchung, buchung_id)
+    if b is not None:
+        mitgliedschaft.klaere(db, b, admin_user_id=admin.id)
+        db.commit()
+    return mit_flash(RedirectResponse("/admin/system/klaerung", status_code=303), "Geklärt")

@@ -19,6 +19,8 @@
     <option value="">bitte wählen</option>
     {% for k in kunden %}<option value="{{ k.id }}">{{ k.name }} ({{ k.email }})</option>{% endfor %}
   </select></label>
+  <label>Steuersatz (Prozent) <input name="ust_satz" value="{{ ust_vorgabe|wert }}" required></label>
+  <p class="small">Vorbelegt mit dem Satz für Betreiberbuchungen aus den Einstellungen. Die Buchung bekommt sofort eine offene Rechnung.</p>
   <button>Buchen</button>
 </form>
 </div>

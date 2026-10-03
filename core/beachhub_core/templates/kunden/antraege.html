@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Mitgliedsanträge{% endblock %}
+{% block content %}
+<h1>Mitgliedsanträge</h1>
+<p class="hinweis">Kunden, die im Portal die Freischaltung als Mitglied beantragt haben. Prüfen Sie die Angaben gegen die Mitgliederliste des Vereins; freischalten oder verwerfen können Sie auf der Kundenseite.</p>
+<div class="karte">
+<table>
+  <thead><tr><th>Beantragt am</th><th>Name</th><th>E-Mail</th><th>Angaben</th><th class="rechts"></th></tr></thead>
+  <tbody>
+  {% for k in kunden %}<tr>
+    <td>{{ k.mitglied_antrag_am|lokal }}</td>
+    <td>{{ k.name }}</td>
+    <td>{{ k.email }}</td>
+    <td>{{ k.mitglied_antrag_hinweis }}</td>
+    <td class="rechts"><a class="aktion" href="/admin/kunden/{{ k.id }}">öffnen</a></td>
+  </tr>{% else %}
+    <tr><td colspan="5" class="leer">Keine offenen Anträge.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
