@@ -44,7 +44,7 @@ NAVIGATION: list[Bereich] = [
             Punkt("Ausnahmetage", "/admin/ausnahmetage"),
             Punkt("Kundengruppen", "/admin/kundengruppen"),
             Punkt("Tarife", "/admin/tarife"),
-            Punkt("Konfiguration", "/admin/konfiguration"),
+            Punkt("Einstellungen", "/admin/konfiguration"),
         ],
     ),
     Bereich(

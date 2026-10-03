@@ -8,6 +8,7 @@
   <p>Feld: {{ b.feld.name }}</p>
   <p>Zeitraum: {{ b.beginn|lokal }} – {{ b.ende|uhrzeit }} Uhr</p>
   <p>Preis: {{ b.preis|euro }}</p>
+  <p>Steuersatz: {{ b.ust_satz|prozent }}</p>
   <p>Status: {{ b.status }}</p>
   <p>Zahlungsart: {{ b.zahlungsart }}</p>
   {% if pin %}<p>PIN: <strong class="pin-gross">{{ pin }}</strong></p>{% endif %}

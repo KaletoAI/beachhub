@@ -35,6 +35,7 @@ def welt(db: Session):
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
     return f, v1

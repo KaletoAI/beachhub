@@ -452,12 +452,9 @@ def tarif_deaktivieren(
     return _redirect("/admin/tarife", "Tarif deaktiviert")
 
 
-# ---- Konfiguration ----
-@router.get("/konfiguration", response_class=HTMLResponse)
-def konfiguration_seite(
-    request: Request,
-    admin: AdminUser = Depends(auth.aktueller_admin),
-    db: Session = Depends(get_db),
+# ---- Einstellungen (A-ADM-9) ----
+def _einstellungen(
+    request: Request, admin: AdminUser, db: Session, fehler: str | None = None
 ) -> HTMLResponse:
     werte = {k: konfiguration.hole(db, k) for k in konfiguration.DEFAULTS}
     return render(
@@ -466,7 +463,17 @@ def konfiguration_seite(
         admin=admin,
         gruppen=konfiguration.gruppiert(werte),
         defaults=konfiguration.DEFAULTS,
+        fehler=fehler,
     )
+
+
+@router.get("/konfiguration", response_class=HTMLResponse)
+def konfiguration_seite(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    return _einstellungen(request, admin, db)
 
 
 @router.post("/konfiguration", response_model=None)
@@ -481,17 +488,10 @@ async def konfiguration_speichern(
         for schluessel in konfiguration.DEFAULTS:
             wert = str(form.get(schluessel, "")).strip()
             if wert:
-                konfiguration.setze(db, schluessel, wert.replace(",", "."), admin_user_id=admin.id)
+                konfiguration.setze(db, schluessel, wert, admin_user_id=admin.id)
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
-        werte = {k: konfiguration.hole(db, k) for k in konfiguration.DEFAULTS}
-        return render(
-            request,
-            "stammdaten/konfiguration.html",
-            admin=admin,
-            werte=werte,
-            defaults=konfiguration.DEFAULTS,
-            fehler=f"{schluessel}: {fehlertext(e)}",
-        )
-    return _redirect("/admin/konfiguration", "Konfiguration gespeichert")
+        name = konfiguration.BESCHREIBUNGEN[schluessel].name
+        return _einstellungen(request, admin, db, fehler=f"{name}: {fehlertext(e)}")
+    return _redirect("/admin/konfiguration", "Einstellungen gespeichert")

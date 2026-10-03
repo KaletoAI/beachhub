@@ -154,7 +154,11 @@ def _neue_rechnung(
     return r
 
 
-def erzeuge_einzelrechnung(db: Session, buchung: Buchung, *, quelle: str = "system") -> Rechnung:
+def erzeuge_einzelrechnung(
+    db: Session, buchung: Buchung, *, quelle: str = "system", status: str = "bezahlt"
+) -> Rechnung:
+    """Online bezahlte Buchungen bekommen eine bezahlte Rechnung (A-RECH-2), Betreiberbuchungen
+    eine offene mit Zahlungsziel (A-ZAHL-1)."""
     if buchung.rechnung_position_id is not None:
         raise RechnungsFehler("bereits_berechnet")
     d = lokales_datum(buchung.beginn)
@@ -165,14 +169,14 @@ def erzeuge_einzelrechnung(db: Session, buchung: Buchung, *, quelle: str = "syst
         [Posten(buchung, _positionstext(buchung), buchung.preis, buchung.ust_satz)],
         d,
         d,
-        "bezahlt",
+        status,
         quelle=quelle,
     )
 
 
-# Zahlungsarten, die der Monatslauf sammelt. Plan 1a-II ersetzt den Monatslauf durch die
-# Saisonrechnung (A-RECH-3).
-MONATSLAUF_ZAHLUNGSARTEN: tuple[str, ...] = ("saison", "manuell")
+# Zahlungsarten, die der Monatslauf sammelt: nur noch Termine von Dauerbuchungen. Plan 1a-II
+# ersetzt ihn durch die Saisonrechnung (A-RECH-3).
+MONATSLAUF_ZAHLUNGSARTEN: tuple[str, ...] = ("saison",)
 
 
 def abrechenbare_buchungen(

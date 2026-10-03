@@ -9,6 +9,7 @@ from beachhub_core.models import (
     Dauerbuchung,
     Feld,
     FeldRaster,
+    Rechnung,
     Sperre,
     Storno,
     Tarif,
@@ -55,9 +56,10 @@ def test_woche_zeigt_slots_und_buchung(eingeloggt: TestClient, db: Session, welt
     )
     assert r.status_code == 303
     b = db.query(Buchung).one()
-    assert (
-        b.preis == Decimal("60.00") and b.rechnung_position_id is not None
-    )  # Onlinekunde: sofort Einzelrechnung
+    # Betreiberbuchung: Zahlungsart manuell, Event-Satz, sofort eine offene Rechnung.
+    assert b.preis == Decimal("60.00") and b.zahlungsart == "manuell"
+    assert b.ust_satz == Decimal("19.00") and b.rechnung_position_id is not None
+    assert db.query(Rechnung).one().status == "offen"
     assert [m["betreff"].split(":")[0] for m in mail.TEST_AUSGANG] == [
         "Buchung bestätigt",
         "Rechnung 2027-00001",
@@ -66,6 +68,50 @@ def test_woche_zeigt_slots_und_buchung(eingeloggt: TestClient, db: Session, welt
     assert 'class="zelle belegt"' in seite.text and "A" in seite.text
     detail = c.get(f"/admin/belegung/buchung/{b.id}")
     assert detail.status_code == 200 and "PIN" in detail.text
+
+
+def test_betreiberbuchung_mit_eigenem_steuersatz(eingeloggt: TestClient, db: Session, welt) -> None:
+    f, a, _ = welt
+    a.mitglied_bis = date(2028, 4, 30)  # auch für Mitglieder gilt der Event-Satz (A-RECH-9)
+    db.commit()
+    c = eingeloggt
+    formular = c.get(f"/admin/belegung/buchung/neu?feld={f.id}&beginn=2027-12-01T19:00")
+    assert 'name="ust_satz" value="19"' in formular.text
+    r = c.post(
+        "/admin/belegung/buchung",
+        data={
+            "csrf_token": c.csrf,
+            "feld_id": str(f.id),
+            "kunde_id": str(a.id),
+            "beginn": "2027-12-01T19:00",
+            "ende": "2027-12-01T20:00",
+            "ust_satz": "7",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    b = db.query(Buchung).one()
+    assert b.zahlungsart == "manuell" and b.ust_satz == Decimal("7.00")
+    rechnung = db.query(Rechnung).one()
+    assert rechnung.status == "offen" and rechnung.positionen[0].ust_satz == Decimal("7.00")
+
+
+def test_betreiberbuchung_ungueltiger_steuersatz(eingeloggt: TestClient, db: Session, welt) -> None:
+    f, a, _ = welt
+    c = eingeloggt
+    r = c.post(
+        "/admin/belegung/buchung",
+        data={
+            "csrf_token": c.csrf,
+            "feld_id": str(f.id),
+            "kunde_id": str(a.id),
+            "beginn": "2027-12-01T19:00",
+            "ende": "2027-12-01T20:00",
+            "ust_satz": "120",
+        },
+    )
+    assert "Steuersatz ungültig" in r.text
+    assert db.query(Buchung).count() == 0
 
 
 def test_storno_ueber_ui(eingeloggt: TestClient, db: Session, welt) -> None:

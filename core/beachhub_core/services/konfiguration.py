@@ -2,7 +2,7 @@
 
 import uuid
 from dataclasses import dataclass
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -17,6 +17,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "zahlungsfrist_minuten": (int, 15),
     "rechnung_tag_im_folgemonat": (int, 3),
     "rechnung_zahlungsziel_tage": (int, 14),
+    "event_ust_satz": (Decimal, Decimal("19.00")),
     "heiz_vorlauf_minuten": (int, 30),
     "licht_vorlauf_minuten": (int, 5),
     "licht_nachlauf_minuten": (int, 5),
@@ -88,6 +89,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Zahlungsziel",
         "Tage",
     ),
+    "event_ust_satz": Beschreibung(
+        "Zahlung und Rechnung",
+        "Steuersatz für Betreiberbuchungen",
+        "Prozent",
+        "Vorbelegung, wenn Sie eine Buchung oder ein Event selbst anlegen – auch wenn ein "
+        "Mitglied bucht. Im Buchungsformular können Sie ihn im Einzelfall ändern.",
+    ),
     "heiz_vorlauf_minuten": Beschreibung(
         "Halle",
         "Heizvorlauf",
@@ -150,7 +158,15 @@ def _parse(typ: type, roh: str) -> Any:
         return roh.lower() in ("1", "true", "ja")
     if typ is Decimal:
         # Die Oberfläche zeigt Dezimalzahlen deutsch mit Komma und bekommt sie so zurück.
-        roh = roh.strip().replace(",", ".")
+        try:
+            return Decimal(roh.strip().replace(",", "."))
+        except InvalidOperation as e:
+            raise ValueError("Bitte eine Zahl angeben") from e
+    if typ is int:
+        try:
+            return int(roh.strip())
+        except ValueError as e:
+            raise ValueError("Bitte eine ganze Zahl angeben") from e
     return typ(roh)
 
 
@@ -165,6 +181,11 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
     zeile = db.get(Konfiguration, schluessel)
     vorher = zeile.wert if zeile else str(default)
     neu = str(_parse(typ, str(wert)))
+    aktuell = zeile.wert if zeile else str(_parse(typ, str(default)))
+    if neu == aktuell:
+        # Unverändert: keine Zeile, kein Audit-Eintrag. Ein leeres Formularfeld und der
+        # Vorgabewert bleiben dadurch gleichwertig.
+        return
     if zeile:
         zeile.wert = neu
     else:

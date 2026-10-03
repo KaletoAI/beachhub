@@ -46,6 +46,7 @@ def test_monatslauf_fuer_erzeugt_pdf_und_mail(db: Session) -> None:
         kunde_id=k.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
 

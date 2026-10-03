@@ -88,6 +88,7 @@ def test_sammelrechnung_und_monatslauf_idempotent(db: Session, welt) -> None:
             kunde_id=v1.id,
             beginn=kombiniere(date(2027, 12, tag), time(19)),
             ende=kombiniere(date(2027, 12, tag), time(21)),
+            zahlungsart="saison",
         )
     b3 = buchungen.lege_an(
         db,
@@ -95,6 +96,7 @@ def test_sammelrechnung_und_monatslauf_idempotent(db: Session, welt) -> None:
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 15), time(19)),
         ende=kombiniere(date(2027, 12, 15), time(21)),
+        zahlungsart="saison",
     )
     clock.set_override(db, date(2027, 12, 14))  # innerhalb der 72-h-Frist → kostenpflichtig
     storno.storniere(db, b3, durch="kunde")
@@ -104,6 +106,7 @@ def test_sammelrechnung_und_monatslauf_idempotent(db: Session, welt) -> None:
         kunde_id=v1.id,
         beginn=kombiniere(date(2028, 1, 5), time(19)),
         ende=kombiniere(date(2028, 1, 5), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
     clock.set_override(db, date(2028, 1, 3))
@@ -129,6 +132,7 @@ def test_stornorechnung_gibt_buchungen_frei(db: Session, welt) -> None:
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
     clock.set_override(db, date(2028, 1, 3))
@@ -198,6 +202,7 @@ def test_setze_bezahlt_und_nicht_offen(db: Session, welt) -> None:
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
+        zahlungsart="saison",
     )
     db.commit()
     clock.set_override(db, date(2028, 1, 3))

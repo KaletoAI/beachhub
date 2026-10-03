@@ -174,6 +174,7 @@ def test_konfiguration_ungueltiger_wert(eingeloggt: TestClient, db: Session) -> 
     r = c.post("/admin/konfiguration", data={"csrf_token": c.csrf, "storno_frist_stunden": "abc"})
     assert r.status_code == 200
     assert "storno_frist_stunden" in r.text
+    assert "Stornofrist" in r.text and "ganze Zahl" in r.text
     assert db.query(Konfiguration).filter_by(schluessel="storno_frist_stunden").first() is None
 
 
@@ -265,3 +266,9 @@ def test_kundengruppen_name_und_satz_aendern(eingeloggt: TestClient, db: Session
     assert r.status_code == 200 and "Steuersatz ungültig" in r.text
     # Eine dritte Gruppe lässt sich nicht anlegen.
     assert c.post("/admin/kundengruppen", data={"csrf_token": c.csrf}).status_code == 405
+
+
+def test_einstellungen_seite(eingeloggt: TestClient) -> None:
+    text = eingeloggt.get("/admin/konfiguration").text
+    assert "<h1>Einstellungen</h1>" in text
+    assert "Steuersatz für Betreiberbuchungen" in text
