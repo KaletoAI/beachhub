@@ -71,6 +71,7 @@ def aendere(
     if not Decimal("0") <= ust_satz < Decimal("100"):
         raise GruppenFehler("Steuersatz ungültig")
     vorher = audit.als_dict(gruppe)
+    umbenannt = gruppe.name != name
     gruppe.name, gruppe.ust_satz = name, ust_satz
     db.flush()
     audit.protokolliere(
@@ -85,4 +86,13 @@ def aendere(
     from beachhub_core.services import lesestand
 
     lesestand.markiere_geaendert(db, "tarife")
+    if umbenannt:
+        # Das Portal ordnet Tarife über den Gruppennamen im Konto-Dokument zu.
+        ids = db.scalars(
+            select(Kunde.id).where(
+                Kunde.portal_konto_id.is_not(None), Kunde.anonymisiert_am.is_(None)
+            )
+        ).all()
+        if ids:
+            lesestand.markiere_geaendert(db, *(f"konto:{i}" for i in ids))
     return gruppe

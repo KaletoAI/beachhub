@@ -65,3 +65,20 @@ def test_aendere_lehnt_ungueltiges_ab(db: Session, name: str, satz: Decimal) -> 
     g = kundengruppen.nicht_mitglied(db)
     with pytest.raises(kundengruppen.GruppenFehler):
         kundengruppen.aendere(db, g, name=name, ust_satz=satz, admin_user_id=None)
+
+
+def test_umbenennen_markiert_konto_dokumente_nicht_der_satz(db: Session) -> None:
+    import uuid
+
+    k = Kunde(name="A", email="a@x.de", portal_konto_id=uuid.uuid4())
+    ohne = Kunde(name="B", email="b@x.de")
+    db.add_all([k, ohne])
+    g = kundengruppen.mitglied(db)
+    db.commit()
+    kundengruppen.aendere(db, g, name=g.name, ust_satz=Decimal("5.00"), admin_user_id=None)
+    db.commit()
+    assert db.get(LesestandVersion, f"konto:{k.id}") is None
+    kundengruppen.aendere(db, g, name="Verein", ust_satz=Decimal("5.00"), admin_user_id=None)
+    db.commit()
+    assert db.get(LesestandVersion, f"konto:{k.id}").geaendert
+    assert db.get(LesestandVersion, f"konto:{ohne.id}") is None

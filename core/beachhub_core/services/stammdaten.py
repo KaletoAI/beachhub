@@ -15,7 +15,8 @@ class StammdatenFehler(Exception):  # noqa: N818
     pass
 
 
-# Betroffenes Lesestand-Dokument je Objekttyp (Kundengruppen gehen in keins ein).
+# Betroffenes Lesestand-Dokument je Objekttyp (Gruppennamen speisen das Tarif-Dokument über
+# kundengruppen.aendere, nicht über diese Tabelle).
 _LESESTAND_DOKUMENT = {
     "feld": "belegung",
     "feld_raster": "belegung",
