@@ -15,7 +15,6 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "mindestvorlauf_minuten": (int, 60),
     "storno_frist_stunden": (int, 24),
     "zahlungsfrist_minuten": (int, 15),
-    "ust_satz": (Decimal, Decimal("19.00")),
     "rechnung_tag_im_folgemonat": (int, 3),
     "rechnung_zahlungsziel_tage": (int, 14),
     "heiz_vorlauf_minuten": (int, 30),
@@ -78,12 +77,6 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Zahlungsfrist",
         "Minuten",
         "So lange bleibt eine Reservierung nach der Buchung für die Online-Zahlung bestehen.",
-    ),
-    "ust_satz": Beschreibung(
-        "Zahlung und Rechnung",
-        "Umsatzsteuersatz",
-        "Prozent",
-        "Gilt für alle Rechnungen.",
     ),
     "rechnung_tag_im_folgemonat": Beschreibung(
         "Zahlung und Rechnung",

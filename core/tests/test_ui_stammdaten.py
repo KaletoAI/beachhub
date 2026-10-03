@@ -87,7 +87,6 @@ def test_tarif_und_konfiguration(eingeloggt: TestClient, db: Session) -> None:
         data={
             "csrf_token": c.csrf,
             "storno_frist_stunden": "48",
-            "ust_satz": "19.00",
             **{k: "" for k in ("fenster_tage",)},
         },
         follow_redirects=False,

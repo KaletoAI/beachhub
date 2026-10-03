@@ -29,7 +29,6 @@ class Rechnung(UUIDMixin, ZeitstempelMixin, Base):
     leistung_von: Mapped[date] = mapped_column(Date, nullable=False)
     leistung_bis: Mapped[date] = mapped_column(Date, nullable=False)
     faellig_am: Mapped[date] = mapped_column(Date, nullable=False)
-    ust_satz: Mapped[Decimal] = mapped_column(DECIMAL(5, 2), nullable=False)
     netto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     ust: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     brutto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
@@ -62,6 +61,9 @@ class RechnungPosition(UUIDMixin, Base):
     menge: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
     einzelpreis_brutto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     ust_satz: Mapped[Decimal] = mapped_column(DECIMAL(5, 2), nullable=False)
+    # Je Position gerundet (A-RECH-8); der Rechnungskopf summiert Netto, Steuer und Brutto.
+    netto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
+    ust: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     brutto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     rechnung: Mapped[Rechnung] = relationship(back_populates="positionen")
 

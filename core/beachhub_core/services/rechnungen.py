@@ -3,6 +3,7 @@ import io
 import uuid
 from calendar import monthrange
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -24,6 +25,26 @@ from beachhub_core.models import (
 from beachhub_core.services import audit, konfiguration
 
 CENT = Decimal("0.01")
+NULL = Decimal("0.00")
+
+
+@dataclass(frozen=True)
+class Posten:
+    """Eine Rechnungsposition vor dem Anlegen. Netto und Steuer rechnet `_neue_rechnung` je
+    Position (A-RECH-8)."""
+
+    buchung: Buchung | None
+    text: str
+    brutto: Decimal
+    ust_satz: Decimal
+
+
+@dataclass(frozen=True)
+class SteuerZeile:
+    ust_satz: Decimal
+    netto: Decimal
+    ust: Decimal
+    brutto: Decimal
 
 
 class RechnungsFehler(Exception):  # noqa: N818
@@ -40,9 +61,19 @@ def naechste_nummer(db: Session, jahr: int) -> str:
     return f"{jahr}-{kreis.letzte_nummer:05d}"
 
 
-def _netto_ust(brutto: Decimal, satz: Decimal) -> tuple[Decimal, Decimal]:
+def netto_ust(brutto: Decimal, satz: Decimal) -> tuple[Decimal, Decimal]:
     netto = (brutto / (1 + satz / 100)).quantize(CENT, rounding=ROUND_HALF_UP)
     return netto, brutto - netto
+
+
+def steuer_je_satz(r: Rechnung) -> list[SteuerZeile]:
+    """Netto, Steuer und Brutto je Steuersatz, aufsteigend nach Satz – für PDF, Detailseite und
+    CSV-Export. Summiert die je Position gerundeten Beträge."""
+    summen: dict[Decimal, tuple[Decimal, Decimal, Decimal]] = {}
+    for p in r.positionen:
+        netto, ust, brutto = summen.get(p.ust_satz, (NULL, NULL, NULL))
+        summen[p.ust_satz] = (netto + p.netto, ust + p.ust, brutto + p.brutto)
+    return [SteuerZeile(satz, *werte) for satz, werte in sorted(summen.items())]
 
 
 def _snapshot(k: Kunde) -> dict[str, str]:
@@ -64,7 +95,7 @@ def _neue_rechnung(
     db: Session,
     kunde: Kunde,
     art: str,
-    positionen: Sequence[tuple[Buchung | None, str, Decimal]],
+    posten: Sequence[Posten],
     leistung_von: date,
     leistung_bis: date,
     status: str,
@@ -72,9 +103,7 @@ def _neue_rechnung(
     quelle: str,
 ) -> Rechnung:
     heute = clock.today(db)
-    satz = konfiguration.hole(db, "ust_satz")
-    brutto = sum((p[2] for p in positionen), Decimal("0.00"))
-    netto, ust = _netto_ust(brutto, satz)
+    zeilen = [(p, *netto_ust(p.brutto, p.ust_satz)) for p in posten]
     r = Rechnung(
         nummer=naechste_nummer(db, heute.year),
         kunde_id=kunde.id,
@@ -83,31 +112,32 @@ def _neue_rechnung(
         leistung_von=leistung_von,
         leistung_bis=leistung_bis,
         faellig_am=heute + timedelta(days=konfiguration.hole(db, "rechnung_zahlungsziel_tage")),
-        ust_satz=satz,
-        netto=netto,
-        ust=ust,
-        brutto=brutto,
+        netto=sum((netto for _, netto, _ in zeilen), NULL),
+        ust=sum((ust for _, _, ust in zeilen), NULL),
+        brutto=sum((p.brutto for p in posten), NULL),
         status=status,
         bezahlt_am=utcnow() if status == "bezahlt" else None,
         adresse_snapshot=_snapshot(kunde),
     )
     db.add(r)
     db.flush()
-    for i, (buchung, text, betrag) in enumerate(positionen, start=1):
+    for i, (p, netto, ust) in enumerate(zeilen, start=1):
         pos = RechnungPosition(
             rechnung_id=r.id,
             reihenfolge=i,
-            buchung_id=buchung.id if buchung else None,
-            text=text,
+            buchung_id=p.buchung.id if p.buchung else None,
+            text=p.text,
             menge=1,
-            einzelpreis_brutto=betrag,
-            ust_satz=satz,
-            brutto=betrag,
+            einzelpreis_brutto=p.brutto,
+            ust_satz=p.ust_satz,
+            netto=netto,
+            ust=ust,
+            brutto=p.brutto,
         )
         db.add(pos)
         db.flush()
-        if buchung is not None and art != "storno":
-            buchung.rechnung_position_id = pos.id
+        if p.buchung is not None and art != "storno":
+            p.buchung.rechnung_position_id = pos.id
     db.flush()
     db.refresh(r)
     audit.protokolliere(
@@ -132,7 +162,7 @@ def erzeuge_einzelrechnung(db: Session, buchung: Buchung, *, quelle: str = "syst
         db,
         buchung.kunde,
         "einzel",
-        [(buchung, _positionstext(buchung), buchung.preis)],
+        [Posten(buchung, _positionstext(buchung), buchung.preis, buchung.ust_satz)],
         d,
         d,
         "bezahlt",
@@ -186,10 +216,11 @@ def erzeuge_sammelrechnung(db: Session, kunde: Kunde, jahr: int, monat: int) -> 
     if not posten:
         return None
     positionen = [
-        (
+        Posten(
             b,
             _positionstext(b, " (Storno nach Frist)" if b.status == Buchung.STORNIERT else ""),
             betrag,
+            b.ust_satz,
         )
         for b, betrag in posten
     ]
@@ -248,7 +279,7 @@ def storniere(
     if rechnung.status == "storniert" or rechnung.art == "storno":
         raise RechnungsFehler("nicht_stornierbar")
     positionen = [
-        (None, f"Storno zu Rechnung {rechnung.nummer}: {p.text}", -p.brutto)
+        Posten(None, f"Storno zu Rechnung {rechnung.nummer}: {p.text}", -p.brutto, p.ust_satz)
         for p in rechnung.positionen
     ]
     s = _neue_rechnung(
@@ -297,6 +328,7 @@ def _csv_sicher(wert: str) -> str:
 
 
 def csv_export(db: Session, von: date, bis: date) -> str:
+    """Eine Zeile je Rechnung und Steuersatz, damit die Buchhaltung beide Sätze getrennt erhält."""
     buf = io.StringIO()
     w = csv.writer(buf, delimiter=";", lineterminator="\n")
     w.writerow(
@@ -306,10 +338,10 @@ def csv_export(db: Session, von: date, bis: date) -> str:
             "kunde",
             "art",
             "status",
+            "ust_satz",
             "netto",
             "ust",
             "brutto",
-            "ust_satz",
             "faellig_am",
             "bezahlt_am",
             "leistung_von",
@@ -321,21 +353,22 @@ def csv_export(db: Session, von: date, bis: date) -> str:
         .where(Rechnung.datum >= von, Rechnung.datum <= bis)
         .order_by(Rechnung.nummer)
     ):
-        w.writerow(
-            [
-                r.nummer,
-                r.datum.isoformat(),
-                _csv_sicher(r.adresse_snapshot.get("name", "")),
-                r.art,
-                r.status,
-                _de(r.netto),
-                _de(r.ust),
-                _de(r.brutto),
-                _de(r.ust_satz),
-                r.faellig_am.isoformat(),
-                r.bezahlt_am.isoformat() if r.bezahlt_am else "",
-                r.leistung_von.isoformat(),
-                r.leistung_bis.isoformat(),
-            ]
-        )
+        for z in steuer_je_satz(r):
+            w.writerow(
+                [
+                    r.nummer,
+                    r.datum.isoformat(),
+                    _csv_sicher(r.adresse_snapshot.get("name", "")),
+                    r.art,
+                    r.status,
+                    _de(z.ust_satz),
+                    _de(z.netto),
+                    _de(z.ust),
+                    _de(z.brutto),
+                    r.faellig_am.isoformat(),
+                    r.bezahlt_am.isoformat() if r.bezahlt_am else "",
+                    r.leistung_von.isoformat(),
+                    r.leistung_bis.isoformat(),
+                ]
+            )
     return buf.getvalue()

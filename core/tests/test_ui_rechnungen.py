@@ -100,6 +100,7 @@ def test_rechnungen_detail_zeigt_positionen_und_integritaet(
     assert "TSV" in seite.text
     assert "F1" in seite.text
     assert "PDF unverändert" in seite.text
+    assert "19 %" in seite.text
 
 
 def test_pdf_get_ohne_pdf_redirect_und_post_erzeugt(

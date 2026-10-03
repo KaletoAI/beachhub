@@ -132,7 +132,6 @@ def test_detail_seite_mit_buchungen_rechnungen_guthaben(
             leistung_von=date.today(),
             leistung_bis=date.today(),
             faellig_am=date.today(),
-            ust_satz=Decimal("19.00"),
             netto=Decimal("25.21"),
             ust=Decimal("4.79"),
             brutto=Decimal("30.00"),
