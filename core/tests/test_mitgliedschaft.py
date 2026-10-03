@@ -12,7 +12,14 @@ from beachhub_core.models import (
     Tarif,
     utcnow,
 )
-from beachhub_core.services import buchungen, konfiguration, kunden, kundengruppen, mitgliedschaft
+from beachhub_core.services import (
+    buchungen,
+    konfiguration,
+    kunden,
+    kundengruppen,
+    mitgliedschaft,
+    storno,
+)
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
@@ -131,3 +138,51 @@ def test_antrag_verwerfen(db: Session, welt) -> None:
     db.commit()
     assert mitgliedschaft.offene_antraege(db) == []
     assert mitgliedschaft.status(k, HEUTE) == "nicht_mitglied"
+
+
+def _termin(db: Session, f, k, tag: date, stunde: int = 19):
+    return buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(tag, time(stunde)),
+        ende=kombiniere(tag, time(stunde + 1)),
+        zahlungsart="online",
+    )
+
+
+def test_beenden_bringt_kuenftige_mitgliedsbuchung_in_die_klaerung(db: Session, welt) -> None:
+    f, k = welt
+    andere = kunden.lege_an(db, name="Bea", email="bea@x.de")
+    mitgliedschaft.freischalten(db, k, bis=date(2028, 4, 30), admin_user_id=None)
+    vergangen = _termin(db, f, k, date(2027, 11, 26))
+    kuenftig = _termin(db, f, k, date(2027, 12, 10))
+    _termin(db, f, andere, date(2027, 12, 10), stunde=20)  # Nicht-Mitglied: nie in der Liste
+    db.commit()
+    assert mitgliedschaft.klaerungsfaelle(db) == []
+
+    clock.set_override(db, date(2027, 12, 1))
+    mitgliedschaft.beende(db, k, grund="ausgetreten", admin_user_id=None)
+    db.commit()
+    assert mitgliedschaft.klaerungsfaelle(db) == [kuenftig]
+    assert vergangen not in mitgliedschaft.klaerungsfaelle(db)
+    # Die Buchung behält ihre Konditionen (A-TARIF-3).
+    assert (kuenftig.preis, kuenftig.ust_satz) == (Decimal("20.00"), Decimal("7.00"))
+
+    mitgliedschaft.klaere(db, kuenftig, admin_user_id=None)
+    db.commit()
+    assert mitgliedschaft.klaerungsfaelle(db) == []
+    assert kuenftig.gruppe_geklaert_am is not None
+
+
+def test_storno_nimmt_buchung_aus_der_klaerung(db: Session, welt) -> None:
+    f, k = welt
+    mitgliedschaft.freischalten(db, k, bis=date(2028, 4, 30), admin_user_id=None)
+    b = _termin(db, f, k, date(2027, 12, 10))
+    db.commit()
+    mitgliedschaft.beende(db, k, grund="ausgetreten", admin_user_id=None)
+    db.commit()
+    assert mitgliedschaft.klaerungsfaelle(db) == [b]
+    storno.storniere(db, b, durch="betreiber", kostenfrei=True, grund="Mitgliedschaft beendet")
+    db.commit()
+    assert mitgliedschaft.klaerungsfaelle(db) == []

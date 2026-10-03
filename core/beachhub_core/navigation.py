@@ -60,6 +60,7 @@ NAVIGATION: list[Bereich] = [
         [
             Punkt("Übersicht", "/admin/system"),
             Punkt("Kostenpflichtige Stornos", "/admin/system/stornos"),
+            Punkt("Klärung Mitgliedschaft", "/admin/system/klaerung"),
             Punkt("Änderungsprotokoll", "/admin/system/audit"),
             Punkt("Halle", "/admin/halle"),
         ],

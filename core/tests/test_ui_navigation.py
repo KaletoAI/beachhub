@@ -27,6 +27,7 @@ SEITEN = [
     "/admin/konfiguration",
     "/admin/system",
     "/admin/system/stornos",
+    "/admin/system/klaerung",
     "/admin/system/audit",
     "/admin/halle",
 ]

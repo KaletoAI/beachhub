@@ -1,0 +1,26 @@
+{% extends "base.html" %}{% block title %}Klärung Mitgliedschaft{% endblock %}
+{% block content %}
+<h1>Klärung Mitgliedschaft</h1>
+<p class="hinweis">Künftige Buchungen zum Mitgliedspreis, deren Kunde am Tag des Termins kein Mitglied mehr ist – etwa weil eine Mitgliedschaft vorzeitig beendet wurde. Die Buchungen behalten Preis und Steuersatz. Entscheiden Sie je Buchung: belassen („geklärt“) oder über die Buchung stornieren.</p>
+<div class="karte">
+<table>
+  <thead><tr><th>Termin</th><th>Feld</th><th>Kunde</th><th>Mitglied bis</th><th class="rechts">Preis</th><th>Steuersatz</th><th class="rechts"></th></tr></thead>
+  <tbody>
+  {% for b in faelle %}<tr>
+    <td>{{ b.beginn|lokal }} – {{ b.ende|uhrzeit }}</td>
+    <td>{{ b.feld.name }}</td>
+    <td>{{ b.kunde.name }}</td>
+    <td>{{ b.kunde.mitglied_bis|datum if b.kunde.mitglied_bis else "–" }}</td>
+    <td class="rechts">{{ b.preis|euro }}</td>
+    <td>{{ b.ust_satz|prozent }}</td>
+    <td class="rechts"><span class="aktionen">
+      <a class="aktion" href="/admin/belegung/buchung/{{ b.id }}">öffnen</a>
+      <form method="post" action="/admin/system/klaerung/{{ b.id }}" class="inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="aktion">geklärt</button></form>
+    </span></td>
+  </tr>{% else %}
+    <tr><td colspan="7" class="leer">Nichts zu klären.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

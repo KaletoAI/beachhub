@@ -49,6 +49,9 @@ class Buchung(UUIDMixin, ZeitstempelMixin, Base):
     )
     anwesenheit: Mapped[str] = mapped_column(String(20), default="unbekannt", nullable=False)
     quelle: Mapped[str] = mapped_column(String(10), nullable=False)  # admin | portal | dauer
+    # Mitgliedschaft endete vor dem Termin, der Betreiber belässt die Buchung zu ihren
+    # Konditionen (Klärungsliste, A-KUND-4).
+    gruppe_geklaert_am: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     feld: Mapped[Feld] = relationship()
     kunde: Mapped[Kunde] = relationship()

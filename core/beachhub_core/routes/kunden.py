@@ -343,9 +343,16 @@ def mitgliedschaft_beenden(
         return _detail_mit_fehler(request, admin, db, k, e)
     if war_mitglied:
         benachrichtigung.mitgliedschaft_beendet(db, k)
-    return mit_flash(
-        RedirectResponse(f"/admin/kunden/{k.id}", status_code=303), "Mitgliedschaft beendet"
-    )
+    offen = sum(1 for b in mitgliedschaft.klaerungsfaelle(db) if b.kunde_id == k.id)
+    text = "Mitgliedschaft beendet."
+    if offen:
+        mehrere = offen != 1
+        text += (
+            f" {offen} künftige Buchung{'en' if mehrere else ''} zum Mitgliedspreis "
+            f"{'stehen' if mehrere else 'steht'} in der Klärungsliste "
+            "(System → Klärung Mitgliedschaft)."
+        )
+    return mit_flash(RedirectResponse(f"/admin/kunden/{k.id}", status_code=303), text)
 
 
 @router.post("/kunden/{kunde_id}/mitgliedschaft/antrag-verwerfen", response_model=None)

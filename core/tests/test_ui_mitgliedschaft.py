@@ -1,8 +1,10 @@
-from datetime import date
+from datetime import date, time
+from decimal import Decimal
 
 from beachhub_core import clock
-from beachhub_core.models import Kunde, utcnow
-from beachhub_core.services import kunden, mitgliedschaft
+from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kunde, Tarif, utcnow
+from beachhub_core.services import buchungen, kunden, mitgliedschaft
+from beachhub_shared.zeit import kombiniere
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -79,3 +81,40 @@ def test_antraege_seite_und_verwerfen(eingeloggt: TestClient, db: Session) -> No
     )
     assert r.status_code == 303
     assert "Keine offenen Anträge" in c.get("/admin/kunden/antraege").text
+
+
+def _feld(db: Session) -> Feld:
+    f = Feld(name="F1", reihenfolge=1)
+    f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
+    db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
+    for wt in range(7):
+        db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
+    db.commit()
+    return f
+
+
+def test_klaerungsliste(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    f = _feld(db)
+    k = _kunde(db)
+    mitgliedschaft.freischalten(db, k, bis=date(2028, 4, 30), admin_user_id=None)
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(date(2027, 12, 10), time(19)),
+        ende=kombiniere(date(2027, 12, 10), time(20)),
+    )
+    db.commit()
+    seite = c.post(
+        f"/admin/kunden/{k.id}/mitgliedschaft/beenden",
+        data={"csrf_token": c.csrf, "grund": "ausgetreten"},
+    )
+    assert "1 künftige Buchung zum Mitgliedspreis" in seite.text
+    liste = c.get("/admin/system/klaerung")
+    assert "Anna" in liste.text and f"/admin/belegung/buchung/{b.id}" in liste.text
+    r = c.post(
+        f"/admin/system/klaerung/{b.id}", data={"csrf_token": c.csrf}, follow_redirects=False
+    )
+    assert r.status_code == 303
+    assert "Nichts zu klären" in c.get("/admin/system/klaerung").text

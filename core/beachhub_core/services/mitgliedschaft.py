@@ -9,11 +9,12 @@ import uuid
 from datetime import date, timedelta
 from typing import Any, Literal
 
+from beachhub_shared.zeit import lokales_datum
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Kunde, utcnow
+from beachhub_core.models import Buchung, Kunde, utcnow
 from beachhub_core.services import audit, konfiguration, kundengruppen
 
 Status = Literal["mitglied", "beantragt", "nicht_mitglied"]
@@ -140,3 +141,39 @@ def beantrage(db: Session, kunde: Kunde, *, hinweis: str) -> None:
     kunde.mitglied_antrag_hinweis = hinweis.strip()[:500]
     db.flush()
     _protokolliere(db, kunde, vorher, "antrag_gestellt", quelle="portal", admin_user_id=None)
+
+
+def klaerungsfaelle(db: Session) -> list[Buchung]:
+    """Künftige Buchungen zum Mitgliedspreis, deren Kunde am Termin kein Mitglied mehr ist
+    (A-KUND-4, A-DAUER-5). Sie behalten ihre Konditionen, bis der Betreiber entscheidet."""
+    kandidaten = db.scalars(
+        select(Buchung)
+        .where(
+            Buchung.kundengruppe_id == kundengruppen.mitglied(db).id,
+            Buchung.status.in_((Buchung.RESERVIERT, Buchung.BESTAETIGT)),
+            Buchung.beginn > clock.now(db),
+            Buchung.gruppe_geklaert_am.is_(None),
+        )
+        .order_by(Buchung.beginn)
+    ).all()
+    return [
+        b for b in kandidaten if not kundengruppen.ist_mitglied_am(b.kunde, lokales_datum(b.beginn))
+    ]
+
+
+def klaere(db: Session, buchung: Buchung, *, admin_user_id: uuid.UUID | None) -> None:
+    """Der Betreiber belässt die Buchung zu ihren Konditionen."""
+    if buchung.gruppe_geklaert_am is not None:
+        return
+    vorher = audit.als_dict(buchung)
+    buchung.gruppe_geklaert_am = utcnow()
+    db.flush()
+    audit.protokolliere(
+        db,
+        quelle="admin",
+        objekt_typ="buchung",
+        objekt_id=buchung.id,
+        vorher=vorher,
+        nachher={**audit.als_dict(buchung), "aktion": "gruppe_geklaert"},
+        admin_user_id=admin_user_id,
+    )
