@@ -113,3 +113,11 @@ def test_konto_buchung_zahlungslink_optional() -> None:
         {**alt, "checkout_url": "/test-zahlung/fake_x", "reserviert_bis": "2027-11-25T09:15:00Z"}
     )
     assert neu.checkout_url == "/test-zahlung/fake_x" and neu.reserviert_bis is not None
+
+
+def test_mitgliedschaft_beantragen_validiert() -> None:
+    n = kanal.NUTZLAST["mitgliedschaft_beantragen"].model_validate({"hinweis_text": "Nr. 4711"})
+    assert isinstance(n, kanal.MitgliedschaftBeantragen) and n.hinweis_text == "Nr. 4711"
+    for falsch in ({"hinweis_text": ""}, {"hinweis_text": "x" * 501}, {}):
+        with pytest.raises(ValidationError):
+            kanal.MitgliedschaftBeantragen.model_validate(falsch)

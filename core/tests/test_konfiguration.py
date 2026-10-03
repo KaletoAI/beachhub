@@ -85,3 +85,11 @@ def test_stichtag_speichern_und_lesen(db: Session) -> None:
     wert = konfiguration.hole(db, "mitgliedschaft_ablauf")
     assert isinstance(wert, konfiguration.TagMonat)
     assert wert.im_jahr(2028) == date(2028, 5, 1)
+
+
+def test_ja_nein_nur_eindeutig(db: Session) -> None:
+    assert konfiguration.hole(db, "rechnungskunden_online_buchen") is False
+    konfiguration.setze(db, "rechnungskunden_online_buchen", "ja")
+    assert konfiguration.hole(db, "rechnungskunden_online_buchen") is True
+    with pytest.raises(ValueError, match="ja oder nein"):
+        konfiguration.setze(db, "rechnungskunden_online_buchen", "vielleicht")

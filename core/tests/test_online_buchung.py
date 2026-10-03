@@ -20,6 +20,7 @@ from beachhub_core.services import (
     buchungen,
     dauerbuchungen,
     guthaben,
+    konfiguration,
     kunden,
     lesestand,
     online_buchung,
@@ -458,3 +459,17 @@ def test_verfall_job_bucht_zurueck_und_mailt(db: Session, welt, mail_ausgang) ->
     assert k.guthaben == Decimal("10.00")
     assert any(m["betreff"] == "Reservierung verfallen" for m in mail_ausgang)
     assert jobs.verfall_ausfuehren(db) == 0
+
+
+def test_rechnungskunde_wird_abgelehnt(db: Session, welt) -> None:
+    f, k, _ = welt
+    guthaben.buche(db, kunde=k, betrag=Decimal("30.00"), art="manuell")
+    k.rechnungskunde = True  # nach dem Buchen: guthaben.buche lädt den Kunden neu
+    db.commit()
+    a = _anfragen(db, f, k).antwort
+    db.commit()
+    assert a.status == "abgelehnt" and a.grund == "rechnungskunde"
+    assert db.query(Buchung).count() == 0 and k.guthaben == Decimal("30.00")
+    konfiguration.setze(db, "rechnungskunden_online_buchen", "ja")
+    db.commit()
+    assert _anfragen(db, f, k).antwort.status == "bestaetigt"

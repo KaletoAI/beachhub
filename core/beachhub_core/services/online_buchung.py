@@ -20,6 +20,7 @@ from beachhub_core.services import (
     buchungen,
     guthaben,
     konfiguration,
+    kunden,
     rechnung_pdf,
     rechnungen,
     storno,
@@ -128,6 +129,9 @@ def anfragen(
 ) -> Ergebnis:
     if kunde.anonymisiert_am is not None:
         return abgelehnt("konto_gesperrt")
+    if not kunden.darf_online_buchen(db, kunde):
+        # Rechnungskunden buchen nicht online; ihre Buchungen legt der Betreiber an (A-KUND-7).
+        return abgelehnt("rechnungskunde")
     try:
         with db.begin_nested():
             b = buchungen.lege_an(

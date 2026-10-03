@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from beachhub_core.models import Kunde, utcnow
-from beachhub_core.services import audit
+from beachhub_core.services import audit, konfiguration
 
 
 class KundenFehler(Exception):  # noqa: N818
@@ -106,3 +106,8 @@ def anonymisiere(
         nachher=audit.als_dict(kunde),
         admin_user_id=admin_user_id,
     )
+
+
+def darf_online_buchen(db: Session, kunde: Kunde) -> bool:
+    """Rechnungskunden buchen nur online, wenn der Betreiber es erlaubt (A-KUND-7)."""
+    return not kunde.rechnungskunde or bool(konfiguration.hole(db, "rechnungskunden_online_buchen"))

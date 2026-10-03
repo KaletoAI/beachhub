@@ -15,7 +15,7 @@ from beachhub_core.models import (
     Sperre,
     Tarif,
 )
-from beachhub_core.services import buchungen, kunden, lesestand, storno
+from beachhub_core.services import buchungen, konfiguration, kunden, lesestand, storno
 from beachhub_shared.signatur import pruefe
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy import select
@@ -181,3 +181,29 @@ def test_verarbeite_geaenderte_ueberspringt_fehlerhaftes_dokument(db: Session, w
     assert sorted(lesestand.verarbeite_geaenderte(db)) == ["belegung", "hallenplan"]
     assert Path(settings.data_dir, "lesestand", "belegung.json").exists()
     assert db.get(LesestandVersion, "konto:not-a-uuid") is None
+
+
+def test_konto_zeigt_mitgliedschaft_und_rechnungskunde(db: Session, welt) -> None:
+    _, a, _ = welt
+    a.mitglied_bis = date(2028, 4, 30)
+    a.rechnungskunde = True
+    db.commit()
+    k = lesestand.baue_konto(db, a)
+    assert (k.kundengruppe, k.mitgliedschaft) == ("DJK-Mitglied", "mitglied")
+    assert k.mitglied_bis == date(2028, 4, 30)
+    assert k.rechnungskunde is True and k.online_buchen is False
+    t = lesestand.baue_tarife(db)
+    assert (t.gruppe_mitglied, t.gruppe_nichtmitglied) == ("DJK-Mitglied", "Nicht-Mitglied")
+
+
+def test_umschalten_markiert_konten_der_rechnungskunden(db: Session, welt) -> None:
+    _, a, b = welt
+    a.rechnungskunde = True
+    db.commit()
+    lesestand.verarbeite_geaenderte(db)
+    konfiguration.setze(db, "rechnungskunden_online_buchen", "ja")
+    db.commit()
+    assert db.get(LesestandVersion, f"konto:{a.id}").geaendert
+    zeile_b = db.get(LesestandVersion, f"konto:{b.id}")
+    assert zeile_b is None or not zeile_b.geaendert
+    assert lesestand.baue_konto(db, a).online_buchen is True

@@ -76,3 +76,13 @@ def rechnung(db: Session, r: Rechnung) -> None:
 
 def betreiber_alarm(betreff: str, text: str) -> None:
     mail.sende(settings.email_from, f"[Beachhub] {betreff}", text)
+
+
+def mitgliedsantrag(db: Session, k: Kunde) -> None:
+    betreiber_alarm(
+        "Antrag auf Vereinsmitgliedschaft",
+        f"{k.name} <{k.email}> beantragt im Portal die Freischaltung als Mitglied.\n"
+        f"Angaben: {k.mitglied_antrag_hinweis}\n\n"
+        "Bitte gegen die Mitgliederliste prüfen und in der Verwaltung unter "
+        "Kunden → Mitgliedsanträge freischalten oder verwerfen.",
+    )

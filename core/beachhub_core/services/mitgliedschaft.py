@@ -7,7 +7,7 @@ die Gruppe der Mitglieder, danach läuft die Mitgliedschaft von selbst aus
 
 import uuid
 from datetime import date, timedelta
-from typing import Any
+from typing import Any, Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,7 +16,10 @@ from beachhub_core import clock
 from beachhub_core.models import Kunde, utcnow
 from beachhub_core.services import audit, konfiguration, kundengruppen
 
-MITGLIED, BEANTRAGT, NICHT_MITGLIED = "mitglied", "beantragt", "nicht_mitglied"
+Status = Literal["mitglied", "beantragt", "nicht_mitglied"]
+MITGLIED: Status = "mitglied"
+BEANTRAGT: Status = "beantragt"
+NICHT_MITGLIED: Status = "nicht_mitglied"
 
 
 class MitgliedschaftsFehler(Exception):  # noqa: N818
@@ -37,7 +40,7 @@ def letzter_ablauf(db: Session, bis: date) -> date:
     return d if d <= bis else stichtag.im_jahr(bis.year - 1)
 
 
-def status(kunde: Kunde, heute: date) -> str:
+def status(kunde: Kunde, heute: date) -> Status:
     if kundengruppen.ist_mitglied_am(kunde, heute):
         return MITGLIED
     if kunde.mitglied_antrag_am is not None:
@@ -127,3 +130,13 @@ def offene_antraege(db: Session) -> list[Kunde]:
             .order_by(Kunde.mitglied_antrag_am)
         ).all()
     )
+
+
+def beantrage(db: Session, kunde: Kunde, *, hinweis: str) -> None:
+    """Vermerkt einen Antrag aus dem Portal. Ein erneuter Antrag ersetzt die Angaben des
+    vorigen; entschieden wird im Admin-UI."""
+    vorher = audit.als_dict(kunde)
+    kunde.mitglied_antrag_am = utcnow()
+    kunde.mitglied_antrag_hinweis = hinweis.strip()[:500]
+    db.flush()
+    _protokolliere(db, kunde, vorher, "antrag_gestellt", quelle="portal", admin_user_id=None)

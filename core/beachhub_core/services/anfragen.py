@@ -19,8 +19,10 @@ from beachhub_core.config import settings
 from beachhub_core.models import AnfrageVerarbeitet, Kunde, Rechnung
 from beachhub_core.services import (
     audit,
+    benachrichtigung,
     kunden,
     lesestand,
+    mitgliedschaft,
     online_buchung,
     rechnung_pdf,
 )
@@ -163,12 +165,31 @@ def _rechnung_anfordern(
     return ok(pdf_base64=base64.b64encode(daten).decode(), dateiname=f"Rechnung-{r.nummer}.pdf")
 
 
+def _antrag_mail(kunde_id: Any) -> Nachlauf:
+    def lauf(db: Session) -> None:
+        k = db.get(Kunde, kunde_id)
+        if k is not None:
+            benachrichtigung.mitgliedsantrag(db, k)
+
+    return lauf
+
+
+def _mitgliedschaft_beantragen(
+    db: Session, kunde: Kunde, anfrage: kanal.Anfrage, n: kanal.MitgliedschaftBeantragen
+) -> Ergebnis:
+    if kunde.anonymisiert_am is not None:
+        return abgelehnt("konto_gesperrt")
+    mitgliedschaft.beantrage(db, kunde, hinweis=n.hinweis_text)
+    return Ergebnis(kanal.Antwort(status="ok"), [_antrag_mail(kunde.id)])
+
+
 _MIT_KUNDE: dict[str, Verarbeiter] = {
     "konto_geaendert": _konto_geaendert,
     "konto_loeschen": _konto_loeschen,
     "buchung_anfragen": _buchung_anfragen,
     "buchung_stornieren": _buchung_stornieren,
     "rechnung_anfordern": _rechnung_anfordern,
+    "mitgliedschaft_beantragen": _mitgliedschaft_beantragen,
 }
 
 

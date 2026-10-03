@@ -60,6 +60,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "grund_temperatur": (Decimal, Decimal("0.0")),
     "antwort_hinweis_sekunden": (int, 120),
     "pin_laenge": (int, 6),
+    "rechnungskunden_online_buchen": (bool, False),
 }
 
 # Werte, die in den Plan der Halle eingehen (shared.hallenplan.PlanKonfig).
@@ -172,6 +173,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "um Geduld bittet.",
     ),
     "pin_laenge": Beschreibung("Portal und Zugang", "Länge des Zahlencodes", "Stellen"),
+    "rechnungskunden_online_buchen": Beschreibung(
+        "Portal und Zugang",
+        "Rechnungskunden buchen online",
+        "",
+        "Nein: Rechnungskunden sehen im Portal ihre Termine, Zahlencodes und Rechnungen und "
+        "sagen Abo-Termine ab, buchen aber nicht selbst. Ihre Buchungen legen Sie an.",
+    ),
 }
 
 # Reihenfolge der Gruppen auf der Konfigurationsseite.
@@ -184,13 +192,21 @@ GRUPPEN: list[str] = [
 ]
 
 
-def gruppiert(werte: dict[str, Any]) -> list[tuple[str, list[tuple[str, Any, Beschreibung]]]]:
-    """Ordnet die Werte den Gruppen zu, in der Reihenfolge von GRUPPEN."""
+def gruppiert(
+    werte: dict[str, Any],
+) -> list[tuple[str, list[tuple[str, Any, Beschreibung, bool]]]]:
+    """Ordnet die Werte den Gruppen zu, in der Reihenfolge von GRUPPEN. Das vierte Element sagt,
+    ob der Wert ja/nein ist – die Seite zeigt dafür eine Auswahl statt eines Textfelds."""
     return [
         (
             gruppe,
             [
-                (schluessel, werte[schluessel], BESCHREIBUNGEN[schluessel])
+                (
+                    schluessel,
+                    werte[schluessel],
+                    BESCHREIBUNGEN[schluessel],
+                    DEFAULTS[schluessel][0] is bool,
+                )
                 for schluessel in DEFAULTS
                 if schluessel in werte and BESCHREIBUNGEN[schluessel].gruppe == gruppe
             ],
@@ -201,7 +217,12 @@ def gruppiert(werte: dict[str, Any]) -> list[tuple[str, list[tuple[str, Any, Bes
 
 def _parse(typ: type, roh: str) -> Any:
     if typ is bool:
-        return roh.lower() in ("1", "true", "ja")
+        wert = roh.strip().lower()
+        if wert in ("1", "true", "ja"):
+            return True
+        if wert in ("0", "false", "nein"):
+            return False
+        raise ValueError("Bitte ja oder nein wählen")
     if typ is Decimal:
         # Die Oberfläche zeigt Dezimalzahlen deutsch mit Komma und bekommt sie so zurück.
         try:
@@ -259,3 +280,8 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         from beachhub_core.services import lesestand
 
         lesestand.markiere_geaendert(db, "hallenplan")
+    if schluessel == "rechnungskunden_online_buchen":
+        from beachhub_core.services import lesestand
+
+        # Der Wert steht als online_buchen im Konto-Dokument jedes Rechnungskunden.
+        lesestand.markiere_rechnungskunden(db)

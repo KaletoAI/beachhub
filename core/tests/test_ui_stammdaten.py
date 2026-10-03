@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from beachhub_core.models import Feld, Konfiguration, Tarif
-from beachhub_core.services import kundengruppen
+from beachhub_core.services import konfiguration, kundengruppen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -284,3 +284,15 @@ def test_einstellungen_ungueltiger_stichtag_zeigt_meldung(
     assert r.status_code == 200
     assert "Ablauf der Mitgliedschaft" in r.text and "nicht in jedem Jahr" in r.text
     assert db.query(Konfiguration).filter_by(schluessel="mitgliedschaft_ablauf").first() is None
+
+
+def test_einstellung_ja_nein_als_auswahl(eingeloggt: TestClient, db: Session) -> None:
+    c = eingeloggt
+    assert '<select name="rechnungskunden_online_buchen">' in c.get("/admin/konfiguration").text
+    r = c.post(
+        "/admin/konfiguration",
+        data={"csrf_token": c.csrf, "rechnungskunden_online_buchen": "ja"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    assert konfiguration.hole(db, "rechnungskunden_online_buchen") is True

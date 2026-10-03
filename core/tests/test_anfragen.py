@@ -375,3 +375,32 @@ def test_gleichzeitige_zustellung_im_fehlerpfad_liefert_die_andere_antwort(
     assert antwort.model_dump(mode="json", exclude_none=True) == andere_antwort
     assert nachlauf == []
     assert db.scalars(select(Kunde)).all() == []
+
+
+def test_mitgliedschaft_beantragen(db: Session, welt, mail_ausgang: list) -> None:
+    konto = uuid.uuid4()
+    k = _angelegt(db, konto)
+    db.get(LesestandVersion, f"konto:{k.id}").geaendert = False
+    db.commit()
+    antwort, nachlauf = anfragen.bearbeite(
+        db, anfrage("mitgliedschaft_beantragen", konto, hinweis_text=" Nr. 4711 ")
+    )
+    assert antwort.status == "ok"
+    db.refresh(k)
+    assert k.mitglied_antrag_am is not None and k.mitglied_antrag_hinweis == "Nr. 4711"
+    assert db.get(LesestandVersion, f"konto:{k.id}").geaendert
+    assert db.scalars(select(Audit).where(Audit.objekt_id == k.id, Audit.quelle == "portal")).all()
+    assert mail_ausgang == []  # die Mail geht erst nach dem Commit
+    for schritt in nachlauf:
+        schritt(db)
+    assert [m["betreff"] for m in mail_ausgang] == ["[Beachhub] Antrag auf Vereinsmitgliedschaft"]
+    assert "Nr. 4711" in mail_ausgang[0]["text"] and "anna@x.de" in mail_ausgang[0]["text"]
+
+
+def test_mitgliedschaft_beantragen_ohne_angaben_ungueltig(db: Session, welt) -> None:
+    konto = uuid.uuid4()
+    _angelegt(db, konto)
+    antwort, _ = anfragen.bearbeite(
+        db, anfrage("mitgliedschaft_beantragen", konto, hinweis_text="")
+    )
+    assert antwort.status == "abgelehnt" and antwort.grund == "ungueltig"
