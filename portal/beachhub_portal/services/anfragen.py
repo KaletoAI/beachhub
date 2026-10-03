@@ -283,6 +283,9 @@ GRUENDE: dict[str, str] = {
     # Controller-Hinweis Task 12: core/services/anfragen.py meldet ungültige/unvollständige
     # Anfragen (z. B. fehlende konto_id) mit diesem Grund; der Fallbacktext wäre sonst zu
     # unspezifisch für einen tatsächlich vom Hauptsystem gesendeten Ablehnungsgrund.
+    "rechnungskunde": (
+        "Als Rechnungskunde buchst du nicht online. Deine Termine legt der Betreiber für dich an."
+    ),
     "ungueltig": "Die Anfrage konnte nicht verarbeitet werden. Bitte versuche es erneut.",
 }
 # Unterzahlung (A-9): Die Zahlung ist eingegangen, deckt aber den offenen Betrag nicht; der

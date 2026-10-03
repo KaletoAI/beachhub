@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 import pytest
@@ -75,3 +76,30 @@ def test_check_constraint_verhindert_negatives_guthaben(db: Session) -> None:
         db.execute(update(Kunde).values(guthaben=Decimal("-1")).where(Kunde.id == k.id))
         db.commit()
     db.rollback()
+
+
+def test_anonymisieren_leert_mitgliedsfelder(db: Session) -> None:
+    from datetime import date
+
+    from beachhub_core.models import utcnow
+
+    k = kunden.lege_an(db, name="Anna Müller", email="anna@x.de")
+    k.mitglied_bis = date(2028, 4, 30)
+    k.mitglied_antrag_am = k.mitglied_freigeschaltet_am = k.mitglied_beendet_am = utcnow()
+    k.mitglied_antrag_hinweis = "Nr. 4711"
+    k.mitglied_beendet_grund = "Austritt"
+    k.mitglied_erinnert_fuer = date(2028, 4, 30)
+    k.mitglied_freigeschaltet_von = uuid.uuid4()
+    db.commit()
+    kunden.anonymisiere(db, k)
+    db.commit()
+    for feld in (
+        "mitglied_bis",
+        "mitglied_antrag_am",
+        "mitglied_freigeschaltet_am",
+        "mitglied_freigeschaltet_von",
+        "mitglied_beendet_am",
+        "mitglied_erinnert_fuer",
+    ):
+        assert getattr(k, feld) is None, feld
+    assert k.mitglied_antrag_hinweis == "" and k.mitglied_beendet_grund == ""

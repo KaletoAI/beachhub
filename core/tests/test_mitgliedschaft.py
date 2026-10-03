@@ -1,4 +1,4 @@
-from datetime import date, time
+from datetime import date, time, timedelta
 from decimal import Decimal
 
 import pytest
@@ -284,3 +284,30 @@ def test_tageslauf_markiert_konto_nach_ablauf(db: Session, welt) -> None:
     db.expire_all()
     assert db.get(LesestandVersion, f"konto:{abgelaufen.id}").geaendert is True
     assert db.get(LesestandVersion, f"konto:{laufend.id}").geaendert is False
+
+
+def test_tageslauf_holt_verpassten_tag_nach(db: Session, welt) -> None:
+    ende = _mitglied(db, "Ende", date(2028, 4, 30))
+    spaeter = _mitglied(db, "Spaeter", date(2029, 4, 30))
+    db.commit()
+    for k in (ende, spaeter):
+        db.merge(LesestandVersion(dokument=f"konto:{k.id}", version=1, geaendert=False))
+    db.commit()
+    clock.set_override(db, date(2028, 4, 29))
+    mitgliedschaft.tageslauf(db)
+    db.commit()
+    clock.set_override(db, date(2028, 5, 3))  # 30.04., 01.05. und 02.05. ausgefallen
+    mitgliedschaft.tageslauf(db)
+    db.commit()
+    db.expire_all()
+    assert db.get(LesestandVersion, f"konto:{ende.id}").geaendert is True
+    assert db.get(LesestandVersion, f"konto:{spaeter.id}").geaendert is False
+
+
+def test_freischalten_im_erinnerungsfenster_setzt_erinnert_fuer(db: Session, welt) -> None:
+    _, k = welt
+    mitgliedschaft.freischalten(db, k, bis=HEUTE + timedelta(days=5), admin_user_id=None)
+    assert k.mitglied_erinnert_fuer == HEUTE + timedelta(days=5)
+    k2 = _mitglied(db, "Weit", HEUTE)
+    mitgliedschaft.freischalten(db, k2, bis=date(2028, 4, 30), admin_user_id=None)
+    assert k2.mitglied_erinnert_fuer is None

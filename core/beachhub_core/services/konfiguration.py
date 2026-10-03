@@ -243,9 +243,12 @@ def _parse(typ: type, roh: str) -> Any:
     if typ is Decimal:
         # Die Oberfläche zeigt Dezimalzahlen deutsch mit Komma und bekommt sie so zurück.
         try:
-            return Decimal(roh.strip().replace(",", "."))
+            zahl = Decimal(roh.strip().replace(",", "."))
         except InvalidOperation as e:
             raise ValueError("Bitte eine Zahl angeben") from e
+        if not zahl.is_finite():
+            raise ValueError("Bitte eine Zahl angeben")
+        return zahl
     if typ is int:
         try:
             return int(roh.strip())
@@ -264,7 +267,10 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
     typ, default = DEFAULTS[schluessel]
     zeile = db.get(Konfiguration, schluessel)
     vorher = zeile.wert if zeile else str(default)
-    neu = str(_parse(typ, str(wert)))
+    geparst = _parse(typ, str(wert))
+    if schluessel == "event_ust_satz" and not Decimal("0") <= geparst < Decimal("100"):
+        raise ValueError("Steuersatz ungültig")
+    neu = str(geparst)
     aktuell = zeile.wert if zeile else str(_parse(typ, str(default)))
     if neu == aktuell:
         # Unverändert: keine Zeile, kein Audit-Eintrag. Ein leeres Formularfeld und der

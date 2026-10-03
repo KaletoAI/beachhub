@@ -93,3 +93,15 @@ def test_ja_nein_nur_eindeutig(db: Session) -> None:
     assert konfiguration.hole(db, "rechnungskunden_online_buchen") is True
     with pytest.raises(ValueError, match="ja oder nein"):
         konfiguration.setze(db, "rechnungskunden_online_buchen", "vielleicht")
+
+
+@pytest.mark.parametrize("roh", ["NaN", "Infinity", "-Infinity"])
+def test_decimal_lehnt_nicht_endliche_werte_ab(db: Session, roh: str) -> None:
+    with pytest.raises(ValueError, match="Zahl angeben"):
+        konfiguration.setze(db, "event_ust_satz", roh)
+
+
+@pytest.mark.parametrize("roh", ["150", "100", "-1"])
+def test_event_ust_satz_bereich(db: Session, roh: str) -> None:
+    with pytest.raises(ValueError, match="Steuersatz ungültig"):
+        konfiguration.setze(db, "event_ust_satz", roh)

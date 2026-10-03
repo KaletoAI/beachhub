@@ -127,7 +127,7 @@ Betrieb beginnt:
    und `rechnungskunden_online_buchen` (nein).
 6. Einen **Testkunden** anlegen.
 7. Eine **Testbuchung** für den Testkunden durchführen und die Bestätigungsmail (PIN) prüfen.
-8. Über den Monatslauf oder manuell eine **Testrechnung** erzeugen und das PDF prüfen.
+8. Als Betreiber eine **Testbuchung** anlegen (Belegung → Buchung): Dafür entsteht sofort eine Rechnung; das PDF prüfen.
 9. Testkunde, Testbuchung und Testrechnung wieder entfernen bzw. stornieren, damit sie nicht in
    den echten Betrieb einfließen; falls die interne Uhr für Tests verstellt wurde, **Uhr
    zurücksetzen** (nur im Entwicklungsmodus verfügbar – im Produktivbetrieb nicht vorhanden).
@@ -159,13 +159,15 @@ docker compose logs -f app
 ### Mitgliedschaft
 
 - **Anträge** aus dem Portal kommen per Mail und stehen unter Kunden → Mitgliedsanträge.
-  Freischalten, Verlängern, Beenden und Verwerfen geschieht auf der Kundenseite; der Kunde bekommt
-  jeweils eine Mail.
+  Freischalten, Verlängern, Beenden und Verwerfen geschieht auf der Kundenseite. Der Kunde bekommt
+  eine Mail beim Freischalten und Verlängern sowie beim Beenden einer noch laufenden
+  Mitgliedschaft; beim Verwerfen eines Antrags geht keine Mail raus.
 - **Tageslauf um 07:00 Uhr:** Am Stichtag `mitglieder_abgleich` (einmal im Jahr, bei Ausfall am
   nächsten Lauf nachgeholt) kommt eine Mail an den Betreiber; die Prüfliste steht unter Kunden →
-  Mitglieder-Abgleich (mit CSV und Sammelaktionen). Kunden, deren Mitgliedschaft in
+  Mitglieder-Abgleich (mit CSV und Sammelaktionen). Kunden, deren Mitgliedschaft innerhalb von
   `mitglied_erinnerung_tage` Tagen endet, bekommen eine Erinnerung – je Ablaufdatum höchstens eine.
-  Der Tageslauf markiert außerdem die Konto-Dokumente von Kunden, deren Mitgliedschaft gestern endete.
+  Außerdem aktualisiert der Tageslauf das Konto im Portal (Mitgliedschaft und Gruppe) für Kunden,
+  deren Mitgliedschaft seit dem letzten Lauf abgelaufen ist.
 - **Klärungsliste** (System → Klärung Mitgliedschaft): künftige Buchungen zum Mitgliedspreis, deren
   Kunde am Termin kein Mitglied mehr ist. Die Buchungen behalten Preis und Steuersatz, bis sie
   geklärt oder storniert sind.

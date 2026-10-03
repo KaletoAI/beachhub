@@ -179,6 +179,8 @@ def _mitgliedschaft_beantragen(
 ) -> Ergebnis:
     if kunde.anonymisiert_am is not None:
         return abgelehnt("konto_gesperrt")
+    if not n.hinweis_text.strip():
+        return abgelehnt("ungueltig")
     mitgliedschaft.beantrage(db, kunde, hinweis=n.hinweis_text)
     return Ergebnis(kanal.Antwort(status="ok"), [_antrag_mail(kunde.id)])
 

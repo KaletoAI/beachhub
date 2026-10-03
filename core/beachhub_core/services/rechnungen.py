@@ -10,7 +10,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from beachhub_shared.zeit import lokal, lokales_datum
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from beachhub_core import clock
 from beachhub_core.models import (
@@ -355,6 +355,7 @@ def csv_export(db: Session, von: date, bis: date) -> str:
     for r in db.scalars(
         select(Rechnung)
         .where(Rechnung.datum >= von, Rechnung.datum <= bis)
+        .options(selectinload(Rechnung.positionen))
         .order_by(Rechnung.nummer)
     ):
         for z in steuer_je_satz(r):

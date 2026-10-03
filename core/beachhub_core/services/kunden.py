@@ -95,6 +95,11 @@ def anonymisiere(
     kunde.adresse_strasse = kunde.adresse_plz = kunde.adresse_ort = ""
     kunde.portal_konto_id = None
     kunde.stripe_customer_id = None
+    # Alles zur Mitgliedschaft, auch die vom Kunden getippte Mitgliedsnummer.
+    kunde.mitglied_bis = kunde.mitglied_erinnert_fuer = None
+    kunde.mitglied_antrag_am = kunde.mitglied_freigeschaltet_am = kunde.mitglied_beendet_am = None
+    kunde.mitglied_freigeschaltet_von = None
+    kunde.mitglied_antrag_hinweis = kunde.mitglied_beendet_grund = ""
     kunde.anonymisiert_am = utcnow()
     db.flush()
     audit.protokolliere(

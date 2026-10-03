@@ -91,6 +91,11 @@ def freischalten(db: Session, kunde: Kunde, *, bis: date, admin_user_id: uuid.UU
     kunde.mitglied_antrag_am = None
     kunde.mitglied_beendet_am = None
     kunde.mitglied_beendet_grund = ""
+    # Liegt das Ende schon im Erinnerungsfenster, folgt auf die frische Freischaltmail keine
+    # Erinnerung mehr.
+    tage = konfiguration.hole(db, "mitglied_erinnerung_tage")
+    if tage > 0 and bis <= clock.today(db) + timedelta(days=tage):
+        kunde.mitglied_erinnert_fuer = bis
     db.flush()
     _protokolliere(
         db, kunde, vorher, "mitglied_freigeschaltet", quelle="admin", admin_user_id=admin_user_id
@@ -185,6 +190,7 @@ def klaere(db: Session, buchung: Buchung, *, admin_user_id: uuid.UUID | None) ->
 
 
 ABGLEICH_MARKER = "mitglieder_abgleich_letzter"
+TAGESLAUF_MARKER = "mitgliedschaft_tageslauf_letzter"
 
 
 def pruefliste(db: Session, heute: date) -> list[Kunde]:
@@ -327,11 +333,26 @@ def tageslauf(db: Session) -> Tageslauf:
                 lauf.erinnert.append(k.id)
     # Das Konto-Dokument zeigt Mitgliedschaft und Gruppe „Stand heute“: Am Tag nach dem Ablauf
     # muss es neu entstehen, sonst zeigt das Portal weiter die abgelaufene Mitgliedschaft.
+    # Ein ausgefallener Lauf wird nachgeholt: ab dem letzten Lauf (ohne Marker nur gestern).
+    gestern = heute - timedelta(days=1)
+    letzter = db.get(AppSetting, TAGESLAUF_MARKER)
+    ab = gestern
+    if letzter is not None:
+        try:
+            ab = min(gestern, date.fromisoformat(letzter.value or ""))
+        except ValueError:
+            pass
     abgelaufen = db.scalars(
         select(Kunde.id).where(
-            Kunde.anonymisiert_am.is_(None), Kunde.mitglied_bis == heute - timedelta(days=1)
+            Kunde.anonymisiert_am.is_(None),
+            Kunde.mitglied_bis >= ab,
+            Kunde.mitglied_bis <= gestern,
         )
     ).all()
+    if letzter is None:
+        db.add(AppSetting(key=TAGESLAUF_MARKER, value=heute.isoformat()))
+    else:
+        letzter.value = heute.isoformat()
     if abgelaufen:
         from beachhub_core.services import lesestand
 

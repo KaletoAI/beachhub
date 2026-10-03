@@ -388,3 +388,32 @@ def test_buchung_neu_ohne_slot_fuehrt_in_den_plan(eingeloggt: TestClient, welt) 
     seite = eingeloggt.get("/admin/belegung/buchung/neu", follow_redirects=True)
     assert seite.status_code == 200
     assert "Belegungsplan" in seite.text
+
+
+def _post_buchung(c, f, a, satz: str):
+    return c.post(
+        "/admin/belegung/buchung",
+        data={
+            "csrf_token": c.csrf,
+            "feld_id": str(f.id),
+            "kunde_id": str(a.id),
+            "beginn": "2027-12-01T19:00",
+            "ende": "2027-12-01T20:00",
+            "ust_satz": satz,
+        },
+        follow_redirects=False,
+    )
+
+
+def test_betreiberbuchung_steuersatz_mit_komma(eingeloggt: TestClient, db: Session, welt) -> None:
+    f, a, _ = welt
+    assert _post_buchung(eingeloggt, f, a, "7,5").status_code == 303
+    assert db.query(Buchung).one().ust_satz == Decimal("7.50")
+
+
+def test_betreiberbuchung_steuersatz_nan(eingeloggt: TestClient, db: Session, welt) -> None:
+    f, a, _ = welt
+    r = _post_buchung(eingeloggt, f, a, "NaN")
+    assert r.status_code == 303
+    assert "Steuersatz ungültig" in eingeloggt.get(r.headers["location"]).text
+    assert db.query(Buchung).count() == 0

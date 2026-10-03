@@ -116,8 +116,8 @@ def _satz(db: Session, roh: str) -> Decimal:
     """Steuersatz aus dem Buchungsformular; leer heißt Vorgabe für Betreiberbuchungen."""
     satz = t_betrag(roh)
     if satz is None:
-        return Decimal(konfiguration.hole(db, "event_ust_satz"))
-    if not Decimal("0") <= satz < Decimal("100"):
+        satz = Decimal(konfiguration.hole(db, "event_ust_satz"))
+    if not satz.is_finite() or not Decimal("0") <= satz < Decimal("100"):
         raise ValueError("Steuersatz ungültig")
     return satz
 

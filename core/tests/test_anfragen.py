@@ -404,3 +404,12 @@ def test_mitgliedschaft_beantragen_ohne_angaben_ungueltig(db: Session, welt) -> 
         db, anfrage("mitgliedschaft_beantragen", konto, hinweis_text="")
     )
     assert antwort.status == "abgelehnt" and antwort.grund == "ungueltig"
+
+
+def test_mitgliedschaft_beantragen_nur_leerzeichen_ungueltig(db: Session, welt) -> None:
+    konto = uuid.uuid4()
+    _angelegt(db, konto)
+    antwort, _ = anfragen.bearbeite(
+        db, anfrage("mitgliedschaft_beantragen", konto, hinweis_text="   ")
+    )
+    assert antwort.status == "abgelehnt" and antwort.grund == "ungueltig"
