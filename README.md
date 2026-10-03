@@ -9,13 +9,13 @@ Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald 
 Hallenhersteller die Schnittstellen festlegt.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
-- Dokument für den Betreiber (nicht technisch), Version 0.3: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
+- Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
   (Quelle: `docs/betreiber/anforderungen-und-loesungskonzept.html`, erzeugt mit WeasyPrint)
-- Offene Rückfragen an den Betreiber: `docs/betreiber/Beachhub-Rueckfragen-Runde-3.pdf`, zum Ausfüllen
-  auch als `docs/betreiber/Beachhub-Rueckfragen-Runde-3.docx` (Quelle: `docs/betreiber/rueckfragen-runde-3.html`)
 - Antworten des Betreibers vom 10.09.2026: `docs/betreiber/Beachhub_Anforderungsprofil Antwort.pdf`
 - Antworten des Betreibers vom 23.09.2026 auf Runde 2: `docs/betreiber/Fragenkatalog 2_BeachAugsburg Buchungssystem.docx`
   (frühere Rückfragen: `docs/betreiber/Beachhub-Rueckfragen-Runde-2.pdf`)
+- Rückfragen Runde 3: `docs/betreiber/Beachhub-Rueckfragen-Runde-3.pdf` (Quelle: `docs/betreiber/rueckfragen-runde-3.html`);
+  die Antworten vom 03.10.2026 stehen in der Spezifikation, Abschnitt 12.1b
 - Betriebshandbuch (Inbetriebnahme, Backup, WireGuard): `docs/betrieb/hauptsystem.md`
 - Entwickler-Kurzstart: `core/README.md`
 - Portal: Design docs/superpowers/specs/2026-09-23-portal-kern-design.md, Betrieb docs/betrieb/portal.md, Kurzstart portal/README.md

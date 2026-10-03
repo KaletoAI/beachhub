@@ -18,7 +18,7 @@ die Anfragen über einen Kanal, den es selbst aufbaut.
 - `shared/`: Nachrichtenschemata für den Kanal.
 
 **Nicht enthalten** (kommt nach dem Betreiber-Feedback zusammen mit Stufe 1a):
-`mitgliedschaft_beantragen`, `gutschein_kaufen`, `gutschein_code` beim Buchen, ein echter
+`mitgliedschaft_beantragen`, `gutschein_kaufen`, `gutschein_codes` beim Buchen, ein echter
 Zahlungsanbieter (Stripe oder Mollie, Ⓞ-13), die Gruppenverwaltung (Stufe 4, Schema `gruppen`).
 
 ## 2. Kanal Portal ↔ Hauptsystem
