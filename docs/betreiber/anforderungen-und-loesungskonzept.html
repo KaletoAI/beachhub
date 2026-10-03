@@ -40,12 +40,12 @@
   <div class="sub">Anforderungen und Lösungskonzept für Buchung, Abrechnung und Steuerung der Beachhalle</div>
   <p>Dieses Dokument beschreibt, was das neue System für die Beachhalle leisten soll und wie es aufgebaut wird. Es richtet sich an den Betreiber der Halle als Auftraggeber. Es enthält bewusst keine technischen Details; diese stehen in einer separaten Spezifikation für die Entwickler.</p>
   <p>Am Ende steht eine Liste von Entscheidungen, die der Betreiber treffen muss, bevor die Umsetzung beginnt.</p>
-  <p>Diese Ausgabe arbeitet Ihre Antworten aus dem Fragenkatalog 2 vom 23. September 2026 ein. Geändert haben sich vor allem: Ein Gutschein deckt jetzt zwei Stunden statt eines Eurobetrags und enthält die Umsatzsteuer schon beim Kauf; Gratis-Codes gelten einmal; Abo-Kunden können bis zu drei Termine kostenlos absagen; Rechnungskunden buchen nicht online; ein Saisonabo setzt die DJK-Mitgliedschaft voraus; die Mitgliedschaft endet am 30. April, der Abgleich ist am 31. August; gestartet wird mit dem Zahlungsdienst Stripe.</p>
-  <p>Neu ist außerdem ein Grundsatz: <b>Ihre Entscheidungen sind Einstellungen.</b> Wo Sie zwischen zwei Wegen gewählt haben, bauen wir beide und stellen Ihre Wahl ein. Sie können sie später selbst ändern, ohne Entwickler – etwa wenn Ihr Steuerberater zu einem anderen Ergebnis kommt. Die wenigen verbliebenen Fragen stehen im Dokument „Rückfragen zur dritten Runde“.</p>
+  <p>Diese Ausgabe arbeitet Ihre Antworten auf die „Rückfragen zur dritten Runde“ vom 3. Oktober 2026 ein. Die meisten Vorschläge haben Sie bestätigt, und Ihr Steuerberater hat die Angaben zur Umsatzsteuer bestätigt. Neu ist: Für eine längere Buchung lassen sich mehrere Gutscheine einlösen, einer je volle zwei Stunden; Rechnungskunden dürfen Gutscheine kaufen und bezahlen sie online; ob ein Gutschein zum Mitgliedspreis gekauft wurde, steht auf dem Gutschein.</p>
+  <p>Es bleibt beim Grundsatz: <b>Ihre Entscheidungen sind Einstellungen.</b> Wo Sie zwischen zwei Wegen gewählt haben, bauen wir beide und stellen Ihre Wahl ein. Sie können sie später selbst ändern, ohne Entwickler. Alle Ihre bisherigen Antworten und die eine noch offene Frage stehen in Abschnitt 13.</p>
   <div class="meta">
-    Stand: 23. September 2026<br>
+    Stand: 3. Oktober 2026<br>
     Status: Entwurf zur Abstimmung<br>
-    Ausgabe: Version 0.3
+    Ausgabe: Version 0.4
   </div>
 </div>
 
@@ -121,7 +121,7 @@
 </figure>
 
 <h3>Das Buchungsportal</h3>
-<p>Die Webseite, auf der Kunden buchen, ihre Buchungen sehen, stornieren und ihre Spielergruppen verwalten. Rechnungskunden (Abo-Kunden, Veranstalter) sehen dort ihre Termine und Rechnungen und können Abo-Termine absagen, buchen aber nicht selbst. Sie speichert nur, was dafür nötig ist: E-Mail-Adresse, Anzeigename, die eigenen Buchungen und die Gruppendaten. Keine Postadressen, keine Zahlungsdaten, keine Rechnungen.</p>
+<p>Die Webseite, auf der Kunden buchen, ihre Buchungen sehen, stornieren und ihre Spielergruppen verwalten. Rechnungskunden (Abo-Kunden, Veranstalter) sehen dort ihre Termine, Zahlencodes und Rechnungen, können Abo-Termine absagen und Gutscheine kaufen, buchen aber nicht selbst. Sie speichert nur, was dafür nötig ist: E-Mail-Adresse, Anzeigename, die eigenen Buchungen und die Gruppendaten. Keine Postadressen, keine Zahlungsdaten, keine Rechnungen.</p>
 <p>Das Portal entscheidet nichts selbst. Jede Buchung ist zunächst eine Anfrage, die das Hauptsystem prüft und beantwortet. Der Kunde sieht das als „Anfrage gesendet“ und wenige Sekunden später als Bestätigung.</p>
 
 <h3>Das Hauptsystem</h3>
@@ -140,7 +140,7 @@
   <li><b>Anmelden ohne Passwort.</b> Der Kunde gibt seine E-Mail-Adresse ein und bekommt einen Anmeldelink zugeschickt. Es gibt keine Passwörter, die vergessen oder gestohlen werden können.</li>
   <li><b>Freies Feld wählen.</b> Der Belegungsplan zeigt je Feld die freien Zeiten. Fremde Buchungen erscheinen nur als „belegt“, ohne Namen. Buchbar sind Zeiten innerhalb des Buchungsfensters (z. B. die nächsten 14 Tage).</li>
   <li><b>Preis sehen und anfragen.</b> Der Preis richtet sich nach Feld, Uhrzeit, Wochentag und Kundengruppe. Der Kunde sieht ihn vor dem Klick.</li>
-  <li><b>Bezahlen.</b> Das Hauptsystem prüft, ob der Slot wirklich frei ist, und reserviert ihn. Der Kunde wird zur Online-Zahlung weitergeleitet und hat dafür 15 Minuten Zeit. Eine Zahlung auf Rechnung gibt es im Portal nicht. Wer einen Gutscheincode hat, gibt ihn hier ein; er deckt zwei Stunden, der Zahlungsschritt entfällt dann.</li>
+  <li><b>Bezahlen.</b> Das Hauptsystem prüft, ob der Slot wirklich frei ist, und reserviert ihn. Der Kunde wird zur Online-Zahlung weitergeleitet und hat dafür 15 Minuten Zeit. Eine Zahlung auf Rechnung gibt es im Portal nicht. Wer einen Gutscheincode hat, gibt ihn hier ein; jeder Gutschein deckt zwei Stunden. Ist die Buchung damit ganz gedeckt, entfällt der Zahlungsschritt.</li>
   <li><b>Zahlencode.</b> Mit der Bestätigung erhält der Kunde per E-Mail seinen Zahlencode für die Tür. Er gilt nur für seinen Termin, ab 15 Minuten vor Beginn bis zum Ende. Einen Tag vorher kommt eine Erinnerung.</li>
   <li><b>Spielen.</b> Beim Betreten ist die Halle vorgeheizt, das Licht des gebuchten Feldes geht kurz vor Beginn an und nach dem Ende aus.</li>
 </ol>
@@ -178,7 +178,7 @@
     <li>Nach der Frist bleibt der Preis fällig. Der Slot wird trotzdem sofort wieder freigegeben.</li>
     <li>Wird der Platz danach von jemand anderem gebucht, ändert das nichts: Der Betrag bleibt fällig.</li>
     <li>Der Betreiber kann jede Stornierung aus Kulanz auf kostenfrei setzen.</li>
-    <li><b>Abos:</b> Je Abo sind bis zu drei Absagen kostenlos, sofern sie vor der Stornofrist liegen. Der Betrag des Termins wird gutgeschrieben. Jede weitere Absage gibt den Platz frei, der Preis bleibt.</li>
+    <li><b>Abos:</b> Je Abo sind bis zu drei Absagen kostenlos, sofern sie vor der Stornofrist liegen – wer dienstags und donnerstags spielt, hat zwei Abos und damit sechs. Der Kunde sagt selbst im Portal ab und sieht dort, wie viele kostenlose Absagen er noch hat. Der Betrag des Termins wird gutgeschrieben. Jede weitere Absage gibt den Platz frei, der Preis bleibt.</li>
   </ul>
 </div>
 
@@ -188,7 +188,8 @@
 <h3>Zahlung</h3>
 <ul>
   <li><b>Einzelbuchungen werden online bezahlt</b>, direkt bei der Buchung. Das Geld geht auf das Konto des Betreibers beim Zahlungsdienst und wird von dort aufs Bankkonto ausgezahlt.</li>
-  <li><b>Rechnungskunden buchen nicht online.</b> Abos und andere Events legt der Betreiber im System an; der Kunde bekommt eine Rechnung und zahlt per Überweisung. Der Betreiber hakt den Zahlungseingang ab.</li>
+  <li><b>Rechnungskunden buchen nicht online.</b> Abos und andere Events legt der Betreiber im System an; der Kunde bekommt eine Rechnung und zahlt per Überweisung. Der Betreiber hakt den Zahlungseingang ab. Gutscheine dürfen Rechnungskunden kaufen; die bezahlen sie online wie alle anderen.</li>
+  <li><b>Umsatzsteuer bei Events:</b> Legen Sie ein Event an, ist 19 % vorbelegt – auch wenn ein Mitglied bucht, wie vom Steuerberater bestätigt. Im Einzelfall können Sie den Satz ändern.</li>
   <li>Eine Zahlung auf Rechnung gibt es im Portal nicht.</li>
 </ul>
 <p><b>Zahlungsdienst: Wir starten mit Stripe</b>, wie von Ihnen entschieden. Wero ist damit vorerst nicht möglich. Der Zahlungsdienst ist im System ein austauschbarer Baustein (ein „Plugin“): Mollie wird gleich mitgebaut, und ein Wechsel ist eine Einstellung, kein Umbau. Zahlungen, die beim alten Anbieter begonnen haben, laufen dort sauber zu Ende.</p>
@@ -217,17 +218,18 @@
 <p>Jemand <b>kauft</b> einen Gutschein für später, ohne Datum und Uhrzeit. Und jemand <b>löst</b> einen Code bei der Buchung ein – entweder einen gekauften oder einen, den Sie selbst ausgestellt haben. So haben Sie es entschieden:</p>
 <table>
   <tr><th>Art</th><th>Wie sie entsteht</th><th>Was sie wert ist</th></tr>
-  <tr><td>Gekaufter Gutschein</td><td>Ein Kunde mit Konto kauft ihn im Portal und bezahlt online, zum Preis seiner Gruppe (Mitglied oder Nicht-Mitglied). Er kann ihn verschenken. Gültig 730 Tage.</td><td><b>Eine Buchungseinheit:</b> ein Feld für zwei Stunden, zu jeder Zeit, egal was diese zwei Stunden bei der Einlösung kosten.</td></tr>
-  <tr><td>Gratis-Code</td><td>Sie stellen ihn in der Verwaltung aus – für Werbung, als Entschädigung oder für eine Eröffnungsaktion, auch viele auf einmal.</td><td>Ebenfalls ein Feld für zwei Stunden, aber ohne Geldwert. <b>Jeder Code gilt genau einmal.</b></td></tr>
+  <tr><td>Gekaufter Gutschein</td><td>Ein Kunde mit Konto kauft ihn im Portal und bezahlt online, zum Gutscheinpreis seiner Gruppe (Mitglied oder Nicht-Mitglied). Beide Preise stellen Sie in der Verwaltung ein; es gilt der Preis am Tag des Kaufs. Auf dem Gutschein steht, ob er zum Mitgliedspreis gekauft wurde. Er kann ihn verschenken. Gültig 730 Tage.</td><td><b>Eine Buchungseinheit:</b> ein Feld für zwei Stunden, zu jeder Zeit, egal was diese zwei Stunden bei der Einlösung kosten.</td></tr>
+  <tr><td>Gratis-Code</td><td>Sie stellen ihn in der Verwaltung aus – für Werbung, als Entschädigung oder für eine Eröffnungsaktion, auch viele auf einmal. Gültig 90 Tage, je Code änderbar.</td><td>Ebenfalls ein Feld für zwei Stunden, aber ohne Geldwert. Feld und Uhrzeit wählt der Kunde, wenn Sie nichts vorgeben. <b>Jeder Code gilt genau einmal.</b></td></tr>
 </table>
-<p>Eingelöst wird direkt bei der Buchung. Bucht jemand länger als zwei Stunden, zahlt er die übrige Zeit online. Sagt er rechtzeitig ab, wird sein Gutschein wieder gültig; sagt er zu spät ab, ist er verbraucht.</p>
+<p>Eingelöst wird direkt bei der Buchung. Je volle zwei Stunden lässt sich ein Gutschein einlösen: Bei vier Stunden sind es zwei Gutscheine, bei drei Stunden einer, und die dritte Stunde wird online bezahlt. Sagt der Kunde rechtzeitig ab, werden seine Gutscheine wieder gültig; sagt er zu spät ab, sind sie verbraucht.</p>
+<p>Einen <b>Gutschein zum Mitgliedspreis</b> können nur Mitglieder einlösen; einen zum Preis für Nicht-Mitglieder kann jeder einlösen.</p>
 <div class="box">
   <div class="t">Was das für Sie bedeutet</div>
   Steigen die Preise zwischen Kauf und Einlösung, tragen Sie die Differenz – so ist es gewollt, der Gutschein ist „zwei Stunden spielen“. Einen Restbetrag gibt es nicht mehr. Sollten Sie es sich anders überlegen: Der frühere Vorschlag (Gutschein über einen Eurobetrag mit Restwert) bleibt als Einstellung im System und lässt sich für künftige Verkäufe einschalten.
 </div>
-<div class="box warn">
-  <div class="t">Umsatzsteuer beim Gutscheinkauf – bitte vom Steuerberater bestätigen lassen</div>
-  Wie von Ihnen angegeben, enthält die Rechnung für den Gutschein bereits die Umsatzsteuer: 7 %, wenn ein Mitglied kauft, 19 % bei einem Nicht-Mitglied. Bei der Einlösung fällt keine Steuer mehr an. Das Gesetz nennt das einen <i>Einzweckgutschein</i>. Er setzt voraus, dass die Steuer beim Kauf wirklich feststeht. Genau das wackelt, wenn ein Mitglied einen Gutschein zum Mitgliedspreis kauft und ihn einem Nicht-Mitglied schenkt: Dann spielt ein Nicht-Mitglied zu 7 % und zum Mitgliedspreis. Wir schlagen deshalb vor, dass Gutscheine zum Mitgliedspreis nur von Mitgliedern eingelöst werden können (Rückfrage 2). Kommt Ihr Steuerberater zu einem anderen Ergebnis, stellen wir auf die andere Variante um (Steuer erst bei Einlösung) – das ist eine Einstellung, kein Umbau.
+<div class="box">
+  <div class="t">Umsatzsteuer beim Gutscheinkauf – vom Steuerberater bestätigt</div>
+  Die Rechnung für den Gutschein enthält bereits die Umsatzsteuer: 7 %, wenn ein Mitglied kauft, 19 % bei einem Nicht-Mitglied. Bei der Einlösung fällt keine Steuer mehr an, Gratis-Codes lösen keine Steuer aus. Das Gesetz nennt das einen <i>Einzweckgutschein</i>. Er setzt voraus, dass die Steuer beim Kauf wirklich feststeht – deshalb können Gutscheine zum Mitgliedspreis nur Mitglieder einlösen. Sollte sich die Steuerlage einmal ändern, lässt sich auf die andere Variante umstellen (Steuer erst bei Einlösung) – das ist eine Einstellung, kein Umbau.
 </div>
 <div class="box warn">
   <div class="t">Zur Gültigkeit von 730 Tagen</div>
@@ -258,7 +260,7 @@
   <tr><td>Kunden</td><td>Liste und Suche, als Rechnungskunde markieren, Mitgliedschaft freischalten, verlängern oder beenden, Guthaben buchen, Auszahlung abhaken, Historie. Dazu die Liste für den Abgleich am 31. August und die Guthabenliste zum Saisonende.</td></tr>
   <tr><td>Rechnungen</td><td>Übersicht, PDF, auf bezahlt setzen, Storno- und Teil-Stornorechnung, CSV-Export.</td></tr>
   <tr><td>Gutscheine</td><td>Verkaufte Gutscheine mit Status, eigene Gratis-Codes ausstellen (einzeln oder als Serie zum Ausdrucken), Code sperren, abgelaufenen Gutschein wieder aktivieren, Einlösungen einsehen.</td></tr>
-  <tr><td>Einstellungen</td><td>Alle Fristen, Werte und Ihre Grundsatzentscheidungen an einer Stelle: freie Abo-Absagen, Gutscheinmodell und -preise, Stichtage der Mitgliedschaft, Onlinebuchung für Rechnungskunden, Zahlungsdienst. Jede Änderung wird protokolliert.</td></tr>
+  <tr><td>Einstellungen</td><td>Alle Fristen, Werte und Ihre Grundsatzentscheidungen an einer Stelle: freie Abo-Absagen, Gutscheinmodell und -preise, Gutscheine je Buchung, Stichtage der Mitgliedschaft, Onlinebuchung und Gutscheinkauf für Rechnungskunden, Steuersatz für Events, Zahlungsdienst. Jede Änderung wird protokolliert.</td></tr>
   <tr><td>Halle</td><td>Live-Zustand von Licht, Heizung, Tür je Feld; letzter Kontakt; Ereignisse; Handbetrieb ein/aus.</td></tr>
   <tr><td>Klärung</td><td>Kostenpflichtige Stornos (dort gewähren Sie bei Bedarf Kulanz); unzuordenbare Zahlungen; Anwesenheit ohne Buchung; Änderungsprotokoll.</td></tr>
 </table>
@@ -330,7 +332,20 @@
 
 <div class="pb"></div>
 <h2>13. Entscheidungen des Betreibers</h2>
-<p>Ihre Antworten vom 10. und vom 23. September 2026 sind eingearbeitet. Was noch offen ist, steht in der letzten Tabelle; die zugehörigen Fragen finden Sie ausformuliert im Dokument „Rückfragen zur dritten Runde“.</p>
+<p>Ihre Antworten vom 10. und 23. September und vom 3. Oktober 2026 sind eingearbeitet. Was noch offen ist, steht in der letzten Tabelle.</p>
+
+<h3>Beantwortet am 3. Oktober 2026</h3>
+<table class="check">
+  <tr><th></th><th>Frage</th><th>Ihre Antwort</th></tr>
+  <tr><td>☑</td><td>Was kostet ein Gutschein?</td><td>je Gruppe ein <b>eigener Gutscheinpreis</b>, den Sie einstellen; es gilt der Preis am Tag des Kaufs; auf dem Gutschein steht, ob er zum Mitgliedspreis gekauft wurde</td></tr>
+  <tr><td>☑</td><td>Darf ein Nicht-Mitglied einen Gutschein zum Mitgliedspreis einlösen?</td><td>nein</td></tr>
+  <tr><td>☑</td><td>Mehrere Gutscheine für eine Buchung?</td><td><b>ja, einer je volle zwei Stunden</b>; angebrochene Zeit wird online bezahlt</td></tr>
+  <tr><td>☑</td><td>Gratis-Code: Feld und Uhrzeit, Gültigkeit</td><td>der Kunde wählt frei, Sie können je Code vorgeben; 90 Tage, je Code änderbar</td></tr>
+  <tr><td>☑</td><td>Freie Abo-Absagen</td><td>je Abo, mit 24-Stunden-Frist, im Portal</td></tr>
+  <tr><td>☑</td><td>Guthaben aus Abo-Absagen</td><td>automatisch mit der nächsten Saisonrechnung verrechnet, Auszahlung zum Saisonende auf Wunsch</td></tr>
+  <tr><td>☑</td><td>Was dürfen Rechnungskunden im Portal?</td><td>Termine, Zahlencodes und Rechnungen sehen, Abo-Termine absagen und <b>Gutscheine kaufen</b> (online bezahlt); nicht buchen</td></tr>
+  <tr><td>☑</td><td>Umsatzsteuer vom Steuerberater bestätigt?</td><td><b>ja</b>, alle Angaben; andere Events zu 19 % auch bei Mitgliedern</td></tr>
+</table>
 
 <h3>Beantwortet am 23. September 2026</h3>
 <table class="check">
@@ -375,19 +390,12 @@
 <h3>Noch offen</h3>
 <table class="check">
   <tr><th></th><th>Frage</th><th>Womit wir vorerst arbeiten</th></tr>
-  <tr><td>☐</td><td><b>Steuerberater:</b> Sind die Angaben zur Umsatzsteuer mit ihm abgestimmt – insbesondere Gutscheine mit Steuer beim Kauf und Events zu 19 % auch bei Mitgliedern?</td><td>wie in diesem Dokument beschrieben; jede Antwort ist eine Einstellung</td></tr>
-  <tr><td>☐</td><td>Was kostet ein Gutschein, für Mitglieder und für Nicht-Mitglieder?</td><td>je Gruppe ein fester Preis, den Sie einstellen</td></tr>
-  <tr><td>☐</td><td>Darf ein Nicht-Mitglied einen Gutschein zum Mitgliedspreis einlösen?</td><td>nein</td></tr>
-  <tr><td>☐</td><td>Mehrere Gutscheine für eine Buchung?</td><td>einer je Buchung</td></tr>
-  <tr><td>☐</td><td>Gratis-Code: Feld und Uhrzeit frei wählbar?</td><td>ja; Sie können sie je Code vorgeben</td></tr>
-  <tr><td>☐</td><td>Freie Abo-Absagen: je Abo, mit 24-Stunden-Frist, im Portal?</td><td>ja</td></tr>
-  <tr><td>☐</td><td>Guthaben aus Abo-Absagen automatisch mit der nächsten Saisonrechnung verrechnen?</td><td>ja, Auszahlung auf Wunsch</td></tr>
-  <tr><td>☐</td><td>Was dürfen Rechnungskunden im Portal?</td><td>Termine und Rechnungen sehen, Abo-Termine absagen</td></tr>
+  <tr><td>☐</td><td>Rechnungskunden dürfen Gutscheine kaufen, aber nicht online buchen – selbst einlösen können sie einen Gutschein also nicht. Sollen Sie einen Code einlösen können, wenn Sie für einen Rechnungskunden eine Buchung anlegen?</td><td>nein; Rechnungskunden kaufen Gutscheine zum Verschenken</td></tr>
 </table>
 
 <div class="box warn">
-  <div class="t">Zwei Punkte mit zeitlichem Druck</div>
-  Die <b>Umsatzsteuer</b> sollte vor dem ersten verkauften Gutschein und der ersten echten Rechnung mit dem Steuerberater geklärt sein – rückwirkend geht das nur über Korrekturrechnungen. Und das <b>Gespräch mit Hupfauer</b> sollte stattfinden, solange die Bauplanung noch änderbar ist: Tastenfeld, Türöffner, Sensoren und die Heizungsanbindung lassen sich später nur mit Aufwand nachrüsten.
+  <div class="t">Ein Punkt mit zeitlichem Druck</div>
+  Das <b>Gespräch mit Hupfauer</b> sollte stattfinden, solange die Bauplanung noch änderbar ist: Tastenfeld, Türöffner, Sensoren und die Heizungsanbindung lassen sich später nur mit Aufwand nachrüsten.
 </div>
 
 <h2>14. Begriffe</h2>
