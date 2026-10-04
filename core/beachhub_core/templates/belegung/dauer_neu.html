@@ -47,6 +47,12 @@
     </table>
   </div>
   {% endif %}
+  {% if kunde and not kunde.rechnungskunde %}
+  <div class="karte schmal">
+    <label><input type="checkbox" name="rechnungskunde_setzen" value="1" {% if werte.get("rechnungskunde_setzen") == "1" %}checked{% endif %}> {{ kunde.name }} als Rechnungskunde markieren – Abos gibt es nur für Rechnungskunden</label>
+  </div>
+  {% endif %}
+  {% if mitglied_fehlt %}<p class="fehler">Die Mitgliedschaft von {{ kunde.name }} reicht nicht bis zum letzten Termin. <a href="/admin/kunden/{{ kunde.id }}">Mitgliedschaft auf der Kundenseite verlängern</a></p>{% endif %}
   <button formaction="/admin/belegung/dauer/planen" formmethod="post">Termine prüfen</button>
   <button formaction="/admin/belegung/dauer" formmethod="post">Anlegen</button>
 </form>

@@ -46,6 +46,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "fenster_tage": (int, 14),
     "mindestvorlauf_minuten": (int, 60),
     "storno_frist_stunden": (int, 24),
+    "abo_nur_mitglieder": (bool, True),
     "zahlungsfrist_minuten": (int, 15),
     "saison_zahlungsziel_tage": (int, 14),
     "guthaben_auf_saisonrechnung": (bool, True),
@@ -109,6 +110,14 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Stornofrist",
         "Stunden vor Beginn",
         "Bis zu dieser Frist ist die Stornierung kostenfrei.",
+    ),
+    "abo_nur_mitglieder": Beschreibung(
+        "Buchung und Storno",
+        "Saisonabo nur für Mitglieder",
+        "",
+        "Ja: Ein Abo lässt sich nur anlegen, wenn die Mitgliedschaft des Kunden bis zum letzten "
+        "Termin reicht; alle Termine laufen dann zum Satz der Mitglieder. Nein: Auch "
+        "Nicht-Mitglieder bekommen Abos zu ihren Konditionen.",
     ),
     "zahlungsfrist_minuten": Beschreibung(
         "Zahlung und Rechnung",

@@ -353,8 +353,10 @@ def test_storno_bestaetigt_vor_frist_mit_gutschrift(db: Session, welt, mail_ausg
 def test_storno_dauerbuchungstermin_nicht_stornierbar(db: Session, welt) -> None:
     # Ein Dauerbuchungstermin ist nie online bezahlt worden: kein Storno im Portal, kein Guthaben.
     f, k, _ = welt
+    k.mitglied_bis = date(2028, 4, 30)
     dauer = dauerbuchungen.lege_an(
         db,
+        rechnungskunde_setzen=True,
         kunde_id=k.id,
         feld_id=f.id,
         wochentag=1,

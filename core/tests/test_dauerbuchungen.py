@@ -4,6 +4,7 @@ from decimal import Decimal
 import pytest
 from beachhub_core import clock
 from beachhub_core.models import (
+    Audit,
     Betriebszeit,
     Buchung,
     Dauerbuchung,
@@ -13,7 +14,7 @@ from beachhub_core.models import (
     Sperre,
     Tarif,
 )
-from beachhub_core.services import buchungen, dauerbuchungen, kunden, pin
+from beachhub_core.services import buchungen, dauerbuchungen, konfiguration, kunden, pin
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -28,6 +29,7 @@ def welt(db: Session):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
     k = kunden.lege_an(db, name="TSV", email="tsv@x.de", rechnungskunde=True)
+    k.mitglied_bis = date(2028, 4, 30)
     k2 = kunden.lege_an(db, name="B", email="b@x.de")
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
@@ -171,3 +173,157 @@ def test_beenden_storniert_kuenftige(db: Session, welt) -> None:
     status = [b.status for b in dauer.buchungen]
     assert status == ["bestaetigt", "bestaetigt", "storniert", "storniert"]
     assert dauer.beendet_ab == date(2027, 12, 20) and dauer.beendet_am is not None
+
+
+def _abo(db: Session, f, kunde, **extra):
+    return dauerbuchungen.lege_an(
+        db,
+        kunde_id=kunde.id,
+        feld_id=f.id,
+        wochentag=1,
+        start=time(19),
+        ende=time(21),
+        gueltig_von=date(2027, 12, 1),
+        gueltig_bis=date(2027, 12, 31),
+        admin_user_id=None,
+        auslassen=set(),
+        entscheidungen={},
+        **extra,
+    )
+
+
+def test_abo_nur_fuer_rechnungskunden(db: Session, welt) -> None:
+    f, _, k2 = welt  # k2 ist kein Rechnungskunde
+    k2.mitglied_bis = date(2028, 4, 30)
+    db.commit()
+    with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match="kein_rechnungskunde"):
+        _abo(db, f, k2)
+    db.rollback()
+    assert db.query(Dauerbuchung).count() == 0 and db.query(Rechnung).count() == 0
+    d = _abo(db, f, k2, rechnungskunde_setzen=True)
+    db.commit()
+    db.refresh(k2)
+    assert k2.rechnungskunde is True and len(d.buchungen) == 4
+    eintraege = db.query(Audit).filter(Audit.objekt_id == k2.id).all()
+    assert any(
+        a.vorher_json
+        and a.vorher_json["rechnungskunde"] is False
+        and a.nachher_json["rechnungskunde"] is True
+        for a in eintraege
+    )
+
+
+def test_abo_nur_fuer_mitglieder_bis_zum_letzten_termin(db: Session, welt) -> None:
+    f, k, _ = welt
+    k.mitglied_bis = date(2027, 12, 20)  # endet vor dem 21. und 28.12.
+    db.commit()
+    with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match="mitgliedschaft_zu_kurz"):
+        _abo(db, f, k)
+    db.rollback()
+    assert db.query(Dauerbuchung).count() == 0
+    konfiguration.setze(db, "abo_nur_mitglieder", "nein")
+    db.commit()
+    d = _abo(db, f, k)
+    db.commit()
+    # Ohne die Regel gelten die Konditionen am jeweiligen Termin (A-KUND-6).
+    assert [b.ust_satz for b in d.buchungen] == [Decimal("7.00")] * 2 + [Decimal("19.00")] * 2
+
+
+def test_abo_prueft_letzten_nicht_ausgelassenen_termin(db: Session, welt) -> None:
+    f, k, _ = welt
+    k.mitglied_bis = date(2027, 12, 21)
+    db.commit()
+    d = dauerbuchungen.lege_an(
+        db,
+        kunde_id=k.id,
+        feld_id=f.id,
+        wochentag=1,
+        start=time(19),
+        ende=time(21),
+        gueltig_von=date(2027, 12, 1),
+        gueltig_bis=date(2027, 12, 31),
+        admin_user_id=None,
+        auslassen={date(2027, 12, 28)},
+        entscheidungen={},
+    )
+    db.commit()
+    assert len(d.buchungen) == 3
+    assert all(b.ust_satz == Decimal("7.00") for b in d.buchungen)
+
+
+@pytest.mark.parametrize(
+    "feld,wert,fehler",
+    [
+        ("rechnungskunde", False, "kein_rechnungskunde"),
+        ("mitglied_bis", None, "mitgliedschaft_zu_kurz"),
+    ],
+)
+def test_abo_prueft_frischen_kundenstand_unter_sperre(
+    db: Session, welt, feld, wert, fehler
+) -> None:
+    from beachhub_core.database import SessionLocal
+    from beachhub_core.models import Kunde
+    from sqlalchemy import update
+
+    f, k, _ = welt
+    kid = k.id
+    # Die Hauptsession hält den alten Stand in ihrer Identity Map.
+    assert k.rechnungskunde and k.mitglied_bis == date(2028, 4, 30)
+    with SessionLocal() as andere:
+        andere.execute(update(Kunde).where(Kunde.id == kid).values(**{feld: wert}))
+        andere.commit()
+    with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match=fehler):
+        _abo(db, f, k)
+    db.rollback()
+    assert db.query(Dauerbuchung).count() == 0
+    assert db.query(Rechnung).count() == 0
+
+
+def test_abo_markierung_erst_nach_vollstaendiger_kundensperre(db: Session, welt) -> None:
+    from sqlalchemy import event
+
+    f, k, k2 = welt
+    k2.mitglied_bis = date(2028, 4, 30)
+    fremd = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(date(2027, 12, 7), time(19)),
+        ende=kombiniere(date(2027, 12, 7), time(20)),
+    )
+    db.commit()
+    kid, fremd_id = k2.id, fremd.id
+    kunden_ids = {k.id, kid}
+    batch_gesperrt = False
+    markierung_gesehen = False
+
+    def pruefe(conn, cursor, statement, parameters, context, executemany):
+        nonlocal batch_gesperrt, markierung_gesehen
+        if "FOR UPDATE" in statement and "ORDER BY kunde.id" in statement:
+            batch_gesperrt |= kunden_ids.issubset(set(parameters.values()))
+        if statement.startswith("UPDATE kunde SET rechnungskunde"):
+            assert batch_gesperrt, "Kundenmutation vor vollständiger Batchsperre"
+            markierung_gesehen = True
+
+    verbindung = db.connection()
+    event.listen(verbindung, "before_cursor_execute", pruefe)
+    try:
+        d = dauerbuchungen.lege_an(
+            db,
+            kunde_id=kid,
+            feld_id=f.id,
+            wochentag=1,
+            start=time(19),
+            ende=time(21),
+            gueltig_von=date(2027, 12, 1),
+            gueltig_bis=date(2027, 12, 31),
+            admin_user_id=None,
+            auslassen=set(),
+            entscheidungen={fremd_id: "stornieren"},
+            rechnungskunde_setzen=True,
+        )
+        assert batch_gesperrt and markierung_gesehen
+        assert k2.rechnungskunde and len(d.buchungen) == 4
+    finally:
+        event.remove(verbindung, "before_cursor_execute", pruefe)
+    db.commit()

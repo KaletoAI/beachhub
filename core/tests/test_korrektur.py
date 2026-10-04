@@ -460,6 +460,7 @@ def test_mehrkundenbatch_sperrt_alle_kunden_vor_nummernkreis(db: Session, welt, 
     f, k1 = welt
     k2 = kunden.lege_an(db, name="Zweitkunde", email="zwei@x.de")
     neu = kunden.lege_an(db, name="Abokunde", email="abo@x.de")
+    neu.mitglied_bis = date(2028, 4, 30)
     db.commit()
     niedrig, hoch = sorted([k1, k2], key=lambda k: k.id)
     (b1,), r1 = _rechnung(db, f, niedrig, stunden=(19,), status="bezahlt")
@@ -500,6 +501,7 @@ def test_mehrkundenbatch_sperrt_alle_kunden_vor_nummernkreis(db: Session, welt, 
                 dauerbuchungen.lege_an(
                     session,
                     kunde_id=neu_id,
+                    rechnungskunde_setzen=True,
                     feld_id=f_id,
                     wochentag=D.weekday(),
                     start=time(19),

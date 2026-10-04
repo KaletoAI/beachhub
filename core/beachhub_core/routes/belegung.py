@@ -31,6 +31,7 @@ from beachhub_core.services import (
     buchungen,
     dauerbuchungen,
     konfiguration,
+    kundengruppen,
     pin,
     rechnung_pdf,
     rechnungen,
@@ -49,6 +50,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 GRUND = {
+    "kein_rechnungskunde": "Abos gibt es nur für Rechnungskunden – bitte „als Rechnungskunde "
+    "markieren“ ankreuzen",
+    "mitgliedschaft_zu_kurz": "Die Mitgliedschaft des Kunden reicht nicht bis zum letzten "
+    "Termin. Bitte zuerst auf der Kundenseite verlängern.",
     "belegt": "Zeitraum ist belegt",
     "ausserhalb_betriebszeit": "Zeitraum passt nicht zu Raster oder Betriebszeit",
     "ausserhalb_fenster": "Außerhalb des Buchungsfensters",
@@ -502,11 +507,23 @@ def _dauer_args(form: Any) -> dict[str, Any]:
 def _dauer_formular_ctx(
     db: Session, *, termine: Any, werte: dict[str, Any], fehler: str | None = None
 ) -> dict[str, Any]:
+    try:
+        kunde = db.get(Kunde, uuid.UUID(str(werte.get("kunde_id", ""))))
+    except ValueError:
+        kunde = None
+    mitglied_fehlt = bool(
+        termine
+        and kunde is not None
+        and konfiguration.hole(db, "abo_nur_mitglieder")
+        and not kundengruppen.ist_mitglied_am(kunde, termine[-1].datum)
+    )
     ctx: dict[str, Any] = {
         "termine": termine,
         "werte": werte,
         "kunden": _kunden_liste(db),
         "felder": _aktive_felder(db),
+        "kunde": kunde,
+        "mitglied_fehlt": mitglied_fehlt,
     }
     if fehler is not None:
         ctx["fehler"] = fehler
@@ -588,7 +605,12 @@ async def dauer_anlegen(
             if k.startswith("entscheidung_")
         }
         d = dauerbuchungen.lege_an(
-            db, **args, admin_user_id=admin.id, auslassen=auslassen, entscheidungen=entscheidungen
+            db,
+            **args,
+            admin_user_id=admin.id,
+            auslassen=auslassen,
+            entscheidungen=entscheidungen,
+            rechnungskunde_setzen=form.get("rechnungskunde_setzen") == "1",
         )
         db.commit()
     except FORM_FEHLER as e:

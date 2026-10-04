@@ -190,6 +190,7 @@ def test_nach_stornorechnung_kann_buchung_neu_berechnet_werden(db: Session, welt
 def _zwei_saetze(db: Session, welt) -> Rechnung:
     """Saisonrechnung mit einem Termin als Mitglied (7 %) und einem danach (19 %), A-RECH-8."""
     f, _, v1 = welt
+    konfiguration.setze(db, "abo_nur_mitglieder", "nein")
     v1.mitglied_bis = date(2027, 12, 5)
     db.commit()
     dauerbuchungen.lege_an(
@@ -230,6 +231,7 @@ def test_rundung_je_position(db: Session, welt) -> None:
     """Drei Positionen zu 10 € bei 19 %: je Position 8,40 € netto, zusammen 25,20 € – nicht
     25,21 €, wie es die Rundung der Bruttosumme ergäbe (A-RECH-8)."""
     f, _, v1 = welt
+    konfiguration.setze(db, "abo_nur_mitglieder", "nein")
     db.query(Tarif).update({Tarif.preis: Decimal("10.00")})
     db.commit()
     dauerbuchungen.lege_an(

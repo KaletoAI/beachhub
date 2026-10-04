@@ -30,6 +30,7 @@ def welt(db: Session):
     db.flush()
     a = kunden.lege_an(db, name="A", email="a@x.de")
     v1 = kunden.lege_an(db, name="TSV", email="v@x.de", rechnungskunde=True)
+    v1.mitglied_bis = date(2028, 4, 30)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
     return f, a, v1
@@ -453,3 +454,50 @@ def test_storno_mit_rechnung_verschickt_stornorechnung(
     assert "Stornorechnung" in c.get(f"/admin/belegung/buchung/{b.id}").text
     # Betreiberbuchung mit offener Rechnung: Die Forderung sinkt, Guthaben entsteht keins.
     assert db.get(Kunde, a.id).guthaben == Decimal("0.00")
+
+
+def _abo_daten(c: TestClient, f, kunde) -> dict[str, str]:
+    return {
+        "csrf_token": c.csrf,
+        "kunde_id": str(kunde.id),
+        "feld_id": str(f.id),
+        "wochentag": "1",
+        "start": "19:00",
+        "ende": "21:00",
+        "gueltig_von": "2027-12-01",
+        "gueltig_bis": "2027-12-31",
+    }
+
+
+def test_ui_abo_ohne_mitgliedschaft_zeigt_link_zur_kundenseite(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, _, v1 = welt
+    v1.mitglied_bis = None
+    db.commit()
+    c = eingeloggt
+    daten = _abo_daten(c, f, v1)
+    r = c.post("/admin/belegung/dauer/planen", data=daten)
+    assert f'href="/admin/kunden/{v1.id}"' in r.text
+    r = c.post("/admin/belegung/dauer", data=daten)
+    assert "reicht nicht bis zum letzten Termin" in r.text
+    assert db.query(Dauerbuchung).count() == 0
+
+
+def test_ui_abo_rechnungskunde_markieren(eingeloggt: TestClient, db: Session, welt) -> None:
+    f, a, _ = welt
+    a.mitglied_bis = date(2028, 4, 30)
+    db.commit()
+    c = eingeloggt
+    daten = _abo_daten(c, f, a)
+    assert 'name="rechnungskunde_setzen"' in c.post("/admin/belegung/dauer/planen", data=daten).text
+    r = c.post("/admin/belegung/dauer", data=daten)
+    assert "nur für Rechnungskunden" in r.text
+    r = c.post(
+        "/admin/belegung/dauer",
+        data={**daten, "rechnungskunde_setzen": "1"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.refresh(a)
+    assert a.rechnungskunde is True

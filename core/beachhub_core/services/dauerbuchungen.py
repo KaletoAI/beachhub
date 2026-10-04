@@ -91,6 +91,7 @@ def lege_an(
     admin_user_id: uuid.UUID | None,
     auslassen: set[date],
     entscheidungen: dict[uuid.UUID, str],
+    rechnungskunde_setzen: bool = False,
 ) -> Dauerbuchung:
     termine = [
         t
@@ -122,6 +123,19 @@ def lege_an(
         db,
         {kunde_id} | {k.kunde_id for t in termine for k in t.kollisionen if isinstance(k, Buchung)},
     )
+    kunde = db.get(Kunde, kunde_id)
+    assert kunde is not None  # plane() hat den Kunden geprüft
+    # Die Identity Map kann einen alten Stand halten: unter der vollständigen
+    # Kundensperre frisch prüfen, bevor Kunden, Buchungen oder Rechnungen entstehen.
+    db.refresh(kunde)
+    if not kunde.rechnungskunde and not rechnungskunde_setzen:
+        raise DauerbuchungsFehler("kein_rechnungskunde")
+    if konfiguration.hole(db, "abo_nur_mitglieder") and not kundengruppen.ist_mitglied_am(
+        kunde, termine[-1].datum
+    ):
+        raise DauerbuchungsFehler("mitgliedschaft_zu_kurz")
+    if not kunde.rechnungskunde:
+        kunden.aendere(db, kunde, admin_user_id=admin_user_id, rechnungskunde=True)
     pin_klar = pin.finde_freien(
         db,
         termine[0].beginn,
