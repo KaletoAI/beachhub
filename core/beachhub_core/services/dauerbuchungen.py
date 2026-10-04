@@ -4,9 +4,10 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from beachhub_shared.zeit import kombiniere
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Sperre, utcnow
+from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, Sperre, utcnow
 from beachhub_core.services import (
     audit,
     buchungen,
@@ -14,6 +15,7 @@ from beachhub_core.services import (
     kunden,
     kundengruppen,
     pin,
+    rechnungen,
     sperren,
     tarife,
 )
@@ -164,6 +166,7 @@ def lege_an(
         )
     db.flush()
     db.refresh(dauer)
+    rechnungen.erzeuge_saisonrechnung(db, dauer, quelle="admin")
     audit.protokolliere(
         db,
         quelle="admin",
@@ -176,19 +179,43 @@ def lege_an(
     return dauer
 
 
-def beende(db: Session, dauer: Dauerbuchung, *, ab: date, admin_user_id: uuid.UUID | None) -> None:
+def beende(
+    db: Session, dauer: Dauerbuchung, *, ab: date, admin_user_id: uuid.UUID | None
+) -> list[Rechnung]:
+    """Beendet eine Dauerbuchung ab einem Datum: künftige Termine werden kostenfrei storniert
+    (A-DAUER-4) und die Saisonrechnung mit einem Korrekturbeleg über alle betroffenen Termine
+    korrigiert (A-RECH-7). Liefert die Belege für den Versand nach dem Commit."""
+    from beachhub_core.services import storno
+
+    kunden.sperre_mehrere(db, [dauer.kunde_id])
+    db.execute(
+        select(Dauerbuchung)
+        .where(Dauerbuchung.id == dauer.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    db.scalars(
+        select(Buchung)
+        .where(Buchung.dauerbuchung_id == dauer.id)
+        .execution_options(populate_existing=True)
+    ).all()
+    db.expire(dauer, ["buchungen"])
     grenze = kombiniere(ab, time(0, 0))
     vorher = audit.als_dict(dauer)
-    for b in dauer.buchungen:
-        if b.beginn >= grenze and b.aktiv:
-            sperren.STORNIERE(
-                db,
-                b,
-                durch="betreiber",
-                kostenfrei=True,
-                grund="Dauerbuchung beendet",
-                admin_user_id=admin_user_id,
-            )
+    betroffen = [b for b in dauer.buchungen if b.beginn >= grenze and b.aktiv]
+    for b in betroffen:
+        storno.storniere(
+            db,
+            b,
+            durch="betreiber",
+            kostenfrei=True,
+            grund="Dauerbuchung beendet",
+            admin_user_id=admin_user_id,
+            korrigieren=False,
+        )
+    belege = storno.gutschreiben_alle(
+        db, betroffen, grund="Dauerbuchung beendet", quelle="admin", admin_user_id=admin_user_id
+    )
     dauer.beendet_am = utcnow()
     dauer.beendet_ab = ab
     db.flush()
@@ -201,3 +228,4 @@ def beende(db: Session, dauer: Dauerbuchung, *, ab: date, admin_user_id: uuid.UU
         nachher=audit.als_dict(dauer),
         admin_user_id=admin_user_id,
     )
+    return belege

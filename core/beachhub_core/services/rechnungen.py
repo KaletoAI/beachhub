@@ -1,7 +1,6 @@
 import csv
 import io
 import uuid
-from calendar import monthrange
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -15,15 +14,15 @@ from sqlalchemy.orm import Session, selectinload
 from beachhub_core import clock
 from beachhub_core.models import (
     Buchung,
+    Dauerbuchung,
     Kunde,
     Nummernkreis,
     Rechnung,
     RechnungPosition,
-    Storno,
     Zahlung,
     utcnow,
 )
-from beachhub_core.services import audit, konfiguration
+from beachhub_core.services import audit, guthaben, konfiguration
 
 CENT = Decimal("0.01")
 NULL = Decimal("0.00")
@@ -210,8 +209,14 @@ def _neue_rechnung(
     status: str,
     *,
     quelle: str,
+    zahlungsziel_tage: int | None = None,
 ) -> Rechnung:
     heute = clock.today(db)
+    ziel = (
+        konfiguration.hole(db, "rechnung_zahlungsziel_tage")
+        if zahlungsziel_tage is None
+        else zahlungsziel_tage
+    )
     zeilen = [(p, *netto_ust(p.brutto, p.ust_satz)) for p in posten]
     r = Rechnung(
         nummer=naechste_nummer(db, heute.year),
@@ -220,7 +225,7 @@ def _neue_rechnung(
         datum=heute,
         leistung_von=leistung_von,
         leistung_bis=leistung_bis,
-        faellig_am=heute + timedelta(days=konfiguration.hole(db, "rechnung_zahlungsziel_tage")),
+        faellig_am=heute + timedelta(days=ziel),
         netto=sum((netto for _, netto, _ in zeilen), NULL),
         ust=sum((ust for _, _, ust in zeilen), NULL),
         brutto=sum((p.brutto for p in posten), NULL),
@@ -283,87 +288,113 @@ def erzeuge_einzelrechnung(
     )
 
 
-# Zahlungsarten, die der Monatslauf sammelt: nur noch Termine von Dauerbuchungen. Plan 1a-II
-# ersetzt ihn durch die Saisonrechnung (A-RECH-3).
-MONATSLAUF_ZAHLUNGSARTEN: tuple[str, ...] = ("saison",)
-
-
-def abrechenbare_buchungen(
-    db: Session, kunde: Kunde, jahr: int, monat: int
-) -> list[tuple[Buchung, Decimal]]:
-    von, bis = date(jahr, monat, 1), date(jahr, monat, monthrange(jahr, monat)[1])
-    kandidaten = db.scalars(
-        select(Buchung)
-        .where(
-            Buchung.kunde_id == kunde.id,
-            Buchung.zahlungsart.in_(MONATSLAUF_ZAHLUNGSARTEN),
-            Buchung.rechnung_position_id.is_(None),
-            Buchung.status.in_(
-                (
-                    Buchung.BESTAETIGT,
-                    Buchung.DURCHGEFUEHRT,
-                    Buchung.NICHT_ERSCHIENEN,
-                    Buchung.STORNIERT,
-                )
-            ),
-        )
-        .order_by(Buchung.beginn)
-    ).all()
-    out: list[tuple[Buchung, Decimal]] = []
-    for b in kandidaten:
-        if not (von <= lokales_datum(b.beginn) <= bis):
-            continue
-        if b.status == Buchung.STORNIERT:
-            s = db.scalar(select(Storno).where(Storno.buchung_id == b.id))
-            if s is None or s.kostenfrei:
-                continue
-            out.append((b, b.preis))
-        else:
-            out.append((b, b.preis))
-    return out
-
-
-def erzeuge_sammelrechnung(db: Session, kunde: Kunde, jahr: int, monat: int) -> Rechnung | None:
-    db.execute(select(Kunde).where(Kunde.id == kunde.id).with_for_update())
-    posten = abrechenbare_buchungen(db, kunde, jahr, monat)
-    if not posten:
-        return None
-    positionen = [
-        Posten(
-            b,
-            _positionstext(b, " (Storno nach Frist)" if b.status == Buchung.STORNIERT else ""),
-            betrag,
-            b.ust_satz,
-        )
-        for b, betrag in posten
-    ]
-    return _neue_rechnung(
+def verrechne_guthaben(db: Session, r: Rechnung, *, quelle: str) -> Decimal:
+    """Verrechnet Guthaben des Kunden mit dem offenen Betrag – als Zahlung, nicht als
+    Preisminderung (A-ZAHL-4). Deckt es alles, ist die Rechnung bezahlt. Einmal je Rechnung
+    (provider_ref ist eindeutig)."""
+    sperre(db, r)
+    kunde = r.kunde
+    db.refresh(kunde)
+    if db.scalar(select(Zahlung.id).where(Zahlung.provider_ref == f"guthaben:{r.id}")):
+        return NULL
+    betrag = min(kunde.guthaben, offener_betrag(db, r))
+    if betrag <= NULL:
+        return NULL
+    guthaben.buche(
         db,
-        kunde,
-        "sammel",
-        positionen,
-        date(jahr, monat, 1),
-        date(jahr, monat, monthrange(jahr, monat)[1]),
+        kunde=kunde,
+        betrag=-betrag,
+        art="verrechnung",
+        bezug_id=r.id,
+        notiz=f"Verrechnung mit Rechnung {r.nummer}",
+        quelle=quelle,
+    )
+    db.add(
+        Zahlung(
+            kunde_id=kunde.id,
+            rechnung_id=r.id,
+            provider="guthaben",
+            provider_ref=f"guthaben:{r.id}",
+            betrag=betrag,
+            status=Zahlung.BEZAHLT,
+            empfangen_am=utcnow(),
+        )
+    )
+    db.flush()
+    if offener_betrag(db, r) == NULL:
+        vorher = audit.als_dict(r)
+        r.status, r.bezahlt_am = "bezahlt", utcnow()
+        db.flush()
+        audit.protokolliere(
+            db,
+            quelle=quelle,
+            objekt_typ="rechnung",
+            objekt_id=r.id,
+            vorher=vorher,
+            nachher={**audit.als_dict(r), "bezahlt_durch": "guthaben"},
+        )
+    return betrag
+
+
+def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "admin") -> Rechnung:
+    """Vorausrechnung über die aktiven unberechneten Termine einer Dauerbuchung
+    (A-RECH-3): Leistungszeitraum erster bis letzter Termin, Zahlungsziel
+    `saison_zahlungsziel_tage`. Ist es eingestellt, wird Guthaben sofort verrechnet (A-ZAHL-4).
+    Neuausstellung nach Vollstorno erfolgt ausdrücklich, nie automatisch.
+    Kommen später Termine hinzu, ist das eine neue Dauerbuchung mit eigener Saisonrechnung."""
+    # Kundensperre vor Dauerbuchung und Nummernkreis; danach keine alten ORM-Marker nutzen.
+    db.execute(select(Kunde).where(Kunde.id == dauer.kunde_id).with_for_update())
+    db.execute(
+        select(Dauerbuchung)
+        .where(Dauerbuchung.id == dauer.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    if (
+        db.scalar(
+            select(Rechnung.id).where(
+                Rechnung.dauerbuchung_id == dauer.id,
+                Rechnung.art == "saison",
+                Rechnung.status != "storniert",
+            )
+        )
+        is not None
+    ):
+        raise RechnungsFehler("bereits_berechnet")
+    termine = db.scalars(
+        select(Buchung)
+        .where(Buchung.dauerbuchung_id == dauer.id)
+        .order_by(Buchung.beginn)
+        .execution_options(populate_existing=True)
+    ).all()
+    termine = [b for b in termine if b.aktiv and b.rechnung_position_id is None]
+    if not termine:
+        raise RechnungsFehler("keine_termine")
+    r = _neue_rechnung(
+        db,
+        dauer.kunde,
+        "saison",
+        [Posten(b, _positionstext(b), b.preis, b.ust_satz) for b in termine],
+        lokales_datum(termine[0].beginn),
+        lokales_datum(termine[-1].beginn),
         "offen",
-        quelle="system",
+        quelle=quelle,
+        zahlungsziel_tage=konfiguration.hole(db, "saison_zahlungsziel_tage"),
     )
-
-
-def monatslauf(db: Session, jahr: int, monat: int) -> list[Rechnung]:
-    offen = select(Buchung.kunde_id).where(
-        Buchung.zahlungsart.in_(MONATSLAUF_ZAHLUNGSARTEN),
-        Buchung.rechnung_position_id.is_(None),
+    vorher = audit.als_dict(r)
+    r.dauerbuchung_id = dauer.id
+    db.flush()
+    audit.protokolliere(
+        db,
+        quelle=quelle,
+        objekt_typ="rechnung",
+        objekt_id=r.id,
+        vorher=vorher,
+        nachher=audit.als_dict(r),
     )
-    erzeugt = []
-    for kunde in db.scalars(
-        select(Kunde)
-        .where(Kunde.id.in_(offen), Kunde.anonymisiert_am.is_(None))
-        .order_by(Kunde.name)
-    ).all():
-        r = erzeuge_sammelrechnung(db, kunde, jahr, monat)
-        if r:
-            erzeugt.append(r)
-    return erzeugt
+    if konfiguration.hole(db, "guthaben_auf_saisonrechnung"):
+        verrechne_guthaben(db, r, quelle=quelle)
+    return r
 
 
 def setze_bezahlt(db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID | None) -> None:

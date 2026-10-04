@@ -7,72 +7,17 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import clock
 from beachhub_core.database import SessionLocal
-from beachhub_core.models import AppSetting, Kunde, Rechnung
+from beachhub_core.models import Kunde
 from beachhub_core.services import (
     benachrichtigung,
     halle,
-    konfiguration,
     lesestand,
     mitgliedschaft,
     online_buchung,
-    rechnung_pdf,
-    rechnungen,
 )
-from beachhub_core.services.rechnungen import RechnungsFehler
 
 logger = logging.getLogger(__name__)
-MARKER = "monatslauf_letzter"
 _scheduler: BackgroundScheduler | None = None
-
-
-def monatslauf_faellig(db: Session) -> tuple[int, int] | None:
-    heute = clock.today(db)
-    if heute.day < konfiguration.hole(db, "rechnung_tag_im_folgemonat"):
-        return None
-    jahr, monat = (heute.year, heute.month - 1) if heute.month > 1 else (heute.year - 1, 12)
-    marker = db.get(AppSetting, MARKER)
-    if marker and marker.value == f"{jahr}-{monat:02d}":
-        return None
-    return jahr, monat
-
-
-def monatslauf_fuer(db: Session, jahr: int, monat: int) -> int:
-    """Erzeugt die Rechnungen für jahr/monat inkl. PDF und Mail.
-
-    Die Rechnungen selbst werden in einer eigenen Transaktion angelegt und committet, bevor
-    PDFs erzeugt werden. Danach wird pro Rechnung einzeln committet: schlägt die PDF-Erzeugung
-    für eine Rechnung fehl, bleiben die übrigen Rechnungen und bereits erzeugte PDFs erhalten
-    (kein Rollback über alle Rechnungen hinweg), und ein erneuter Lauf kann die fehlende PDF
-    nachholen.
-    """
-    erzeugt: list[Rechnung] = rechnungen.monatslauf(db, jahr, monat)
-    db.commit()
-    for r in erzeugt:
-        try:
-            rechnung_pdf.erzeuge(db, r)
-            db.commit()
-        except RechnungsFehler:
-            logger.exception("PDF-Erzeugung für Rechnung %s fehlgeschlagen", r.nummer)
-            db.rollback()
-            continue
-        benachrichtigung.rechnung(db, r)
-    logger.info("Monatslauf %s-%02d: %d Rechnungen", jahr, monat, len(erzeugt))
-    return len(erzeugt)
-
-
-def monatslauf_ausfuehren(db: Session) -> int:
-    faellig = monatslauf_faellig(db)
-    if faellig is None:
-        return 0
-    jahr, monat = faellig
-    anzahl = monatslauf_fuer(db, jahr, monat)
-    marker = db.get(AppSetting, MARKER)
-    if marker:
-        marker.value = f"{jahr}-{monat:02d}"
-    else:
-        db.add(AppSetting(key=MARKER, value=f"{jahr}-{monat:02d}"))
-    db.commit()
-    return anzahl
 
 
 def verfall_ausfuehren(db: Session) -> int:
@@ -82,17 +27,6 @@ def verfall_ausfuehren(db: Session) -> int:
     for b in verfallen:
         benachrichtigung.zahlungsfrist_abgelaufen(db, b)
     return len(verfallen)
-
-
-def _job_monatslauf() -> None:
-    with SessionLocal() as db:
-        try:
-            monatslauf_ausfuehren(db)
-        except Exception:
-            logger.exception("Monatslauf fehlgeschlagen")
-            benachrichtigung.betreiber_alarm(
-                "Monatslauf fehlgeschlagen", "Details im Log des Hauptsystems."
-            )
 
 
 def _job_lesestand() -> None:
@@ -159,9 +93,6 @@ def _job_halle_kontakt() -> None:
 def starte_scheduler() -> BackgroundScheduler:
     global _scheduler
     s = BackgroundScheduler(timezone="Europe/Berlin")
-    s.add_job(
-        _job_monatslauf, CronTrigger(hour=6, minute=0), id="monatslauf", replace_existing=True
-    )
     s.add_job(_job_lesestand, IntervalTrigger(minutes=5), id="lesestand", replace_existing=True)
     s.add_job(_job_verfall, IntervalTrigger(minutes=1), id="verfall", replace_existing=True)
     s.add_job(

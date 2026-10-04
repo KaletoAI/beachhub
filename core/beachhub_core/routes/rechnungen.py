@@ -8,10 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from beachhub_core import auth, jobs
+from beachhub_core import auth
 from beachhub_core.database import get_db
 from beachhub_core.models import AdminUser, Kunde, Rechnung
-from beachhub_core.routes._form import fehlertext, pflicht, t_datum, t_int
+from beachhub_core.routes._form import fehlertext, t_datum
 from beachhub_core.services import benachrichtigung, rechnung_pdf, rechnungen
 from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_core.templating import mit_flash, render
@@ -212,30 +212,4 @@ def storno(
     return mit_flash(
         RedirectResponse(f"/admin/rechnungen/{s.id}", status_code=303),
         f"Stornorechnung {s.nummer} erzeugt",
-    )
-
-
-@router.post("/rechnungen/monatslauf")
-def monatslauf(
-    jahr: str = Form(...),
-    monat: str = Form(...),
-    admin: AdminUser = Depends(auth.nur_admin_rolle),
-    db: Session = Depends(get_db),
-) -> RedirectResponse:
-    try:
-        j = pflicht(t_int(jahr), "Jahr")
-        m = pflicht(t_int(monat), "Monat")
-        if not (1 <= m <= 12):
-            raise ValueError("Monat muss zwischen 1 und 12 liegen")
-        if not (2000 <= j <= 2100):
-            raise ValueError("Jahr ungültig")
-        anzahl = jobs.monatslauf_fuer(db, j, m)
-    except (RechnungsFehler, ValueError, IntegrityError) as e:
-        db.rollback()
-        return mit_flash(
-            RedirectResponse("/admin/rechnungen", status_code=303), fehlertext(e, GRUND), "fehler"
-        )
-    return mit_flash(
-        RedirectResponse("/admin/rechnungen?status=offen", status_code=303),
-        f"{anzahl} Rechnungen erzeugt",
     )

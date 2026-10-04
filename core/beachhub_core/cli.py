@@ -14,8 +14,6 @@ def main() -> None:
     z = sub.add_parser("zertifikate", help="interne CA und Client-Zertifikate für mTLS")
     z.add_argument("--ziel", default="data/zertifikate")
     z.add_argument("--name", action="append", help="Zertifikatsname (mehrfach möglich)")
-    m = sub.add_parser("monatslauf")
-    m.add_argument("monat", help="JJJJ-MM")
     args = p.parse_args()
     if args.cmd == "create-admin":
         from beachhub_core import auth
@@ -43,10 +41,3 @@ def main() -> None:
             p.error(str(e))
         for pfad in pfade:
             print(pfad)
-    elif args.cmd == "monatslauf":
-        from beachhub_core import jobs
-
-        jahr, monat = (int(x) for x in args.monat.split("-"))
-        with SessionLocal() as db:
-            anzahl = jobs.monatslauf_fuer(db, jahr, monat)
-        print(f"{anzahl} Rechnungen erzeugt")

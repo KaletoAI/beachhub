@@ -531,7 +531,11 @@ def test_mehrkundenbatch_sperrt_alle_kunden_vor_nummernkreis(db: Session, welt, 
         Decimal("30.00"),
         Decimal("30.00"),
     ]
-    assert db.query(Rechnung).count() == 4
+    assert db.query(Rechnung).count() == (5 if batch == "dauer" else 4)
+    if batch == "dauer":
+        saison = db.scalars(select(Rechnung).where(Rechnung.art == "saison")).one()
+        assert saison.kunde_id == neu_id
+        assert saison.brutto == Decimal("60.00") and len(saison.positionen) == 2
 
 
 def test_umgekehrte_gutschriftbatches_sperren_in_gleicher_reihenfolge(db: Session, welt) -> None:

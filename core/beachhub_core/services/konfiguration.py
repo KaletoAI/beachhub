@@ -47,7 +47,8 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "mindestvorlauf_minuten": (int, 60),
     "storno_frist_stunden": (int, 24),
     "zahlungsfrist_minuten": (int, 15),
-    "rechnung_tag_im_folgemonat": (int, 3),
+    "saison_zahlungsziel_tage": (int, 14),
+    "guthaben_auf_saisonrechnung": (bool, True),
     "rechnung_zahlungsziel_tage": (int, 14),
     "event_ust_satz": (Decimal, Decimal("19.00")),
     "mitgliedschaft_ablauf": (TagMonat, TagMonat("30.04.")),
@@ -115,15 +116,25 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Minuten",
         "So lange bleibt eine Reservierung nach der Buchung für die Online-Zahlung bestehen.",
     ),
-    "rechnung_tag_im_folgemonat": Beschreibung(
-        "Zahlung und Rechnung",
-        "Tag des Rechnungslaufs",
-        "Tag im Folgemonat",
-    ),
     "rechnung_zahlungsziel_tage": Beschreibung(
         "Zahlung und Rechnung",
-        "Zahlungsziel",
+        "Zahlungsziel von Einzelrechnungen",
         "Tage",
+        "Für Buchungen und Events, die Sie selbst anlegen.",
+    ),
+    "saison_zahlungsziel_tage": Beschreibung(
+        "Zahlung und Rechnung",
+        "Zahlungsziel der Saisonrechnung",
+        "Tage",
+        "Die Saisonrechnung geht bei der Anlage eines Abos sofort an den Kunden; so lange hat er "
+        "Zeit zu überweisen.",
+    ),
+    "guthaben_auf_saisonrechnung": Beschreibung(
+        "Zahlung und Rechnung",
+        "Guthaben mit der Saisonrechnung verrechnen",
+        "",
+        "Ja: Vorhandenes Guthaben des Kunden wird beim Erstellen der Saisonrechnung als Zahlung "
+        "verrechnet; die Rechnung weist es aus. Nein: Sie verrechnen von Hand.",
     ),
     "event_ust_satz": Beschreibung(
         "Zahlung und Rechnung",

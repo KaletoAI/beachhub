@@ -19,6 +19,7 @@ from beachhub_core.models import (
     Dauerbuchung,
     Feld,
     Kunde,
+    Rechnung,
     RechnungPosition,
     Sperre,
     Storno,
@@ -64,6 +65,7 @@ GRUND = {
     "zeitraum_ungueltig": "Zeitraum ungültig",
     "ueberlappt": "Überlappt mit einer bestehenden Sperre",
     "bereits_berechnet": "Buchung wurde bereits berechnet",
+    "bereits_korrigiert": "Rechnungsposition wurde bereits korrigiert",
     "pdf_vorhanden": "Rechnungs-PDF existiert bereits",
     "nicht_offen": "Rechnung ist nicht offen",
 }
@@ -610,9 +612,24 @@ async def dauer_anlegen(
                 fehler=fehlertext(e, GRUND),
             ),
         )
-    benachrichtigung.dauerbuchung_angelegt(db, d)
     stornierte = [bid for bid, wahl in entscheidungen.items() if wahl == "stornieren"]
-    benachrichtigung.belege_versenden(db, _belege_der_buchungen(db, stornierte))
+    saison = db.scalars(select(Rechnung.id).where(Rechnung.dauerbuchung_id == d.id)).all()
+    beleg_ids = [*_belege_der_buchungen(db, stornierte), *saison]
+    dauer_id = d.id
+    try:
+        benachrichtigung.dauerbuchung_angelegt(db, d)
+    except Exception:
+        logger.exception("Bestätigung für Dauerbuchung %s nicht versandt", dauer_id)
+        db.rollback()
+        try:
+            benachrichtigung.betreiber_alarm(
+                "Dauerbuchung nicht bestätigt",
+                f"Die Bestätigung für Dauerbuchung {dauer_id} konnte nicht versandt werden. "
+                "Details im Log des Hauptsystems.",
+            )
+        except Exception:
+            logger.exception("Betreiber-Alarm für Dauerbuchung %s fehlgeschlagen", dauer_id)
+    benachrichtigung.belege_versenden(db, beleg_ids)
     return mit_flash(
         RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung angelegt"
     )
@@ -630,12 +647,60 @@ def dauer_detail(
         return mit_flash(
             RedirectResponse("/admin/belegung", status_code=303), "Nicht gefunden", "fehler"
         )  # type: ignore[return-value]
+    saison = db.scalar(
+        select(Rechnung)
+        .where(Rechnung.dauerbuchung_id == d.id, Rechnung.art == "saison")
+        .order_by(Rechnung.created_at.desc(), Rechnung.nummer.desc())
+        .limit(1)
+    )
+    aktive_rechnung = db.scalar(
+        select(Rechnung.id).where(
+            Rechnung.dauerbuchung_id == d.id,
+            Rechnung.art == "saison",
+            Rechnung.status != "storniert",
+        )
+    )
+    rechnung_erstellbar = aktive_rechnung is None and any(
+        b.aktiv and b.rechnung_position_id is None for b in d.buchungen
+    )
     return render(
         request,
         "belegung/dauer.html",
         admin=admin,
         d=d,
         pin=pin.entschluessele(d.pin_verschluesselt),
+        saison=saison,
+        offen=rechnungen.offener_betrag(db, saison) if saison else None,
+        rechnung_erstellbar=rechnung_erstellbar,
+    )
+
+
+@router.post("/belegung/dauer/{dauer_id}/rechnung", response_model=None)
+def dauer_rechnung(
+    dauer_id: uuid.UUID,
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    d = db.get(Dauerbuchung, dauer_id)
+    if d is None:
+        return mit_flash(
+            RedirectResponse("/admin/belegung", status_code=303), "Nicht gefunden", "fehler"
+        )
+    try:
+        r = rechnungen.erzeuge_saisonrechnung(db, d)
+        beleg_id = r.id
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        return mit_flash(
+            RedirectResponse(f"/admin/belegung/dauer/{dauer_id}", status_code=303),
+            fehlertext(e, GRUND),
+            "fehler",
+        )
+    benachrichtigung.belege_versenden(db, [beleg_id])
+    return mit_flash(
+        RedirectResponse(f"/admin/belegung/dauer/{dauer_id}", status_code=303),
+        "Saisonrechnung erstellt",
     )
 
 
@@ -652,7 +717,8 @@ def dauer_beenden(
             RedirectResponse("/admin/belegung", status_code=303), "Nicht gefunden", "fehler"
         )
     try:
-        dauerbuchungen.beende(db, d, ab=date.fromisoformat(ab), admin_user_id=admin.id)
+        belege = dauerbuchungen.beende(db, d, ab=date.fromisoformat(ab), admin_user_id=admin.id)
+        beleg_ids = [b.id for b in belege]
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
@@ -661,6 +727,7 @@ def dauer_beenden(
             fehlertext(e, GRUND),
             "fehler",
         )
+    benachrichtigung.belege_versenden(db, beleg_ids)
     return mit_flash(
         RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung beendet"
     )

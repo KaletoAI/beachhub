@@ -3,21 +3,15 @@ from decimal import Decimal
 
 import pytest
 from beachhub_core import clock, mail
-from beachhub_core.models import (
-    Betriebszeit,
-    Buchung,
-    Feld,
-    FeldRaster,
-    Rechnung,
-    Tarif,
-)
+from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kunde, Rechnung, Tarif
 from beachhub_core.services import buchungen, kunden, rechnungen
+from beachhub_shared.zeit import kombiniere
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 
 @pytest.fixture
-def welt(db: Session):
+def welt(db: Session) -> tuple[Feld, Kunde]:
     f = Feld(name="F1", reihenfolge=1)
     f.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
     db.add_all([f, Tarif(name="Std", preis=Decimal("30.00"))])
@@ -25,37 +19,38 @@ def welt(db: Session):
         db.add(Betriebszeit(wochentag=wt, oeffnet=time(9), schliesst=time(23)))
     db.flush()
     v1 = kunden.lege_an(db, name="TSV", email="v@x.de", rechnungskunde=True)
+    v1.mitglied_bis = date(2028, 4, 30)
     db.commit()
     clock.set_override(db, date(2027, 11, 25))
-    from beachhub_shared.zeit import kombiniere
-
-    buchungen.lege_an(
-        db,
-        feld_id=f.id,
-        kunde_id=v1.id,
-        beginn=kombiniere(date(2027, 12, 1), time(19)),
-        ende=kombiniere(date(2027, 12, 1), time(20)),
-        zahlungsart="saison",
-    )
-    db.commit()
     return f, v1
 
 
-def test_monatslauf_liste_pdf_bezahlt_storno_export(
-    eingeloggt: TestClient, db: Session, welt
-) -> None:
-    c = eingeloggt
-    clock.set_override(db, date(2028, 1, 3))
+def _abo(c: TestClient, f: Feld, v1: Kunde) -> None:
     r = c.post(
-        "/admin/rechnungen/monatslauf",
-        data={"csrf_token": c.csrf, "jahr": "2027", "monat": "12"},
+        "/admin/belegung/dauer",
+        data={
+            "csrf_token": c.csrf,
+            "kunde_id": str(v1.id),
+            "feld_id": str(f.id),
+            "wochentag": "2",
+            "start": "19:00",
+            "ende": "20:00",
+            "gueltig_von": "2027-12-01",
+            "gueltig_bis": "2027-12-08",
+        },
         follow_redirects=False,
     )
     assert r.status_code == 303
+
+
+def test_saisonrechnung_liste_pdf_bezahlt_storno_export(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    c = eingeloggt
+    _abo(c, *welt)
     rechnung = db.query(Rechnung).one()
-    assert rechnung.pdf_sha256 and any(
-        m["betreff"] == f"Rechnung {rechnung.nummer}" for m in mail.TEST_AUSGANG
-    )
+    assert rechnung.art == "saison" and rechnung.pdf_sha256
+    assert any(m["betreff"] == f"Rechnung {rechnung.nummer}" for m in mail.TEST_AUSGANG)
     seite = c.get("/admin/rechnungen?status=offen")
     assert rechnung.nummer in seite.text and "TSV" in seite.text
     pdf = c.get(f"/admin/rechnungen/{rechnung.id}/pdf")
@@ -76,7 +71,7 @@ def test_monatslauf_liste_pdf_bezahlt_storno_export(
     assert r.status_code == 303
     db.expire_all()
     assert db.query(Rechnung).count() == 2 and db.get(Rechnung, rechnung.id).status == "storniert"
-    csv = c.get("/admin/rechnungen/export.csv?von=2028-01-01&bis=2028-01-31")
+    csv = c.get("/admin/rechnungen/export.csv?von=2027-11-01&bis=2027-11-30")
     assert (
         csv.status_code == 200
         and csv.headers["content-type"].startswith("text/csv")
@@ -88,28 +83,27 @@ def test_rechnungen_detail_zeigt_positionen_und_integritaet(
     eingeloggt: TestClient, db: Session, welt
 ) -> None:
     c = eingeloggt
-    clock.set_override(db, date(2028, 1, 3))
-    c.post(
-        "/admin/rechnungen/monatslauf",
-        data={"csrf_token": c.csrf, "jahr": "2027", "monat": "12"},
-        follow_redirects=False,
-    )
+    _abo(c, *welt)
     rechnung = db.query(Rechnung).one()
     seite = c.get(f"/admin/rechnungen/{rechnung.id}")
     assert seite.status_code == 200
-    assert rechnung.nummer in seite.text
-    assert "TSV" in seite.text
-    assert "F1" in seite.text
-    assert "PDF unverändert" in seite.text
-    assert "19 %" in seite.text
+    assert rechnung.nummer in seite.text and "TSV" in seite.text and "F1" in seite.text
+    assert "PDF unverändert" in seite.text and "Offener Betrag" in seite.text
 
 
 def test_pdf_get_ohne_pdf_redirect_und_post_erzeugt(
     eingeloggt: TestClient, db: Session, welt
 ) -> None:
     c = eingeloggt
-    b = db.query(Buchung).one()
-    r = rechnungen.erzeuge_einzelrechnung(db, b)
+    f, v1 = welt
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=v1.id,
+        beginn=kombiniere(date(2027, 12, 1), time(19)),
+        ende=kombiniere(date(2027, 12, 1), time(20)),
+    )
+    r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
     db.commit()
     ohne_pdf = c.get(f"/admin/rechnungen/{r.id}/pdf", follow_redirects=False)
     assert ohne_pdf.status_code == 303
@@ -125,15 +119,11 @@ def test_pdf_get_ohne_pdf_redirect_und_post_erzeugt(
     assert pdf.status_code == 200 and pdf.headers["content-type"] == "application/pdf"
 
 
-def test_monatslauf_ungueltiger_monat_zeigt_meldung(eingeloggt: TestClient, db: Session) -> None:
+def test_kein_monatslauf_mehr(eingeloggt: TestClient) -> None:
     c = eingeloggt
+    assert "Monatslauf" not in c.get("/admin/rechnungen").text
     r = c.post(
         "/admin/rechnungen/monatslauf",
-        data={"csrf_token": c.csrf, "jahr": "2027", "monat": "13"},
-        follow_redirects=False,
+        data={"csrf_token": c.csrf, "jahr": "2027", "monat": "12"},
     )
-    assert r.status_code == 303
-    assert "bh_flash" in r.cookies
-    seite = c.get(r.headers["location"])
-    assert "Monat muss zwischen 1 und 12" in seite.text
-    assert db.query(Rechnung).count() == 0
+    assert r.status_code == 405

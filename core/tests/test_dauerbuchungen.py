@@ -9,11 +9,13 @@ from beachhub_core.models import (
     Dauerbuchung,
     Feld,
     FeldRaster,
+    Rechnung,
     Sperre,
     Tarif,
 )
 from beachhub_core.services import buchungen, dauerbuchungen, kunden, pin
 from beachhub_shared.zeit import kombiniere
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 
@@ -119,6 +121,10 @@ def test_anlegen_mit_auslassen_und_gemeinsamer_pin(db: Session, welt) -> None:
         dauer.buchungen[0].pin_verschluesselt
     )
 
+    r = db.scalars(select(Rechnung).where(Rechnung.dauerbuchung_id == dauer.id)).one()
+    assert r.art == "saison" and len(r.positionen) == 3
+    assert all(b.rechnung_position_id is not None for b in dauer.buchungen)
+
 
 def test_anlegen_ohne_tarif_wirft_und_schreibt_nichts(db: Session, welt) -> None:
     f, k, _ = welt
@@ -159,8 +165,9 @@ def test_beenden_storniert_kuenftige(db: Session, welt) -> None:
         entscheidungen={},
     )
     db.commit()
-    dauerbuchungen.beende(db, dauer, ab=date(2027, 12, 20), admin_user_id=None)
+    belege = dauerbuchungen.beende(db, dauer, ab=date(2027, 12, 20), admin_user_id=None)
     db.commit()
+    assert len(belege) == 1 and belege[0].brutto == Decimal("-120.00")
     status = [b.status for b in dauer.buchungen]
     assert status == ["bestaetigt", "bestaetigt", "storniert", "storniert"]
     assert dauer.beendet_ab == date(2027, 12, 20) and dauer.beendet_am is not None

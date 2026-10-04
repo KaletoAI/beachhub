@@ -14,13 +14,14 @@ from beachhub_core.models import (
 )
 from beachhub_core.services import (
     buchungen,
+    dauerbuchungen,
     konfiguration,
     kunden,
     rechnung_pdf,
     rechnungen,
-    storno,
 )
 from beachhub_shared.zeit import kombiniere
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -79,51 +80,6 @@ def test_einzelrechnung_mit_ust(db: Session, welt) -> None:
         rechnungen.erzeuge_einzelrechnung(db, b)
 
 
-def test_sammelrechnung_und_monatslauf_idempotent(db: Session, welt) -> None:
-    f, a, v1 = welt
-    for tag in (1, 8):
-        buchungen.lege_an(
-            db,
-            feld_id=f.id,
-            kunde_id=v1.id,
-            beginn=kombiniere(date(2027, 12, tag), time(19)),
-            ende=kombiniere(date(2027, 12, tag), time(21)),
-            zahlungsart="saison",
-        )
-    b3 = buchungen.lege_an(
-        db,
-        feld_id=f.id,
-        kunde_id=v1.id,
-        beginn=kombiniere(date(2027, 12, 15), time(19)),
-        ende=kombiniere(date(2027, 12, 15), time(21)),
-        zahlungsart="saison",
-    )
-    clock.set_override(db, date(2027, 12, 14))  # innerhalb der 72-h-Frist → kostenpflichtig
-    storno.storniere(db, b3, durch="kunde")
-    buchungen.lege_an(
-        db,
-        feld_id=f.id,
-        kunde_id=v1.id,
-        beginn=kombiniere(date(2028, 1, 5), time(19)),
-        ende=kombiniere(date(2028, 1, 5), time(20)),
-        zahlungsart="saison",
-    )
-    db.commit()
-    clock.set_override(db, date(2028, 1, 3))
-    erzeugt = rechnungen.monatslauf(db, 2027, 12)
-    db.commit()
-    assert len(erzeugt) == 1
-    r = erzeugt[0]
-    assert (
-        r.art == "sammel"
-        and r.status == "offen"
-        and len(r.positionen) == 3
-        and r.brutto == Decimal("180.00")
-    )
-    assert r.faellig_am == date(2028, 1, 17) and r.leistung_von == date(2027, 12, 1)
-    assert rechnungen.monatslauf(db, 2027, 12) == []
-
-
 def test_stornorechnung_gibt_buchungen_frei(db: Session, welt) -> None:
     f, _, v1 = welt
     b = buchungen.lege_an(
@@ -132,15 +88,13 @@ def test_stornorechnung_gibt_buchungen_frei(db: Session, welt) -> None:
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
-        zahlungsart="saison",
     )
-    db.commit()
-    clock.set_override(db, date(2028, 1, 3))
-    r = rechnungen.erzeuge_sammelrechnung(db, v1, 2027, 12)
+    r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
     db.commit()
     s = rechnungen.storniere(db, r, admin_user_id=None, grund="Falscher Preis")
     db.commit()
     assert s.art == "storno" and s.brutto == Decimal("-30.00") and s.storniert_durch_id is None
+    assert s.korrigiert_rechnung_id == r.id
     assert (
         r.status == "storniert" and r.storniert_durch_id == s.id and b.rechnung_position_id is None
     )
@@ -196,19 +150,15 @@ def test_buchung_kann_nicht_doppelt_berechnet_werden(db: Session, welt) -> None:
 
 def test_setze_bezahlt_und_nicht_offen(db: Session, welt) -> None:
     f, _, v1 = welt
-    buchungen.lege_an(
+    b = buchungen.lege_an(
         db,
         feld_id=f.id,
         kunde_id=v1.id,
         beginn=kombiniere(date(2027, 12, 1), time(19)),
         ende=kombiniere(date(2027, 12, 1), time(20)),
-        zahlungsart="saison",
     )
+    r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
     db.commit()
-    clock.set_override(db, date(2028, 1, 3))
-    r = rechnungen.erzeuge_sammelrechnung(db, v1, 2027, 12)
-    db.commit()
-    assert r is not None
     rechnungen.setze_bezahlt(db, r, admin_user_id=None)
     db.commit()
     assert r.status == "bezahlt" and r.bezahlt_am is not None
@@ -238,25 +188,25 @@ def test_nach_stornorechnung_kann_buchung_neu_berechnet_werden(db: Session, welt
 
 
 def _zwei_saetze(db: Session, welt) -> Rechnung:
-    """Sammelrechnung mit einem Termin als Mitglied (7 %) und einem danach (19 %)."""
+    """Saisonrechnung mit einem Termin als Mitglied (7 %) und einem danach (19 %), A-RECH-8."""
     f, _, v1 = welt
     v1.mitglied_bis = date(2027, 12, 5)
     db.commit()
-    for tag in (1, 8):
-        buchungen.lege_an(
-            db,
-            feld_id=f.id,
-            kunde_id=v1.id,
-            beginn=kombiniere(date(2027, 12, tag), time(19)),
-            ende=kombiniere(date(2027, 12, tag), time(20)),
-            zahlungsart="saison",
-        )
+    dauerbuchungen.lege_an(
+        db,
+        kunde_id=v1.id,
+        feld_id=f.id,
+        wochentag=2,
+        start=time(19),
+        ende=time(20),
+        gueltig_von=date(2027, 12, 1),
+        gueltig_bis=date(2027, 12, 8),
+        admin_user_id=None,
+        auslassen=set(),
+        entscheidungen={},
+    )
     db.commit()
-    clock.set_override(db, date(2028, 1, 3))
-    r = rechnungen.erzeuge_sammelrechnung(db, v1, 2027, 12)
-    db.commit()
-    assert r is not None
-    return r
+    return db.scalars(select(Rechnung).where(Rechnung.art == "saison")).one()
 
 
 def test_rechnung_mit_zwei_saetzen_summiert_je_satz(db: Session, welt) -> None:
@@ -282,19 +232,21 @@ def test_rundung_je_position(db: Session, welt) -> None:
     f, _, v1 = welt
     db.query(Tarif).update({Tarif.preis: Decimal("10.00")})
     db.commit()
-    for stunde in (17, 18, 19):
-        buchungen.lege_an(
-            db,
-            feld_id=f.id,
-            kunde_id=v1.id,
-            beginn=kombiniere(date(2027, 12, 1), time(stunde)),
-            ende=kombiniere(date(2027, 12, 1), time(stunde + 1)),
-            zahlungsart="saison",
-        )
+    dauerbuchungen.lege_an(
+        db,
+        kunde_id=v1.id,
+        feld_id=f.id,
+        wochentag=2,
+        start=time(19),
+        ende=time(20),
+        gueltig_von=date(2027, 12, 1),
+        gueltig_bis=date(2027, 12, 15),
+        admin_user_id=None,
+        auslassen=set(),
+        entscheidungen={},
+    )
     db.commit()
-    clock.set_override(db, date(2028, 1, 3))
-    r = rechnungen.erzeuge_sammelrechnung(db, v1, 2027, 12)
-    db.commit()
+    r = db.scalars(select(Rechnung).where(Rechnung.art == "saison")).one()
     assert [p.netto for p in r.positionen] == [Decimal("8.40")] * 3
     assert (r.netto, r.ust, r.brutto) == (Decimal("25.20"), Decimal("4.80"), Decimal("30.00"))
 
