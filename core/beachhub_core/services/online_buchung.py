@@ -75,6 +75,7 @@ def _storno_mail(storno_id: uuid.UUID) -> Nachlauf:
         s = db.get(Storno, storno_id)
         if s is not None:
             benachrichtigung.storno(db, s)
+            benachrichtigung.belege_versenden(db, [s.korrektur_rechnung_id])
 
     return lauf
 
@@ -297,6 +298,8 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
 
 
 def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) -> Ergebnis:
+    # Finanzielle Stornos sperren den Kunden vor Buchung/Dauerbuchung/Rechnung.
+    db.execute(select(Kunde).where(Kunde.id == kunde.id).with_for_update())
     b = db.scalar(select(Buchung).where(Buchung.id == buchung_id).with_for_update())
     if (
         b is None
@@ -307,8 +310,8 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
     if clock.now(db) >= b.beginn:
         return abgelehnt("zu_spaet")
     if not b.im_portal_stornierbar:
-        # Sonst schriebe storno._gutschrift den Preis als Guthaben gut, obwohl nie online
-        # bezahlt wurde (etwa ein Dauerbuchungstermin eines Online-Kunden).
+        # Betreiberbuchungen rechnet der Betreiber außerhalb des Portals ab;
+        # ihr Storno entscheidet er.
         return abgelehnt("nicht_stornierbar")
     war_reserviert = b.status == Buchung.RESERVIERT
     s = storno.storniere(

@@ -98,6 +98,13 @@ def detail(
         admin=admin,
         r=r,
         steuer=rechnungen.steuer_je_satz(r),
+        offen=rechnungen.offener_betrag(db, r),
+        verrechnet=rechnungen.verrechnet(db, r),
+        korrekturen=db.scalars(
+            select(Rechnung)
+            .where(Rechnung.korrigiert_rechnung_id == r.id)
+            .order_by(Rechnung.nummer)
+        ).all(),
         integritaet=rechnung_pdf.pruefe_integritaet(r),
     )
 

@@ -1,8 +1,9 @@
 import hashlib
+from decimal import Decimal
 from pathlib import Path
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, object_session
 from weasyprint import HTML
 
 from beachhub_core.config import settings
@@ -23,8 +24,15 @@ def _betreiber() -> dict[str, str]:
 
 def html(rechnung: Rechnung) -> str:
     """Das HTML der Rechnung, aus dem `erzeuge` das PDF macht."""
+    db = object_session(rechnung)
+    verrechnet = rechnungen.verrechnet(db, rechnung) if db is not None else Decimal("0.00")
+    offen = rechnungen.offener_betrag(db, rechnung) if db is not None else rechnung.brutto
     return templates.env.get_template("rechnung_pdf.html").render(
-        r=rechnung, steuer=rechnungen.steuer_je_satz(rechnung), betreiber=_betreiber()
+        r=rechnung,
+        steuer=rechnungen.steuer_je_satz(rechnung),
+        verrechnet=verrechnet,
+        offen=offen,
+        betreiber=_betreiber(),
     )
 
 

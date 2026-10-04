@@ -22,6 +22,10 @@
     Datum: {{ r.datum|datum }}<br>
     Leistungszeitraum: {{ r.leistung_von|datum }} – {{ r.leistung_bis|datum }}<br>
     Fällig am: {{ r.faellig_am|datum }}<br>
+    {% if r.art != "storno" %}Offener Betrag: <strong>{{ offen|euro }}</strong><br>{% endif %}
+    {% if verrechnet > 0 %}Verrechnetes Guthaben: {{ verrechnet|euro }}<br>{% endif %}
+    {% if r.korrigiert %}Korrigiert: <a href="/admin/rechnungen/{{ r.korrigiert_rechnung_id }}">Rechnung {{ r.korrigiert.nummer }}</a><br>{% endif %}
+
     {% if r.bezahlt_am %}Bezahlt am: {{ r.bezahlt_am|lokal }}<br>{% endif %}
   </p>
   {% if r.pdf_pfad %}
@@ -62,6 +66,20 @@
     </tr>
   </table>
 </div>
+
+{% if korrekturen %}
+<div class="karte">
+  <h2>Korrekturen</h2>
+  <table>
+    <tr><th>Stornorechnung</th><th>Datum</th><th class="rechts">Betrag</th></tr>
+    {% for k in korrekturen %}<tr>
+      <td><a href="/admin/rechnungen/{{ k.id }}">{{ k.nummer }}</a></td>
+      <td>{{ k.datum|datum }}</td>
+      <td class="rechts">{{ k.brutto|euro }}</td>
+    </tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
 
 <div class="zeile">
 {% if r.status == "offen" %}

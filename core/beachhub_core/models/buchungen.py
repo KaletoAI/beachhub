@@ -134,4 +134,10 @@ class Storno(UUIDMixin, Base):
     durch: Mapped[str] = mapped_column(String(10), nullable=False)  # kunde | betreiber | system
     kostenfrei: Mapped[bool] = mapped_column(Boolean, nullable=False)
     grund: Mapped[str] = mapped_column(String(300), default="", nullable=False)
+    # Kostenfreie Absage eines Abo-Termins durch den Kunden (A-DAUER-3); nur diese zählen.
+    freie_absage: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Korrekturbeleg, mit dem das Storno die Rechnung der Buchung korrigiert hat (A-STORNO-6).
+    korrektur_rechnung_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rechnung.id")
+    )
     buchung: Mapped[Buchung] = relationship(back_populates="storno", foreign_keys=[buchung_id])

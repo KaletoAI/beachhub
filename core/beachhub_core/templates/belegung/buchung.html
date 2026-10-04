@@ -22,6 +22,7 @@
   <p>Durch: {{ b.storno.durch }}</p>
   <p>Grund: {{ b.storno.grund }}</p>
   <p>Kostenfrei: {{ "ja" if b.storno.kostenfrei else "nein" }}</p>
+  {% if b.storno.korrektur_rechnung_id %}<p>Stornorechnung: <a href="/admin/rechnungen/{{ b.storno.korrektur_rechnung_id }}">anzeigen</a></p>{% endif %}
   {% if not b.storno.kostenfrei %}
   <form method="post" action="/admin/belegung/buchung/{{ b.id }}/kulanz" class="karte schmal">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

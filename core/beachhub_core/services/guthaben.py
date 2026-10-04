@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from beachhub_core.models import GuthabenBuchung, Kunde
 from beachhub_core.services import audit
 
+# storno_gutschrift entsteht nur über storno.gutschreiben_positionen mit Korrekturbeleg.
 ARTEN = {
     "storno_gutschrift",
     "verrechnung",

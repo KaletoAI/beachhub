@@ -347,6 +347,8 @@ def test_storno_bestaetigt_vor_frist_mit_gutschrift(db: Session, welt, mail_ausg
     assert k.guthaben == Decimal("30.00")
     assert any(m["betreff"] == "Stornierung Ihrer Buchung" for m in mail_ausgang)
 
+    assert any(m["betreff"].startswith("Stornorechnung ") for m in mail_ausgang)
+
 
 def test_storno_dauerbuchungstermin_nicht_stornierbar(db: Session, welt) -> None:
     # Ein Dauerbuchungstermin ist nie online bezahlt worden: kein Storno im Portal, kein Guthaben.

@@ -24,7 +24,7 @@ class Rechnung(UUIDMixin, ZeitstempelMixin, Base):
     kunde_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("kunde.id"), nullable=False
     )
-    art: Mapped[str] = mapped_column(String(10), nullable=False)  # einzel | sammel | storno
+    art: Mapped[str] = mapped_column(String(10), nullable=False)  # einzel | saison | storno
     datum: Mapped[date] = mapped_column(Date, nullable=False)
     leistung_von: Mapped[date] = mapped_column(Date, nullable=False)
     leistung_bis: Mapped[date] = mapped_column(Date, nullable=False)
@@ -39,8 +39,20 @@ class Rechnung(UUIDMixin, ZeitstempelMixin, Base):
     storniert_durch_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("rechnung.id")
     )
+    # Saisonrechnung einer Dauerbuchung (A-RECH-3).
+    dauerbuchung_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("dauerbuchung.id")
+    )
+    # Bei art = storno: die Rechnung, die diese (Teil-)Stornorechnung korrigiert (A-RECH-7).
+    korrigiert_rechnung_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rechnung.id")
+    )
     adresse_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     kunde: Mapped[Kunde] = relationship()
+    korrigiert: Mapped["Rechnung | None"] = relationship(
+        remote_side="Rechnung.id", foreign_keys=[korrigiert_rechnung_id]
+    )
+
     positionen: Mapped[list["RechnungPosition"]] = relationship(
         back_populates="rechnung",
         cascade="all, delete-orphan",
@@ -65,6 +77,10 @@ class RechnungPosition(UUIDMixin, Base):
     netto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     ust: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
     brutto: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)
+    # Gegenposition der (Teil-)Stornorechnung; eine Position wird höchstens einmal korrigiert.
+    korrigiert_durch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rechnung_position.id")
+    )
     rechnung: Mapped[Rechnung] = relationship(back_populates="positionen")
 
     __table_args__ = (

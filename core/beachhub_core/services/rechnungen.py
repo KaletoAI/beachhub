@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
 from beachhub_shared.zeit import lokal, lokales_datum
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session, selectinload
 
@@ -20,6 +20,7 @@ from beachhub_core.models import (
     Rechnung,
     RechnungPosition,
     Storno,
+    Zahlung,
     utcnow,
 )
 from beachhub_core.services import audit, konfiguration
@@ -74,6 +75,114 @@ def steuer_je_satz(r: Rechnung) -> list[SteuerZeile]:
         netto, ust, brutto = summen.get(p.ust_satz, (NULL, NULL, NULL))
         summen[p.ust_satz] = (netto + p.netto, ust + p.ust, brutto + p.brutto)
     return [SteuerZeile(satz, *werte) for satz, werte in sorted(summen.items())]
+
+
+def verrechnet(db: Session, r: Rechnung) -> Decimal:
+    """Auf die Rechnung verbuchte Zahlungen, etwa verrechnetes Guthaben (A-ZAHL-4)."""
+    summe = db.scalar(
+        select(func.coalesce(func.sum(Zahlung.betrag), 0)).where(
+            Zahlung.rechnung_id == r.id, Zahlung.status == Zahlung.BEZAHLT
+        )
+    )
+    return Decimal(str(summe)).quantize(CENT)
+
+
+def offener_betrag(db: Session, r: Rechnung) -> Decimal:
+    """Was der Kunde auf eine offene Rechnung noch zahlen muss: Brutto abzüglich Korrekturen und
+    verrechneter Zahlungen. Bezahlte und stornierte Rechnungen sowie Stornorechnungen sind nie
+    offen; den Zahlungseingang per Überweisung hakt der Betreiber ab (A-ZAHL-7)."""
+    if r.art == "storno" or r.status != "offen":
+        return NULL
+    korrigiert = db.scalar(
+        select(func.coalesce(func.sum(Rechnung.brutto), 0)).where(
+            Rechnung.korrigiert_rechnung_id == r.id
+        )
+    )
+    offen = r.brutto + Decimal(str(korrigiert)) - verrechnet(db, r)
+    return max(NULL, offen.quantize(CENT))
+
+
+def sperre(db: Session, rechnung: Rechnung) -> None:
+    """Schreibzugriffe: zuerst Kunde, dann Rechnung; Salden und Marker frisch lesen.
+
+    Dieselbe Reihenfolge gilt für Guthabenverrechnung und Korrekturen. Die Sperren
+    bleiben bis zum Commit/Rollback bestehen, auch während der Guthabenberechnung.
+    """
+    db.execute(select(Kunde).where(Kunde.id == rechnung.kunde_id).with_for_update())
+    db.execute(
+        select(Rechnung)
+        .where(Rechnung.id == rechnung.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    ).scalar_one()
+    db.scalars(
+        select(RechnungPosition)
+        .where(RechnungPosition.rechnung_id == rechnung.id)
+        .execution_options(populate_existing=True)
+    ).all()
+    db.expire(rechnung, ["positionen"])
+
+
+def korrigiere(
+    db: Session,
+    positionen: Sequence[RechnungPosition],
+    *,
+    grund: str,
+    quelle: str,
+    admin_user_id: uuid.UUID | None = None,
+) -> Rechnung:
+    """(Teil-)Stornorechnung über genau diese Positionen einer Rechnung (A-RECH-7). Die
+    ursprüngliche Rechnung bleibt unverändert (A-RECH-4); sind danach alle ihre Positionen
+    korrigiert, gilt sie als storniert (Abweichung B-4). Guthaben entsteht hier nicht – das
+    entscheidet `storno.gutschreiben_positionen`."""
+    if not positionen:
+        raise RechnungsFehler("keine_positionen")
+    positionen = list({p.id: p for p in positionen}.values())
+    rechnung = positionen[0].rechnung
+    sperre(db, rechnung)
+    if rechnung.art == "storno" or rechnung.status == "storniert":
+        raise RechnungsFehler("nicht_stornierbar")
+    if any(p.rechnung_id != rechnung.id for p in positionen):
+        raise RechnungsFehler("verschiedene_rechnungen")
+    if any(p.korrigiert_durch_id is not None for p in positionen):
+        raise RechnungsFehler("bereits_korrigiert")
+    tage = [
+        lokales_datum(b.beginn)
+        for p in positionen
+        if p.buchung_id is not None and (b := db.get(Buchung, p.buchung_id)) is not None
+    ]
+    von, bis = (min(tage), max(tage)) if tage else (rechnung.leistung_von, rechnung.leistung_bis)
+    vorher = audit.als_dict(rechnung)
+    beleg = _neue_rechnung(
+        db,
+        rechnung.kunde,
+        "storno",
+        [
+            Posten(None, f"Storno zu Rechnung {rechnung.nummer}: {p.text}", -p.brutto, p.ust_satz)
+            for p in positionen
+        ],
+        von,
+        bis,
+        "bezahlt",
+        quelle=quelle,
+    )
+    beleg.korrigiert_rechnung_id = rechnung.id
+    for p, gegen in zip(positionen, beleg.positionen, strict=True):
+        p.korrigiert_durch_id = gegen.id
+    if all(p.korrigiert_durch_id is not None for p in rechnung.positionen):
+        rechnung.status = "storniert"
+        rechnung.storniert_durch_id = beleg.id
+    db.flush()
+    audit.protokolliere(
+        db,
+        quelle=quelle,
+        objekt_typ="rechnung",
+        objekt_id=rechnung.id,
+        vorher=vorher,
+        nachher={**audit.als_dict(rechnung), "korrekturbeleg": beleg.nummer, "grund": grund},
+        admin_user_id=admin_user_id,
+    )
+    return beleg
 
 
 def _snapshot(k: Kunde) -> dict[str, str]:
@@ -258,6 +367,7 @@ def monatslauf(db: Session, jahr: int, monat: int) -> list[Rechnung]:
 
 
 def setze_bezahlt(db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID | None) -> None:
+    sperre(db, rechnung)
     if rechnung.status != "offen":
         raise RechnungsFehler("nicht_offen")
     vorher = audit.als_dict(rechnung)
@@ -280,44 +390,27 @@ def setze_bezahlt(db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID |
 def storniere(
     db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID | None, grund: str
 ) -> Rechnung:
+    """Voll-Storno zur Korrektur mit Neuausstellung (A-RECH-4): korrigiert alle noch nicht
+    korrigierten Positionen und gibt die Buchungen zur Neuberechnung frei. Schreibt kein Guthaben
+    gut (Abweichung B-8)."""
+    sperre(db, rechnung)
     if rechnung.status == "storniert" or rechnung.art == "storno":
         raise RechnungsFehler("nicht_stornierbar")
-    positionen = [
-        Posten(None, f"Storno zu Rechnung {rechnung.nummer}: {p.text}", -p.brutto, p.ust_satz)
-        for p in rechnung.positionen
-    ]
-    s = _neue_rechnung(
-        db,
-        rechnung.kunde,
-        "storno",
-        positionen,
-        rechnung.leistung_von,
-        rechnung.leistung_bis,
-        "bezahlt",
-        quelle="admin",
-    )
-    vorher = audit.als_dict(rechnung)
-    rechnung.status, rechnung.storniert_durch_id = "storniert", s.id
+    offen = [p for p in rechnung.positionen if p.korrigiert_durch_id is None]
+    if not offen:
+        raise RechnungsFehler("nicht_stornierbar")
+    beleg = korrigiere(db, offen, grund=grund, quelle="admin", admin_user_id=admin_user_id)
     for p in rechnung.positionen:
         if p.buchung_id:
             b = db.get(Buchung, p.buchung_id)
-            if b is not None:
+            if b is not None and b.rechnung_position_id == p.id:
                 b.rechnung_position_id = None
             p.buchung_id = None
     db.flush()
-    audit.protokolliere(
-        db,
-        quelle="admin",
-        objekt_typ="rechnung",
-        objekt_id=rechnung.id,
-        vorher=vorher,
-        nachher={**audit.als_dict(rechnung), "grund": grund},
-        admin_user_id=admin_user_id,
-    )
     from beachhub_core.services import lesestand
 
     lesestand.markiere_geaendert(db, f"konto:{rechnung.kunde_id}")
-    return s
+    return beleg
 
 
 def _de(v: Decimal) -> str:

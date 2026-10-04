@@ -3,8 +3,8 @@ from decimal import Decimal
 
 import pytest
 from beachhub_core import clock
-from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Tarif
-from beachhub_core.services import buchungen, konfiguration, kunden, storno
+from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Rechnung, Tarif
+from beachhub_core.services import buchungen, konfiguration, kunden, rechnungen, storno
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy.orm import Session
 
@@ -41,10 +41,40 @@ def test_vor_frist_kostenfrei_mit_gutschrift(db: Session, welt) -> None:
         ende=kombiniere(D, time(21)),
         zahlungsart="online",
     )
+    r = rechnungen.erzeuge_einzelrechnung(db, bu)  # online bezahlt
     db.commit()
     s = storno.storniere(db, bu, durch="kunde")
     db.commit()
     assert s.kostenfrei and bu.status == "storniert"
+    # Das Guthaben entsteht nur zusammen mit dem Korrekturbeleg (A-STORNO-6).
+    beleg = db.get(Rechnung, s.korrektur_rechnung_id)
+    assert beleg.art == "storno" and beleg.korrigiert_rechnung_id == r.id
+    assert beleg.brutto == Decimal("-60.00")
+    assert a.guthaben == Decimal("60.00")
+
+
+def test_kulanz_mit_bezahlter_rechnung_schreibt_mit_beleg_gut(db: Session, welt) -> None:
+    f, a, _, _ = welt
+    bu = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=a.id,
+        beginn=kombiniere(D, time(19)),
+        ende=kombiniere(D, time(21)),
+        zahlungsart="online",
+    )
+    rechnungen.erzeuge_einzelrechnung(db, bu)
+    db.commit()
+    clock.set_override(db, date(2027, 11, 30))  # innerhalb der 48-h-Frist
+    s = storno.storniere(db, bu, durch="kunde")
+    db.commit()
+    assert not s.kostenfrei and s.korrektur_rechnung_id is None and a.guthaben == Decimal("0.00")
+    storno.kulanz(db, s, admin_user_id=None, grund="Krankheit")
+    db.commit()
+    assert s.kostenfrei and s.korrektur_rechnung_id is not None
+    assert a.guthaben == Decimal("60.00")
+    storno.kulanz(db, s, admin_user_id=None, grund="nochmal")  # bleibt folgenlos
+    db.commit()
     assert a.guthaben == Decimal("60.00")
 
 

@@ -1,12 +1,19 @@
+import logging
+import uuid
+from collections.abc import Iterable
+from decimal import Decimal
 from pathlib import Path
 
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import mail
 from beachhub_core.config import settings
-from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, Storno
+from beachhub_core.models import Buchung, Dauerbuchung, GuthabenBuchung, Kunde, Rechnung, Storno
 from beachhub_core.services import konfiguration, pin
 from beachhub_core.templating import templates
+
+logger = logging.getLogger(__name__)
 
 
 def _text(name: str, **ctx: object) -> str:
@@ -81,12 +88,60 @@ def abgleich_faellig(anzahl: int) -> None:
 
 
 def rechnung(db: Session, r: Rechnung) -> None:
-    if not r.pdf_pfad:
-        from beachhub_core.services import rechnung_pdf  # Zyklus vermeiden
+    from beachhub_core.services import rechnung_pdf, rechnungen  # Zyklus vermeiden
 
+    if not r.pdf_pfad:
         rechnung_pdf.erzeuge(db, r)
     anhang = [(f"{r.nummer}.pdf", Path(r.pdf_pfad).read_bytes())] if r.pdf_pfad else []
-    mail.sende(r.kunde.email, f"Rechnung {r.nummer}", _text("rechnung", r=r), anhaenge=anhang)
+    gutschrift = db.scalar(
+        select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0)).where(
+            GuthabenBuchung.bezug_id == r.id, GuthabenBuchung.art == "storno_gutschrift"
+        )
+    )
+    betreff = f"Stornorechnung {r.nummer}" if r.art == "storno" else f"Rechnung {r.nummer}"
+    mail.sende(
+        r.kunde.email,
+        betreff,
+        _text(
+            "rechnung",
+            r=r,
+            offen=rechnungen.offener_betrag(db, r),
+            verrechnet=rechnungen.verrechnet(db, r),
+            gutschrift=Decimal(str(gutschrift)),
+        ),
+        anhaenge=anhang,
+    )
+
+
+def belege_versenden(db: Session, rechnung_ids: Iterable[uuid.UUID | None]) -> None:
+    """Nach dem Commit PDFs festschreiben und versenden; Fehler je Beleg isolieren."""
+    from beachhub_core.services import rechnung_pdf
+
+    for rid in dict.fromkeys(i for i in rechnung_ids if i is not None):
+        nummer = str(rid)
+        phase = "Rechnungs-PDF nicht erzeugt"
+        try:
+            r = db.get(Rechnung, rid)
+            if r is None:
+                continue
+            nummer = r.nummer
+            if not r.pdf_pfad:
+                rechnung_pdf.erzeuge(db, r)
+                db.commit()
+            phase = "Rechnung nicht versandt"
+            rechnung(db, r)
+        except Exception:
+            logger.exception("Belegversand für Rechnung %s fehlgeschlagen", nummer)
+            db.rollback()
+            try:
+                betreiber_alarm(
+                    phase,
+                    f"Die Rechnung {nummer} konnte nicht per Mail versandt werden. "
+                    "Details im Log des Hauptsystems.",
+                )
+            except Exception:
+                logger.exception("Betreiber-Alarm für Rechnung %s fehlgeschlagen", nummer)
+                db.rollback()
 
 
 def betreiber_alarm(betreff: str, text: str) -> None:

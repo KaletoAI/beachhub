@@ -21,6 +21,7 @@ from beachhub_core.models import (
     Kunde,
     RechnungPosition,
     Sperre,
+    Storno,
 )
 from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_datum, t_zeit
 from beachhub_core.services import (
@@ -123,6 +124,19 @@ def _satz(db: Session, roh: str) -> Decimal:
 
 
 # ---- Woche ----
+def _belege_der_buchungen(db: Session, buchung_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+    """Korrekturbelege, die beim Stornieren dieser Buchungen entstanden sind."""
+    if not buchung_ids:
+        return []
+    return list(
+        db.scalars(
+            select(Storno.korrektur_rechnung_id)
+            .where(Storno.buchung_id.in_(buchung_ids), Storno.korrektur_rechnung_id.is_not(None))
+            .distinct()
+        ).all()
+    )
+
+
 @router.get("/belegung", response_class=HTMLResponse)
 def woche(
     request: Request,
@@ -317,6 +331,7 @@ def buchung_storno(
             **_buchung_ctx(db, b),
         )
     benachrichtigung.storno(db, s)
+    benachrichtigung.belege_versenden(db, [s.korrektur_rechnung_id])
     return mit_flash(
         RedirectResponse(f"/admin/belegung/buchung/{b.id}", status_code=303), "Storniert"
     )
@@ -355,6 +370,7 @@ def buchung_kulanz(
             fehler=fehlertext(e, GRUND),
             **_buchung_ctx(db, b),
         )
+    benachrichtigung.belege_versenden(db, [b.storno.korrektur_rechnung_id])
     return mit_flash(
         RedirectResponse(f"/admin/belegung/buchung/{b.id}", status_code=303), "Kulanz gebucht"
     )
@@ -425,6 +441,8 @@ async def sperre_anlegen(
             werte={**dict(form), "feld_ids": form.getlist("feld_ids")},
             fehler=fehlertext(e, GRUND),
         )
+    stornierte = [bid for bid, wahl in entscheidungen.items() if wahl == "stornieren"]
+    benachrichtigung.belege_versenden(db, _belege_der_buchungen(db, stornierte))
     ziel_feld = (
         feld_ids[0] if feld_ids else db.scalars(select(Feld.id).order_by(Feld.reihenfolge)).first()
     )
@@ -593,6 +611,8 @@ async def dauer_anlegen(
             ),
         )
     benachrichtigung.dauerbuchung_angelegt(db, d)
+    stornierte = [bid for bid, wahl in entscheidungen.items() if wahl == "stornieren"]
+    benachrichtigung.belege_versenden(db, _belege_der_buchungen(db, stornierte))
     return mit_flash(
         RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung angelegt"
     )

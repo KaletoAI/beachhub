@@ -37,6 +37,10 @@ class Zahlung(UUIDMixin, ZeitstempelMixin, Base):
     buchung_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("buchung.id"), index=True
     )
+    # Verrechnung von Guthaben auf eine Rechnung (provider = "guthaben", A-ZAHL-4).
+    rechnung_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("rechnung.id"), index=True
+    )
     provider: Mapped[str] = mapped_column(String(20), nullable=False)
     provider_ref: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
     betrag: Mapped[Decimal] = mapped_column(DECIMAL(10, 2), nullable=False)

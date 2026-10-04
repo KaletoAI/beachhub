@@ -9,6 +9,7 @@ from beachhub_core.models import (
     Dauerbuchung,
     Feld,
     FeldRaster,
+    Kunde,
     Rechnung,
     Sperre,
     Storno,
@@ -417,3 +418,38 @@ def test_betreiberbuchung_steuersatz_nan(eingeloggt: TestClient, db: Session, we
     assert r.status_code == 303
     assert "Steuersatz ungültig" in eingeloggt.get(r.headers["location"]).text
     assert db.query(Buchung).count() == 0
+
+
+def test_storno_mit_rechnung_verschickt_stornorechnung(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, a, _ = welt
+    c = eingeloggt
+    c.post(
+        "/admin/belegung/buchung",
+        data={
+            "csrf_token": c.csrf,
+            "feld_id": str(f.id),
+            "kunde_id": str(a.id),
+            "beginn": "2027-12-01T19:00",
+            "ende": "2027-12-01T20:00",
+        },
+    )
+    b = db.query(Buchung).one()
+    mail.TEST_AUSGANG.clear()
+    r = c.post(
+        f"/admin/belegung/buchung/{b.id}/storno",
+        data={"csrf_token": c.csrf, "grund": "Test", "kostenfrei": "ja"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.refresh(b)
+    beleg = db.get(Rechnung, b.storno.korrektur_rechnung_id)
+    assert beleg.art == "storno" and beleg.pdf_pfad
+    assert [m["betreff"] for m in mail.TEST_AUSGANG] == [
+        "Stornierung Ihrer Buchung",
+        f"Stornorechnung {beleg.nummer}",
+    ]
+    assert "Stornorechnung" in c.get(f"/admin/belegung/buchung/{b.id}").text
+    # Betreiberbuchung mit offener Rechnung: Die Forderung sinkt, Guthaben entsteht keins.
+    assert db.get(Kunde, a.id).guthaben == Decimal("0.00")

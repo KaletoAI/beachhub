@@ -20,7 +20,7 @@ td.r, th.r { text-align: right; }
     <strong>{{ betreiber.name }}</strong><br>{{ betreiber.adresse }}<br>USt-IdNr. {{ betreiber.ust_id }}
   </div>
 </div>
-<h1>{% if r.art == "storno" %}Stornorechnung{% else %}Rechnung{% endif %} {{ r.nummer }}</h1>
+<h1>{% if r.art == "storno" %}Stornorechnung{% elif r.art == "saison" %}Saisonrechnung{% else %}Rechnung{% endif %} {{ r.nummer }}</h1>
 <p>Rechnungsdatum: {{ r.datum|datum }} · Leistungszeitraum: {{ r.leistung_von|datum }}{% if r.leistung_bis != r.leistung_von %} – {{ r.leistung_bis|datum }}{% endif %}
 {% if r.status == "offen" %}· Zahlbar bis {{ r.faellig_am|datum }}{% endif %}</p>
 <table>
@@ -34,8 +34,14 @@ td.r, th.r { text-align: right; }
   {% endfor %}
   <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
 </table>
-{% if r.art == "storno" %}<p>Diese Stornorechnung hebt die ursprüngliche Rechnung auf.</p>
-{% elif r.status == "bezahlt" %}<p>Der Betrag wurde bereits bezahlt. Vielen Dank.</p>
-{% else %}<p>Bitte überweisen Sie den Gesamtbetrag bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer auf:<br>{{ betreiber.bank }}</p>{% endif %}
+{% if verrechnet > 0 %}
+<table class="summe">
+  <tr><td></td><td class="r">abzüglich verrechnetes Guthaben</td><td class="r">{{ (-verrechnet)|euro }}</td></tr>
+  <tr class="gesamt"><td></td><td class="r">Offener Betrag</td><td class="r">{{ offen|euro }}</td></tr>
+</table>
+{% endif %}
+{% if r.art == "storno" %}<p>Diese Stornorechnung korrigiert {% if r.korrigiert %}die Rechnung {{ r.korrigiert.nummer }} vom {{ r.korrigiert.datum|datum }}{% else %}eine frühere Rechnung{% endif %} um die aufgeführten Positionen.</p>
+{% elif offen == 0 %}<p>Der Betrag ist bereits beglichen. Vielen Dank.</p>
+{% else %}<p>Bitte überweisen Sie {{ offen|euro }} bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer auf:<br>{{ betreiber.bank }}</p>{% endif %}
 <div class="fuss">{{ betreiber.name }} · {{ betreiber.adresse }} · USt-IdNr. {{ betreiber.ust_id }}</div>
 </body></html>
