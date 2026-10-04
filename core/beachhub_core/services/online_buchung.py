@@ -215,7 +215,16 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
             len(n.rohdaten),
         )
         return ignoriert("nicht_verifiziert")
-    z = db.scalar(select(Zahlung).where(Zahlung.provider_ref == ref).with_for_update())
+    # Erst den Kunden ermitteln, dann Kunde → Zahlung → Buchung sperren.
+    kunde_id = db.scalar(select(Zahlung.kunde_id).where(Zahlung.provider_ref == ref))
+    if kunde_id is not None:
+        kunden.sperre_mehrere(db, [kunde_id])
+    z = db.scalar(
+        select(Zahlung)
+        .where(Zahlung.provider_ref == ref)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if z is None:
         logger.warning("Zahlungsrückmeldung zu unbekannter Referenz %s", ref)
         text = (
@@ -248,7 +257,12 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
     z.empfangen_am = utcnow()
     z.rohdaten_json = {"provider": n.provider, "rohdaten": n.rohdaten[:4000]}
     b = (
-        db.scalar(select(Buchung).where(Buchung.id == z.buchung_id).with_for_update())
+        db.scalar(
+            select(Buchung)
+            .where(Buchung.id == z.buchung_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
         if z.buchung_id
         else None
     )
@@ -329,15 +343,22 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
 
 def verfalle_abgelaufene(db: Session) -> list[Buchung]:
     jetzt = clock.now(db)
+    abgelaufen_filter = (
+        Buchung.status == Buchung.RESERVIERT,
+        Buchung.reserviert_bis.is_not(None),
+        Buchung.reserviert_bis < jetzt,
+    )
+    kandidaten = db.execute(select(Buchung.id, Buchung.kunde_id).where(*abgelaufen_filter)).all()
+    kunden.sperre_mehrere(db, (kunde_id for _, kunde_id in kandidaten))
+    # Nach Warten auf Kunden erneut unter Buchungssperre prüfen; inzwischen
+    # bestätigte/stornierte Reservierungen dürfen weder verfallen noch Guthaben erhalten.
     abgelaufen = list(
         db.scalars(
             select(Buchung)
-            .where(
-                Buchung.status == Buchung.RESERVIERT,
-                Buchung.reserviert_bis.is_not(None),
-                Buchung.reserviert_bis < jetzt,
-            )
+            .where(Buchung.id.in_([bid for bid, _ in kandidaten]), *abgelaufen_filter)
+            .order_by(Buchung.id)
             .with_for_update(skip_locked=True)
+            .execution_options(populate_existing=True)
         ).all()
     )
     for b in abgelaufen:

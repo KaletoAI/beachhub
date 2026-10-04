@@ -11,6 +11,7 @@ from beachhub_core.services import (
     audit,
     buchungen,
     konfiguration,
+    kunden,
     kundengruppen,
     pin,
     sperren,
@@ -113,6 +114,12 @@ def lege_an(
                 raise DauerbuchungsFehler("entscheidung_fehlt")
     if not termine:
         raise DauerbuchungsFehler("keine_termine")
+    # Neue Saisonrechnung und verdrängte Buchungen teilen den Nummernkreis:
+    # alle beteiligten Kunden gemeinsam vor der ersten Korrektur sperren.
+    kunden.sperre_mehrere(
+        db,
+        {kunde_id} | {k.kunde_id for t in termine for k in t.kollisionen if isinstance(k, Buchung)},
+    )
     pin_klar = pin.finde_freien(
         db,
         termine[0].beginn,

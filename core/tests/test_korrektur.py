@@ -444,3 +444,145 @@ def test_portalstorno_und_vollstorno_sperren_kunden_vor_buchung(db: Session, wel
     assert db.get(Buchung, bid).status == "storniert"
     assert db.get(Kunde, kid).guthaben == Decimal("0.00")
     assert db.query(Rechnung).count() == 2
+
+
+@pytest.mark.parametrize("batch", ["sperre", "dauer", "gutschriften"])
+def test_mehrkundenbatch_sperrt_alle_kunden_vor_nummernkreis(db: Session, welt, batch: str) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from beachhub_core.database import SessionLocal
+    from beachhub_core.models import Nummernkreis
+    from beachhub_core.services import dauerbuchungen, sperren
+    from hilfen_parallel import warte_auf_sperre
+    from sqlalchemy import text
+
+    f, k1 = welt
+    k2 = kunden.lege_an(db, name="Zweitkunde", email="zwei@x.de")
+    neu = kunden.lege_an(db, name="Abokunde", email="abo@x.de")
+    db.commit()
+    niedrig, hoch = sorted([k1, k2], key=lambda k: k.id)
+    (b1,), r1 = _rechnung(db, f, niedrig, stunden=(19,), status="bezahlt")
+    tag2 = D.replace(day=8) if batch == "dauer" else D
+    b2 = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=hoch.id,
+        beginn=kombiniere(tag2, time(19 if batch == "dauer" else 20)),
+        ende=kombiniere(tag2, time(20 if batch == "dauer" else 21)),
+    )
+    r2 = rechnungen.erzeuge_einzelrechnung(db, b2)
+    db.commit()
+    bids = [b1.id, b2.id]
+    f_id, neu_id, kunden_ids = f.id, neu.id, [niedrig.id, hoch.id]
+    db.execute(select(Kunde).where(Kunde.id == hoch.id).with_for_update())
+    bereit = Event()
+    pid: list[int] = []
+
+    def lauf():
+        with SessionLocal() as session:
+            gebucht = [session.get(Buchung, bid) for bid in bids]
+            pid.append(session.scalar(text("select pg_backend_pid()")))
+            bereit.set()
+            if batch == "gutschriften":
+                storno.gutschreiben_alle(session, gebucht, grund="batch", quelle="admin")
+            elif batch == "sperre":
+                sperren.lege_an(
+                    session,
+                    feld_ids=[f_id],
+                    beginn=kombiniere(D, time(19)),
+                    ende=kombiniere(D, time(21)),
+                    grund="batch",
+                    admin_user_id=None,
+                    entscheidungen={bid: "stornieren" for bid in bids},
+                )
+            else:
+                dauerbuchungen.lege_an(
+                    session,
+                    kunde_id=neu_id,
+                    feld_id=f_id,
+                    wochentag=D.weekday(),
+                    start=time(19),
+                    ende=time(20),
+                    gueltig_von=D,
+                    gueltig_bis=tag2,
+                    admin_user_id=None,
+                    auslassen=set(),
+                    entscheidungen={bid: "stornieren" for bid in bids},
+                )
+            session.commit()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lauf)
+        assert bereit.wait(5)
+        try:
+            warte_auf_sperre(pid[0])
+            # Solange der Batch noch Kunde hoch braucht, muss der Nummernkreis frei bleiben.
+            db.execute(
+                select(Nummernkreis).where(Nummernkreis.jahr == 2027).with_for_update(nowait=True)
+            )
+            storno.gutschreiben_positionen(db, r2.positionen, grund="einzeln", quelle="admin")
+            db.commit()
+        finally:
+            db.rollback()
+        future.result(timeout=5)
+    db.expire_all()
+    assert [db.get(Kunde, kid).guthaben for kid in kunden_ids] == [
+        Decimal("30.00"),
+        Decimal("30.00"),
+    ]
+    assert db.query(Rechnung).count() == 4
+
+
+def test_umgekehrte_gutschriftbatches_sperren_in_gleicher_reihenfolge(db: Session, welt) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from beachhub_core.database import SessionLocal
+    from hilfen_parallel import warte_auf_sperre
+    from sqlalchemy import text
+    from sqlalchemy.exc import OperationalError
+
+    f, k1 = welt
+    k2 = kunden.lege_an(db, name="Zweitkunde", email="zwei@x.de")
+    db.commit()
+    niedrig, hoch = sorted([k1, k2], key=lambda k: k.id)
+    (b1,), _ = _rechnung(db, f, niedrig, stunden=(19,), status="bezahlt")
+    (b2,), _ = _rechnung(db, f, hoch, stunden=(20,), status="bezahlt")
+    bids, kids = [b1.id, b2.id], [niedrig.id, hoch.id]
+    db.execute(select(Kunde).where(Kunde.id == kids[1]).with_for_update())
+    bereit = [Event(), Event()]
+    pids: list[int | None] = [None, None]
+
+    def lauf(index):
+        with SessionLocal() as session:
+            reihenfolge = bids[::-1] if index == 0 else bids
+            gebucht = [session.get(Buchung, bid) for bid in reihenfolge]
+            pids[index] = session.scalar(text("select pg_backend_pid()"))
+            bereit[index].set()
+            belege = storno.gutschreiben_alle(session, gebucht, grund="batch", quelle="admin")
+            session.commit()
+            return len(belege)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first = pool.submit(lauf, 0)
+        assert bereit[0].wait(5)
+        try:
+            warte_auf_sperre(pids[0])
+            # Auch der umgekehrte Batch besitzt niedrig schon vor dem Warten auf hoch.
+            with SessionLocal() as probe:
+                with pytest.raises(OperationalError):
+                    probe.execute(
+                        select(Kunde).where(Kunde.id == kids[0]).with_for_update(nowait=True)
+                    )
+                probe.rollback()
+            second = pool.submit(lauf, 1)
+            assert bereit[1].wait(5)
+            warte_auf_sperre(pids[1])
+            db.commit()
+        finally:
+            db.rollback()
+        assert sorted([first.result(timeout=5), second.result(timeout=5)]) == [0, 2]
+    db.expire_all()
+    assert [db.get(Kunde, kid).guthaben for kid in kids] == [Decimal("30.00"), Decimal("30.00")]
+    assert db.query(Rechnung).count() == 4

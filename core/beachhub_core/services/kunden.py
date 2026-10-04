@@ -1,4 +1,5 @@
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import select
@@ -10,6 +11,19 @@ from beachhub_core.services import audit, konfiguration
 
 class KundenFehler(Exception):  # noqa: N818
     pass
+
+
+def sperre_mehrere(db: Session, kunde_ids: Iterable[uuid.UUID]) -> None:
+    """Alle Kunden eines Finanzvorgangs vor weiteren Schreibsperren UUID-stabil sperren.
+
+    Batch-Aufrufer müssen die vollständige Menge vor der ersten Korrektur oder
+    Rechnungsnummer übergeben; spätere Einzelaufrufe halten diese Sperren weiter.
+    """
+    ids = set(kunde_ids)
+    if ids:
+        db.scalars(
+            select(Kunde).where(Kunde.id.in_(ids)).order_by(Kunde.id).with_for_update()
+        ).all()
 
 
 def lege_an(

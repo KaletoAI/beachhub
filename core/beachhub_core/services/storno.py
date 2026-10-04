@@ -8,7 +8,15 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import clock
 from beachhub_core.models import Buchung, Kunde, Rechnung, RechnungPosition, Storno
-from beachhub_core.services import audit, buchungen, guthaben, konfiguration, rechnungen, sperren
+from beachhub_core.services import (
+    audit,
+    buchungen,
+    guthaben,
+    konfiguration,
+    kunden,
+    rechnungen,
+    sperren,
+)
 
 NULL = Decimal("0.00")
 
@@ -75,6 +83,7 @@ def gutschreiben_alle(
     """Korrekturbelege für kostenfrei gewordene Buchungen – einer je Rechnung, etwa beim Beenden
     einer Dauerbuchung (A-RECH-7). Verknüpft jedes Storno mit seinem Beleg. Buchungen ohne
     (noch nicht korrigierte) Rechnungsposition bleiben ohne Beleg und ohne Guthaben."""
+    kunden.sperre_mehrere(db, (b.kunde_id for b in gebucht))
     gruppen: dict[uuid.UUID, list[tuple[Buchung, RechnungPosition]]] = {}
     for b in gebucht:
         pos = _offene_position(db, b)

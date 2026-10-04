@@ -475,3 +475,65 @@ def test_rechnungskunde_wird_abgelehnt(db: Session, welt) -> None:
     konfiguration.setze(db, "rechnungskunden_online_buchen", "ja")
     db.commit()
     assert _anfragen(db, f, k).antwort.status == "bestaetigt"
+
+
+@pytest.mark.parametrize("konkurrent", ["zahlung", "verfall"])
+def test_storno_parallel_zu_zahlung_oder_verfall_mit_guthaben(
+    db: Session, welt, konkurrent: str
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+    from threading import Event
+
+    from beachhub_core.database import SessionLocal
+    from beachhub_core.models import Kunde
+    from hilfen_parallel import warte_auf_sperre
+    from sqlalchemy import text
+
+    f, k, _ = welt
+    guthaben.buche(db, kunde=k, betrag=Decimal("10.00"), art="manuell")
+    a = _anfragen(db, f, k).antwort
+    b = db.get(Buchung, a.buchung_id)
+    b.reserviert_bis = clock.now(db) - timedelta(minutes=1)
+    db.commit()
+    bid, kid = b.id, k.id
+    ref = db.scalar(select(Zahlung)).provider_ref
+    db.execute(select(Kunde).where(Kunde.id == kid).with_for_update())
+    bereit = Event()
+    pid: list[int] = []
+
+    def lauf():
+        with SessionLocal() as session:
+            pid.append(session.scalar(text("select pg_backend_pid()")))
+            bereit.set()
+            if konkurrent == "zahlung":
+                erg = online_buchung.zahlung_eingegangen(
+                    session, _rueckmeldung(ref, betrag="25.00")
+                )
+                antwort = erg.antwort.status
+            else:
+                antwort = [bu.id for bu in online_buchung.verfalle_abgelaufene(session)]
+            session.commit()
+            return antwort
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lauf)
+        assert bereit.wait(5)
+        try:
+            warte_auf_sperre(pid[0])
+            # Der wartende Zahlung-/Verfallspfad darf die Buchung noch nicht besitzen.
+            db.execute(select(Buchung).where(Buchung.id == bid).with_for_update(nowait=True))
+            erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=bid)
+            assert erg.antwort.status == "ok"
+            db.commit()
+        finally:
+            db.rollback()
+        assert future.result(timeout=5) == ("ok" if konkurrent == "zahlung" else [])
+    db.expire_all()
+    assert db.get(Buchung, bid).status == "storniert"
+    assert db.get(Kunde, kid).guthaben == Decimal("35.00" if konkurrent == "zahlung" else "10.00")
+    assert db.query(Rechnung).count() == 0
+    assert (
+        len(db.scalars(select(GuthabenBuchung).where(GuthabenBuchung.art == "rueckbuchung")).all())
+        == 1
+    )
