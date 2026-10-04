@@ -5,12 +5,14 @@ import pytest
 from beachhub_core import auth, clock, jobs, mail
 from beachhub_core.models import (
     Betriebszeit,
+    Buchung,
     Dauerbuchung,
     Feld,
     FeldRaster,
     GuthabenBuchung,
     Kunde,
     Rechnung,
+    Storno,
     Tarif,
     Zahlung,
 )
@@ -432,3 +434,84 @@ def test_parallele_saisonrechnung_verhindert_doppelabrechnung(db: Session, welt)
         assert future.result(timeout=5) == "bereits_berechnet"
     db.expire_all()
     assert db.query(Rechnung).count() == 1 and _saison(db, d).brutto == Decimal("120.00")
+
+
+@pytest.mark.parametrize("weg", ["storno", "gutschrift", "kulanz"])
+@pytest.mark.parametrize("neuausstellung", [False, True])
+@pytest.mark.parametrize("bezahlt", [False, True])
+def test_alter_buchungsstand_korrigiert_neu_ausgestellte_saisonrechnung(
+    db: Session, welt, weg: str, neuausstellung: bool, bezahlt: bool
+) -> None:
+    from beachhub_core.database import SessionLocal
+
+    d = _altabo(db, *welt)
+    if neuausstellung:
+        rechnungen.erzeuge_saisonrechnung(db, d)
+        db.commit()
+    b = d.buchungen[0]  # Session A lädt den Rechnungszeiger vor dem anderen Commit.
+    alter_zeiger = b.rechnung_position_id
+    did, bid, kid = d.id, b.id, d.kunde_id
+    with SessionLocal() as andere:
+        aktuell = andere.get(Dauerbuchung, did)
+        if neuausstellung:
+            alt = andere.scalars(select(Rechnung).where(Rechnung.dauerbuchung_id == did)).one()
+            rechnungen.storniere(andere, alt, admin_user_id=None, grund="Neuausstellung")
+        r = rechnungen.erzeuge_saisonrechnung(andere, aktuell)
+        if bezahlt:
+            rechnungen.setze_bezahlt(andere, r, admin_user_id=None)
+        rid = r.id
+        neue_position = andere.get(Buchung, bid).rechnung_position_id
+        if weg == "kulanz":
+            s = storno.storniere(
+                andere, andere.get(Buchung, bid), durch="betreiber", kostenfrei=False
+            )
+            sid = s.id
+        andere.commit()
+    assert neue_position != alter_zeiger and b.rechnung_position_id == alter_zeiger
+    if weg == "storno":
+        storno.storniere(db, b, durch="betreiber", kostenfrei=True)
+    elif weg == "gutschrift":
+        assert storno.gutschreiben(db, b, grund="Kulanz", quelle="admin") is not None
+    else:
+        s = db.get(Storno, sid)
+        assert s.buchung is b  # Bereits gecachte Buchung bleibt ohne Refresh veraltet.
+        storno.kulanz(db, s, admin_user_id=None, grund="Kulanz")
+    db.commit()
+    db.expire_all()
+    korrektur = db.scalars(select(Rechnung).where(Rechnung.korrigiert_rechnung_id == rid)).one()
+    assert korrektur.brutto == Decimal("-30.00") and len(korrektur.positionen) == 1
+    assert db.get(Buchung, bid).rechnung_position_id == neue_position
+    assert rechnungen.offener_betrag(db, db.get(Rechnung, rid)) == Decimal(
+        "0.00" if bezahlt else "90.00"
+    )
+    assert db.get(Kunde, kid).guthaben == Decimal("30.00" if bezahlt else "0.00")
+    if weg in ("storno", "kulanz"):
+        assert db.get(Buchung, bid).storno.korrektur_rechnung_id == korrektur.id
+    if weg == "storno":
+        with pytest.raises(storno.StornoFehler, match="nicht_aktiv"):
+            storno.storniere(db, b, durch="betreiber", kostenfrei=True)
+        db.rollback()
+    elif weg == "gutschrift":
+        assert storno.gutschreiben(db, b, grund="Wiederholung", quelle="admin") is None
+        db.commit()
+    else:
+        storno.kulanz(db, db.get(Storno, sid), admin_user_id=None, grund="Wiederholung")
+        db.commit()
+    assert db.query(Rechnung).filter_by(korrigiert_rechnung_id=rid).count() == 1
+    assert db.query(GuthabenBuchung).filter_by(art="storno_gutschrift").count() == int(bezahlt)
+
+
+def test_alter_aktiver_buchungsstand_wird_nicht_erneut_storniert(db: Session, welt) -> None:
+    from beachhub_core.database import SessionLocal
+
+    d = _altabo(db, *welt)
+    b = d.buchungen[0]
+    bid = b.id
+    with SessionLocal() as andere:
+        storno.storniere(andere, andere.get(Buchung, bid), durch="betreiber", kostenfrei=True)
+        andere.commit()
+    assert b.aktiv
+    with pytest.raises(storno.StornoFehler, match="nicht_aktiv"):
+        storno.storniere(db, b, durch="betreiber", kostenfrei=True)
+    db.rollback()
+    assert db.query(Storno).count() == 1

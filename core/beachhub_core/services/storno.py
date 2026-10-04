@@ -86,6 +86,8 @@ def gutschreiben_alle(
     kunden.sperre_mehrere(db, (b.kunde_id for b in gebucht))
     gruppen: dict[uuid.UUID, list[tuple[Buchung, RechnungPosition]]] = {}
     for b in gebucht:
+        # Saisonrechnung/Neuausstellung kann den zuvor geladenen Zeiger ersetzt haben.
+        db.refresh(b)
         pos = _offene_position(db, b)
         if pos is not None:
             gruppen.setdefault(pos.rechnung_id, []).append((b, pos))
@@ -135,6 +137,7 @@ def storniere(
     (`gutschreiben`) – außer mit `korrigieren=False`: Dann bündelt der Aufrufer die Belege mit
     `gutschreiben_alle`."""
     db.execute(select(Kunde).where(Kunde.id == buchung.kunde_id).with_for_update())
+    db.refresh(buchung)
     if not buchung.aktiv:
         raise StornoFehler("nicht_aktiv")
     jetzt = clock.now(db)
