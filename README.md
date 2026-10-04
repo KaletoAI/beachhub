@@ -33,6 +33,15 @@ cd core && pytest
 
 Details (venv, `.env`, Migrationen, CLI) siehe `core/README.md`.
 
+Hauptsystem und Portal lokal starten (je ein Terminal; das Skript führt vorher die Migrationen aus,
+lauscht auf allen Schnittstellen und nennt die Adresse mit der IP des Rechners; beim ersten
+Portal-Start richtet es `portal/.env` und den Kanal in `core/.env` ein):
+
+```bash
+./start.sh core      # Admin-UI: http://<IP>:8000/admin/login
+./start.sh portal    # Portal:   http://<IP>:8001
+```
+
 ```bash
 pip install -e portal[dev]
 cd portal && pytest          # TEST_PORTAL_DATABASE_URL setzen
