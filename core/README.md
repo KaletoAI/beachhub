@@ -82,3 +82,7 @@ berechnet nur aktive unberechnete Termine und lässt historische Belege unverän
 muss der Betreiber solche Bestandsabos prüfen; Migrationen rechnen sie nicht automatisch ab.
 Details zu Korrekturbelegen, freien Abo-Absagen und manuellen Auszahlungen stehen im
 [Betriebshandbuch](../docs/betrieb/hauptsystem.md#5-laufender-betrieb).
+
+Bei Buchungsanlagen gilt die Sperrreihenfolge Kunde vor Feld, auch für Portal-Einzelbuchungen.
+Daueranlagen sperren vorher die vollständige Menge beteiligter Kunden nach UUID; die
+Fremdschlüsselprüfungen von PostgreSQL sind bei weiteren Änderungen mitzuberücksichtigen.

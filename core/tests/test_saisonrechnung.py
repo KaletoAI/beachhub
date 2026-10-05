@@ -83,6 +83,93 @@ def test_saisonrechnung_bei_anlage(db: Session, welt) -> None:
         rechnungen.erzeuge_saisonrechnung(db, d)
 
 
+@pytest.mark.parametrize("quelle", ["admin", "portal"])
+def test_einzelanlage_parallel_zu_daueranlage_ohne_sperrzyklus(
+    db: Session, welt, quelle: str
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from beachhub_core.database import SessionLocal
+    from beachhub_core.services import kundengruppen
+    from hilfen_parallel import warte_auf_sperre
+    from sqlalchemy import event, text
+
+    f, k = welt
+    fid, kid = f.id, k.id
+    # create_all ersetzt die Migrationen in Tests; 0010 legt im Betrieb beide
+    # festen Gruppen vor jeder Buchung an. Keine parallele Erstinitialisierung.
+    kundengruppen.beide(db)
+    db.commit()
+    feld_gesperrt, fortsetzen, dauer_bereit = Event(), Event(), Event()
+    dauer_pid = []
+
+    def einzel():
+        with SessionLocal() as session:
+            session.execute(text("SET LOCAL statement_timeout = '8s'"))
+            conn = session.connection()
+
+            def nach_sperre(conn, cursor, statement, parameters, context, executemany):
+                # Erst nach der tatsächlich erworbenen produktiven Feldsperre pausieren.
+                # Die Kundensperre davor gehört ausschließlich dem Buchungsdienst.
+                if "FROM feld" in statement and "FOR UPDATE" in statement:
+                    feld_gesperrt.set()
+                    assert fortsetzen.wait(5)
+
+            event.listen(conn, "after_cursor_execute", nach_sperre)
+            try:
+                b = buchungen.lege_an(
+                    session,
+                    feld_id=fid,
+                    kunde_id=kid,
+                    beginn=kombiniere(date(2027, 12, 1), time(18)),
+                    ende=kombiniere(date(2027, 12, 1), time(19)),
+                    quelle=quelle,
+                )
+                bid = b.id
+                session.commit()
+                return bid
+            finally:
+                event.remove(conn, "after_cursor_execute", nach_sperre)
+
+    def dauer():
+        with SessionLocal() as session:
+            session.execute(text("SET LOCAL statement_timeout = '8s'"))
+            dauer_pid.append(session.scalar(text("select pg_backend_pid()")))
+            dauer_bereit.set()
+            d = dauerbuchungen.lege_an(
+                session,
+                kunde_id=kid,
+                feld_id=fid,
+                wochentag=2,
+                start=time(19),
+                ende=time(20),
+                gueltig_von=date(2027, 12, 1),
+                gueltig_bis=date(2027, 12, 1),
+                admin_user_id=None,
+                auslassen=set(),
+                entscheidungen={},
+            )
+            did = d.id
+            session.commit()
+            return did
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        einzel_future = pool.submit(einzel)
+        try:
+            assert feld_gesperrt.wait(5)
+            dauer_future = pool.submit(dauer)
+            assert dauer_bereit.wait(5)
+            warte_auf_sperre(dauer_pid[0])
+        finally:
+            fortsetzen.set()
+        bid = einzel_future.result(timeout=10)
+        did = dauer_future.result(timeout=10)
+    assert db.get(Buchung, bid).quelle == quelle
+    assert db.get(Dauerbuchung, did).kunde_id == kid
+    assert db.query(Buchung).count() == 2 and db.query(Rechnung).count() == 1
+
+
 def test_saison_zahlungsziel_einstellbar(db: Session, welt) -> None:
     f, k = welt
     konfiguration.setze(db, "saison_zahlungsziel_tage", 30)

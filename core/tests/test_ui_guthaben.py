@@ -236,3 +236,59 @@ def test_saisonende_frischer_marker_trotz_altem_session_cache(db: Session) -> No
         assert guthaben.saisonende_faellig(db) == (1, Decimal("30.00"))
         db.commit()
         assert guthaben.saisonende_faellig(andere) is None
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_auszahlung_prueft_anonymisierung_frisch_unter_sperre(
+    db: Session, admin, parallel: bool
+) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    from beachhub_core.database import SessionLocal
+    from beachhub_core.routes.kunden import guthaben_auszahlen
+    from hilfen_parallel import warte_auf_sperre
+    from sqlalchemy import text
+
+    kunde, _ = _kunden(db)
+    kid, aid = kunde.id, admin[0].id
+    db.commit()
+    bereit, starten = Event(), Event()
+    pid = []
+
+    def auszahlen():
+        with SessionLocal() as session:
+            session.execute(text("SET LOCAL statement_timeout = '8s'"))
+            alt = session.get(Kunde, kid)
+            assert alt.anonymisiert_am is None
+            pid.append(session.scalar(text("select pg_backend_pid()")))
+            bereit.set()
+            assert starten.wait(5)
+            return guthaben_auszahlen(
+                kid,
+                betrag="10,00",
+                notiz="überwiesen",
+                admin=session.get(type(admin[0]), aid),
+                db=session,
+            )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(auszahlen)
+        try:
+            assert bereit.wait(5)
+            kunden.anonymisiere(db, kunde)
+            if not parallel:
+                db.commit()
+            starten.set()
+            if parallel:
+                warte_auf_sperre(pid[0])
+                db.commit()
+        finally:
+            db.rollback()
+            starten.set()
+        antwort = future.result(timeout=10)
+    assert antwort.status_code == 303
+    db.refresh(kunde)
+    assert kunde.anonymisiert_am is not None and kunde.guthaben == Decimal("30.00")
+    assert db.scalar(select(GuthabenBuchung.id).where(GuthabenBuchung.art == "auszahlung")) is None
+    assert db.query(Audit).filter(Audit.objekt_typ == "guthaben").count() == 1

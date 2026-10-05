@@ -511,11 +511,12 @@ def _dauer_formular_ctx(
         kunde = db.get(Kunde, uuid.UUID(str(werte.get("kunde_id", ""))))
     except ValueError:
         kunde = None
+    verbleibende = [t for t in (termine or []) if f"auslassen_{t.datum.isoformat()}" not in werte]
     mitglied_fehlt = bool(
-        termine
+        verbleibende
         and kunde is not None
         and konfiguration.hole(db, "abo_nur_mitglieder")
-        and not kundengruppen.ist_mitglied_am(kunde, termine[-1].datum)
+        and not kundengruppen.ist_mitglied_am(kunde, verbleibende[-1].datum)
     )
     ctx: dict[str, Any] = {
         "termine": termine,

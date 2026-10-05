@@ -184,6 +184,8 @@ wiederholt; die Liste bleibt erreichbar.
 
 Auszahlungen führen Sie auf Wunsch des Kunden selbst per Überweisung aus und haken danach den
 positiven Betrag in der Liste ab. Teilbeträge sind möglich, höchstens bis zum verfügbaren Guthaben.
+Wurde der Kunde inzwischen anonymisiert, lehnt das Hauptsystem das Abhaken ab und meldet
+„Kunde nicht gefunden“; das Guthaben bleibt unverändert.
 Das Abhaken vermindert das Guthaben und wird auditiert; das System überweist selbst kein Geld.
 
 Rechnungen sind im Admin-UI unter „Rechnungen“ einsehbar; von dort steht auch ein

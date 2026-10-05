@@ -501,3 +501,24 @@ def test_ui_abo_rechnungskunde_markieren(eingeloggt: TestClient, db: Session, we
     assert r.status_code == 303
     db.refresh(a)
     assert a.rechnungskunde is True
+
+
+@pytest.mark.parametrize(
+    "ausgelassen,hinweis",
+    [
+        ([], True),
+        (["2027-12-28"], False),
+        (["2027-12-07", "2027-12-14", "2027-12-21", "2027-12-28"], False),
+    ],
+)
+def test_ui_abo_vorschau_prueft_nur_verbleibende_termine(
+    eingeloggt: TestClient, db: Session, welt, ausgelassen: list[str], hinweis: bool
+) -> None:
+    f, _, kunde = welt
+    kunde.mitglied_bis = date(2027, 12, 21)
+    db.commit()
+    daten = _abo_daten(eingeloggt, f, kunde)
+    daten.update({f"auslassen_{datum}": "1" for datum in ausgelassen})
+    r = eingeloggt.post("/admin/belegung/dauer/planen", data=daten)
+    assert r.status_code == 200
+    assert ("Mitgliedschaft auf der Kundenseite verlängern" in r.text) is hinweis

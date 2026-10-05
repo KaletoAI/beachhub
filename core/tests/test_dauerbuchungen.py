@@ -196,8 +196,13 @@ def test_abo_nur_fuer_rechnungskunden(db: Session, welt) -> None:
     f, _, k2 = welt  # k2 ist kein Rechnungskunde
     k2.mitglied_bis = date(2028, 4, 30)
     db.commit()
+    audit_ids = set(db.scalars(select(Audit.id)))
     with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match="kein_rechnungskunde"):
         _abo(db, f, k2)
+    assert k2.rechnungskunde is False
+    assert set(db.scalars(select(Audit.id))) == audit_ids
+    assert db.query(Buchung).count() == 0
+    assert db.query(Dauerbuchung).count() == 0 and db.query(Rechnung).count() == 0
     db.rollback()
     assert db.query(Dauerbuchung).count() == 0 and db.query(Rechnung).count() == 0
     d = _abo(db, f, k2, rechnungskunde_setzen=True)
@@ -213,17 +218,26 @@ def test_abo_nur_fuer_rechnungskunden(db: Session, welt) -> None:
     )
 
 
-def test_abo_nur_fuer_mitglieder_bis_zum_letzten_termin(db: Session, welt) -> None:
+@pytest.mark.parametrize("rechnungskunde", [True, False])
+def test_abo_nur_fuer_mitglieder_bis_zum_letzten_termin(
+    db: Session, welt, rechnungskunde: bool
+) -> None:
     f, k, _ = welt
     k.mitglied_bis = date(2027, 12, 20)  # endet vor dem 21. und 28.12.
+    k.rechnungskunde = rechnungskunde
     db.commit()
+    audit_ids = set(db.scalars(select(Audit.id)))
     with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match="mitgliedschaft_zu_kurz"):
-        _abo(db, f, k)
+        _abo(db, f, k, rechnungskunde_setzen=True)
+    assert k.rechnungskunde is rechnungskunde
+    assert set(db.scalars(select(Audit.id))) == audit_ids
+    assert db.query(Buchung).count() == 0
+    assert db.query(Dauerbuchung).count() == 0 and db.query(Rechnung).count() == 0
     db.rollback()
     assert db.query(Dauerbuchung).count() == 0
     konfiguration.setze(db, "abo_nur_mitglieder", "nein")
     db.commit()
-    d = _abo(db, f, k)
+    d = _abo(db, f, k, rechnungskunde_setzen=True)
     db.commit()
     # Ohne die Regel gelten die Konditionen am jeweiligen Termin (A-KUND-6).
     assert [b.ust_satz for b in d.buchungen] == [Decimal("7.00")] * 2 + [Decimal("19.00")] * 2
@@ -272,8 +286,13 @@ def test_abo_prueft_frischen_kundenstand_unter_sperre(
     with SessionLocal() as andere:
         andere.execute(update(Kunde).where(Kunde.id == kid).values(**{feld: wert}))
         andere.commit()
+    audit_ids = set(db.scalars(select(Audit.id)))
     with pytest.raises(dauerbuchungen.DauerbuchungsFehler, match=fehler):
         _abo(db, f, k)
+    assert k.rechnungskunde is (False if feld == "rechnungskunde" else True)
+    assert set(db.scalars(select(Audit.id))) == audit_ids
+    assert db.query(Buchung).count() == 0
+    assert db.query(Dauerbuchung).count() == 0 and db.query(Rechnung).count() == 0
     db.rollback()
     assert db.query(Dauerbuchung).count() == 0
     assert db.query(Rechnung).count() == 0

@@ -253,7 +253,12 @@ def guthaben_auszahlen(
 ) -> RedirectResponse:
     """Hakt eine Auszahlung ab, die der Betreiber selbst überwiesen hat (A-ZAHL-6)."""
     zurueck = RedirectResponse("/admin/kunden/guthabenliste", status_code=303)
-    k = db.get(Kunde, kunde_id)
+    k = db.scalar(
+        select(Kunde)
+        .where(Kunde.id == kunde_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if k is None or k.anonymisiert_am is not None:
         return mit_flash(zurueck, "Kunde nicht gefunden", "fehler")
     try:

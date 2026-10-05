@@ -91,12 +91,19 @@ def lege_an(
 ) -> Buchung:
     if zahlungsart not in ZAHLUNGSARTEN:
         raise BuchungsFehler("zahlungsart_unbekannt")
+    # Wie Daueranlage und Finanzvorgänge zuerst den Kunden sperren: Auch die
+    # FK-Prüfungen beim INSERT nehmen Sperren auf Kunde und Feld.
+    kunde = db.scalar(
+        select(Kunde)
+        .where(Kunde.id == kunde_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if kunde is None or kunde.anonymisiert_am is not None:
+        raise BuchungsFehler("kunde_unbekannt")
     feld = db.scalar(select(Feld).where(Feld.id == feld_id).with_for_update())
     if feld is None or not feld.aktiv:
         raise BuchungsFehler("feld_inaktiv")
-    kunde = db.get(Kunde, kunde_id)
-    if kunde is None or kunde.anonymisiert_am is not None:
-        raise BuchungsFehler("kunde_unbekannt")
     _pruefe_zeitraum(db, feld, beginn, ende, pruefe_fenster)
     if finde_kollisionen(db, feld_id=feld_id, beginn=beginn, ende=ende):
         raise BuchungsFehler("belegt")
