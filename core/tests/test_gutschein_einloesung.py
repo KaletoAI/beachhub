@@ -688,9 +688,12 @@ def test_einheitsstorno_nur_15_euro_geldrest(db, gwelt, steuer):
     assert db.get(Rechnung, g.rechnung_id).status == "bezahlt"
 
 
-def test_centkorrektur_in_anderer_stornoreihenfolge(db, gwelt):
+def test_centkorrektur_in_anderer_stornoreihenfolge(db, gwelt, monkeypatch):
+    from beachhub_core import clock
     from beachhub_core.services import storno
 
+    # Der letzte Termin liegt am 14. Tag um 19 Uhr; die Testuhr bestimmt das Fenster.
+    monkeypatch.setattr(clock, "now", lambda db: kombiniere(D, time(20)))
     g = code(
         db,
         gwelt,
@@ -706,6 +709,7 @@ def test_centkorrektur_in_anderer_stornoreihenfolge(db, gwelt):
     bids = []
     for tag in range(1, 10):
         erg = buchen(db, gwelt, [g.code], stunden=1, tag=date(2027, 12, tag))
+        assert erg.antwort.status == "bestaetigt", erg.antwort
         bids.append(erg.antwort.buchung_id)
         db.commit()
     p = db.get(Rechnung, g.rechnung_id).positionen[0]

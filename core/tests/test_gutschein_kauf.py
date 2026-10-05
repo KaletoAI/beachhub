@@ -318,6 +318,63 @@ def test_entfernte_kaufzuordnung_erfordert_vollstaendigen_retry(db, gwelt):
     assert db.get(Zahlung, zid).status == "offen" and gwelt.mitglied.guthaben == 0
 
 
+def test_kontowechsel_waehrend_kauf_lockwait_lehnt_altes_konto_vor_provider_ab(
+    db, gwelt, monkeypatch
+):
+    from test_gutschein_parallel import _starte, _warte_auf_lock
+
+    k = gwelt.mitglied
+    konto_a, konto_b = uuid.uuid4(), uuid.uuid4()
+    k.portal_konto_id = konto_a
+    db.commit()
+    kid = k.id
+    db.commit()
+    anbieter = zahlung.anbieter()
+    erzeuge = anbieter.erzeuge_sitzung
+    sitzungen = []
+
+    def provider_sitzung(**kwargs):
+        sitzungen.append(kwargs)
+        return erzeuge(**kwargs)
+
+    monkeypatch.setattr(anbieter, "erzeuge_sitzung", provider_sitzung)
+    # Echter bestehender Kontokanal hängt denselben Kunden unter Lock auf B um.
+    neuer_kontoantrag = kanal.Anfrage(
+        anfrage_id=uuid.uuid4(),
+        typ="konto_angelegt",
+        konto_id=konto_b,
+        erstellt_am=clock.now(db),
+        nutzlast={"email": k.email, "anzeigename": k.name},
+    )
+    assert anfragen.verarbeite(db, neuer_kontoantrag).antwort.status == "ok"
+    kauf_von_a = kanal.Anfrage(
+        anfrage_id=uuid.uuid4(),
+        typ="gutschein_kaufen",
+        konto_id=konto_a,
+        erstellt_am=clock.now(db),
+        nutzlast={"empfaenger_email": "geschenk@example.org"},
+    )
+    pid, future, thread = _starte(lambda s: anfragen.bearbeite(s, kauf_von_a))
+    try:
+        _warte_auf_lock(pid)
+    finally:
+        db.commit()
+    antwort, nachlauf = future.result(timeout=5)
+    thread.join(timeout=3)
+    assert (antwort.status, antwort.grund, antwort.checkout_url) == (
+        "abgelehnt",
+        "konto_unbekannt",
+        None,
+    )
+    assert nachlauf == [] and sitzungen == []
+    assert db.scalar(select(Gutschein)) is None and db.scalar(select(Zahlung)) is None
+    db.expire_all()
+    assert k.portal_konto_id == konto_b
+    gueltig, _ = _wunsch(db, k)
+    assert gueltig.status == "reserviert" and gueltig.preis == Decimal("26.00")
+    assert db.scalar(select(Gutschein)).kaeufer_kunde_id == kid and len(sitzungen) == 1
+
+
 def test_mehrzweck_kaufbeleg_mail_semantik(db, gwelt, mail_ausgang):
     g = _offen(db, gwelt)
     g.steuer = "bei_einloesung"
@@ -327,6 +384,19 @@ def test_mehrzweck_kaufbeleg_mail_semantik(db, gwelt, mail_ausgang):
     belegmail = next(m for m in mail_ausgang if m["anhaenge"])
     assert belegmail["betreff"] == f"Kaufbeleg {r.nummer}"
     assert "Kaufbeleg" in belegmail["text"] and "Mehrzweckgutschein" in belegmail["text"]
+
+
+def test_direkter_interner_kaufaufruf_behaelt_vertrag_ohne_erwartete_konto_id(db, gwelt):
+    from beachhub_core.services import gutschein_kauf
+
+    k = gwelt.mitglied
+    k.portal_konto_id = uuid.uuid4()
+    db.commit()
+    erg = gutschein_kauf.anfragen(
+        db, kunde=k, empfaenger_email=None, betrag=None, rueckkehr_url="/zahlung/zurueck"
+    )
+    assert erg.antwort.status == "reserviert" and erg.antwort.preis == Decimal("26.00")
+    assert db.scalar(select(Gutschein)).kaeufer_kunde_id == k.id
 
 
 def test_nachlauf_buyer_mail_fehler_verhindert_geschenk_und_pdf_nicht(

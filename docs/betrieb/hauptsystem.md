@@ -341,6 +341,9 @@ Der Kauf ist im Hauptsystem-Kanal implementiert; signierter Gutscheinbestand, Po
 und manuelle Kaufgutscheinrückgabe folgen in späteren Umsetzungsschritten.
 Ein Kauf benötigt ein verknüpftes Portalkonto. Rechnungskunden dürfen kaufen, solange
 **Rechnungskunden dürfen Gutscheine kaufen** eingeschaltet ist; bezahlt wird ebenfalls online.
+Die Portalbindung wird nach der Kundensperre frisch gegen das anfragende Konto geprüft.
+Wird der Kunde während des Wartens auf ein anderes Konto umgehängt, erhält das alte Konto
+keinen Kauf oder Checkout; es entsteht auch keine Bezahlsitzung beim Anbieter.
 Einheitspreis **0** deaktiviert den Verkauf für die betreffende Käufergruppe. Wertgutscheine
 sind nur zu den angebotenen Beträgen erhältlich. Vorhandenes Guthaben bezahlt keinen Gutscheinkauf.
 

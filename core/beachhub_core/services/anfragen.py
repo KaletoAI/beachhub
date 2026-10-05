@@ -146,6 +146,7 @@ def _gutschein_kaufen(
         empfaenger_email=n.empfaenger_email,
         betrag=n.betrag,
         rueckkehr_url=f"{basis}/zahlung/zurueck?anfrage={anfrage.anfrage_id}",
+        erwartetes_konto_id=anfrage.konto_id,
     )
 
 

@@ -130,16 +130,25 @@ def test_ereignisse_idempotent_je_dienst(client: TestClient, db: Session, welt) 
 
 
 def test_ereignis_created_at_nutzt_echte_uhr_trotz_datums_override(
-    client: TestClient, db: Session
+    client: TestClient, db: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`Ereignis.created_at`/`updated_at` müssen mit der echten Uhr gesetzt werden, nicht mit
     `clock.now(db)` (vom Admin für Tests/Abnahme überschreibbar) – sonst verfälscht ein
     Datums-Override, wann ein Ereignis tatsächlich empfangen wurde (Ruling zu Task 14)."""
+
+    class FachuhrDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            # 00:15 Berlin; das Winter-Override liegt um 23:15 UTC am Vortag.
+            return datetime(2026, 10, 5, 22, 15, tzinfo=UTC)
+
+    # Nur Eingangszeit der Fachuhr fixieren; Modellstempel verwenden weiter Echtzeit.
+    monkeypatch.setattr(clock, "datetime", FachuhrDatetime)
     clock.set_override(db, date(2030, 1, 1))
     db.commit()
     try:
         jetzt = clock.now(db)
-        assert jetzt.year == 2030  # Override wirkt wie erwartet
+        assert jetzt == datetime(2029, 12, 31, 23, 15, tzinfo=UTC)
         r = client.post("/hall/ereignisse", headers=H, json=_lieferung(jetzt, 1))
         assert r.status_code == 200
         ereignis = db.query(Ereignis).filter(Ereignis.halle_seq == 1).one()

@@ -46,11 +46,14 @@ def anfragen(
     empfaenger_email: str | None,
     betrag: Decimal | None,
     rueckkehr_url: str,
+    erwartetes_konto_id: uuid.UUID | None = None,
 ) -> Ergebnis:
     gutschein_sperren.bereite_vorgang_vor(db, kunde_ids=[kunde.id], gutschein_ids=[])
     if kunde.anonymisiert_am is not None:
         return abgelehnt("konto_gesperrt")
-    if kunde.portal_konto_id is None:
+    if kunde.portal_konto_id is None or (
+        erwartetes_konto_id is not None and kunde.portal_konto_id != erwartetes_konto_id
+    ):
         return abgelehnt("konto_unbekannt")
     if kunde.rechnungskunde and not konfiguration.hole(db, "rechnungskunden_gutscheinkauf"):
         return abgelehnt("rechnungskunde")

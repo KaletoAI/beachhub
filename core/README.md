@@ -150,7 +150,11 @@ nur an den Käufer. Die öffentlichen Rechnungsaktionsguards folgen in Task 8.
 
 `gutschein_kauf.anfragen` friert Modell, Minuten/Wert, Kaufpreis, Käufergruppe, Steuersatz,
 Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsdeadline ein. Guthaben wird beim Kauf
-nicht verrechnet. `online_buchung.zahlung_eingegangen` verifiziert Anbieter und Zahlungsstatus,
+nicht verrechnet. Der Kanal übergibt seine vertrauenswürdige Konto-ID; nach der Kundensperre
+vergleicht der Kaufdienst sie mit der frisch geladenen Portalbindung, bevor er eine
+Bezahlsitzung erzeugt. Ein während des Wartens neu verknüpftes Konto berechtigt das alte
+Konto nicht mehr zum Kauf. Direkte interne Dienstaufrufer behalten den bisherigen Vertrag.
+`online_buchung.zahlung_eingegangen` verifiziert Anbieter und Zahlungsstatus,
 entdeckt den Kaufgutschein vor den Vorgangslocks und übergibt den vollständigen Sperrkontext.
 Bei `now >= kauf_reserviert_bis` entsteht auch ohne vorherigen Job kein aktiver Gutschein.
 Unterzahlung bricht den Kauf ab und schreibt den Eingang einmal als Käuferguthaben gut;
