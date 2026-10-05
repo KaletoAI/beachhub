@@ -322,7 +322,7 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
 
 def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) -> Ergebnis:
     # Finanzielle Stornos sperren den Kunden vor Buchung/Dauerbuchung/Rechnung.
-    db.execute(select(Kunde).where(Kunde.id == kunde.id).with_for_update())
+    kunden.sperre_mehrere(db, [kunde.id])
     b = db.scalar(
         select(Buchung)
         .where(Buchung.id == buchung_id)

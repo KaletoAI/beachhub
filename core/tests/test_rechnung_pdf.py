@@ -54,12 +54,18 @@ def test_pdf_wird_erzeugt_und_gehasht(db: Session, rechnung) -> None:
 
 
 def test_registriertes_pdf_wird_nie_ueberschrieben(db: Session, rechnung) -> None:
+    from beachhub_core.services import storno
+
     pfad = rechnung_pdf.erzeuge(db, rechnung)
     db.commit()
     inhalt = Path(pfad).read_bytes()
+    pruefsumme = rechnung.pdf_sha256
+    storno.gutschreiben_positionen(db, rechnung.positionen, grund="Ausfall", quelle="admin")
+    db.commit()
     with pytest.raises(rechnungen.RechnungsFehler, match="pdf_vorhanden"):
         rechnung_pdf.erzeuge(db, rechnung)
     assert Path(pfad).read_bytes() == inhalt
+    assert rechnung.pdf_sha256 == pruefsumme and rechnung_pdf.pruefe_integritaet(rechnung)
 
 
 def test_verwaiste_pdf_datei_wird_ersetzt(db: Session, rechnung) -> None:
@@ -78,3 +84,52 @@ def test_pruefe_integritaet_fehlt_datei(db: Session, rechnung) -> None:
     db.commit()
     Path(pfad).unlink()
     assert rechnung_pdf.pruefe_integritaet(rechnung) is False
+
+
+def test_review_5_stornierte_originalrechnung_behauptet_keine_zahlung(
+    db: Session, rechnung
+) -> None:
+    rechnungen.storniere(db, rechnung, admin_user_id=None, grund="Fehler")
+    db.commit()
+    pfad = rechnung_pdf.erzeuge(db, rechnung)
+    db.commit()
+    text = "".join(p.extract_text() for p in PdfReader(str(pfad)).pages)
+    assert "storniert" in text.lower()
+    assert "bereits beglichen" not in text and "Bitte überweisen" not in text
+
+
+@pytest.mark.parametrize("zahlung,offen", [("30", "60,00"), ("0", "90,00")])
+def test_review_5_pdf_forderung_zeigt_korrekturen_separat(
+    db: Session, rechnung, zahlung: str, offen: str
+) -> None:
+    import re
+
+    from beachhub_core.services import guthaben, storno
+
+    k = rechnung.kunde
+    tag = date(2027, 12, 1)
+    r = rechnungen._neue_rechnung(
+        db,
+        k,
+        "einzel",
+        [rechnungen.Posten(None, f"Termin {i}", Decimal("30"), Decimal("19")) for i in range(4)],
+        tag,
+        tag,
+        "offen",
+        quelle="admin",
+    )
+    if Decimal(zahlung):
+        guthaben.buche(db, kunde=k, betrag=Decimal(zahlung), art="manuell")
+        rechnungen.verrechne_guthaben(db, r, quelle="admin")
+    storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
+    db.commit()
+    html = rechnung_pdf.html(r)
+    zeilen = {
+        re.sub("<[^>]+>", "", zeile).strip()
+        for zeile in re.findall(r"<tr[^>]*>(.*?)</tr>", html, re.S)
+    }
+    assert "Gesamtbetrag120,00 €" in zeilen
+    assert "abzüglich Korrekturen-30,00 €" in zeilen
+    assert f"Offener Betrag{offen} €" in zeilen
+    if Decimal(zahlung):
+        assert "abzüglich verrechnetes Guthaben-30,00 €" in zeilen

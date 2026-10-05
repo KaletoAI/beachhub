@@ -70,6 +70,96 @@ def _saison(db: Session, d: Dauerbuchung) -> Rechnung:
     return db.scalars(select(Rechnung).where(Rechnung.dauerbuchung_id == d.id)).one()
 
 
+def test_review_2_vollstorno_erhaelt_vorher_korrigierten_aktiven_termin(db: Session, welt) -> None:
+    d = _abo(db, *welt)
+    r = _saison(db, d)
+    rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    b = d.buchungen[0]
+    p = r.positionen[0]
+    storno.gutschreiben_positionen(db, [p], grund="Hallenausfall", quelle="admin")
+    rechnungen.storniere(db, r, admin_user_id=None, grund="Neuausstellung")
+    db.commit()
+    assert b.aktiv and b.rechnung_position_id == p.id and p.buchung_id == b.id
+    neu = rechnungen.erzeuge_saisonrechnung(db, d)
+    db.commit()
+    assert neu.brutto == Decimal("90") and len(neu.positionen) == 3
+    assert neu.status == "bezahlt" and d.kunde.guthaben == Decimal("30")
+    assert b.id not in {pos.buchung_id for pos in neu.positionen}
+
+
+@pytest.mark.parametrize("wallet,manuell,offen", [("100", False, "20"), ("0", True, "0")])
+def test_review_1_vollstorno_und_neuausstellung_erhalten_zahlung(
+    db: Session, welt, wallet: str, manuell: bool, offen: str
+) -> None:
+    f, k = welt
+    if Decimal(wallet):
+        guthaben.buche(db, kunde=k, betrag=Decimal(wallet), art="manuell")
+    d = _abo(db, f, k)
+    r = _saison(db, d)
+    if manuell:
+        rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    rechnungen.storniere(db, r, admin_user_id=None, grund="Adresskorrektur")
+    neu = rechnungen.erzeuge_saisonrechnung(db, d)
+    db.commit()
+    assert neu.brutto == Decimal("120")
+    assert rechnungen.offener_betrag(db, neu) == Decimal(offen)
+    assert rechnungen.verrechnet(db, neu) == Decimal("120" if manuell else "100")
+    assert k.guthaben == Decimal("0")
+
+
+@pytest.mark.parametrize("wallet", ["0", "200"])
+def test_review_10_anlageaudit_enthaelt_dauerbuchung(db: Session, welt, wallet: str) -> None:
+    from beachhub_core.models import Audit
+
+    f, k = welt
+    if Decimal(wallet):
+        guthaben.buche(db, kunde=k, betrag=Decimal(wallet), art="manuell")
+    d = _abo(db, f, k)
+    r = _saison(db, d)
+    audits = db.scalars(
+        select(Audit).where(Audit.objekt_typ == "rechnung", Audit.objekt_id == r.id)
+    ).all()
+    anlagen = [a for a in audits if a.vorher_json is None]
+    assert len(anlagen) == 1 and anlagen[0].nachher_json["dauerbuchung_id"] == str(d.id)
+    assert len(audits) == (2 if Decimal(wallet) else 1)
+
+
+@pytest.mark.parametrize("absage", ["spaet", "ohne_kontingent"])
+def test_review_3_neuausstellung_behaelt_kostenpflichtige_absage(
+    db: Session, welt, monkeypatch, absage: str
+) -> None:
+    d = _abo(db, *welt)
+    r = _saison(db, d)
+    if absage == "spaet":
+        monkeypatch.setattr(storno.clock, "now", lambda db: kombiniere(date(2027, 12, 1), time(10)))
+    else:
+        konfiguration.setze(db, "abo_freie_absagen", 0)
+    s = storno.storniere(db, d.buchungen[0], durch="kunde")
+    assert not s.kostenfrei
+    rechnungen.storniere(db, r, admin_user_id=None, grund="Adresskorrektur")
+    neu = rechnungen.erzeuge_saisonrechnung(db, d)
+    db.commit()
+    assert neu.brutto == Decimal("120") and len(neu.positionen) == 4
+    assert "kostenpflichtig storniert" in neu.positionen[0].text
+
+
+def test_review_3_bestandsabo_nur_kostenpflichtige_absagen_ist_abrechenbar(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    d = _altabo(db, *welt)
+    for b in d.buchungen:
+        storno.storniere(db, b, durch="betreiber", kostenfrei=False)
+    db.commit()
+    seite = eingeloggt.get(f"/admin/belegung/dauer/{d.id}")
+    assert "Saisonrechnung erstellen" in seite.text
+    antwort = eingeloggt.post(
+        f"/admin/belegung/dauer/{d.id}/rechnung", data={"csrf_token": eingeloggt.csrf}
+    )
+    assert antwort.status_code == 200
+    db.expire_all()
+    assert _saison(db, d).brutto == Decimal("120")
+
+
 def test_saisonrechnung_bei_anlage(db: Session, welt) -> None:
     f, k = welt
     d = _abo(db, f, k)

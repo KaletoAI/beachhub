@@ -1,5 +1,12 @@
 # Stufe 1a-II: Saisonrechnung, Abo-Absagen und Korrekturbelege – Implementierungsplan
 
+> Historischer Plan. Korrektur vom 05.10.2026 nach externem Review: B-8 „Vollstorno ohne Guthaben“
+> ist ersetzt. Vollstorno erstattet den verbleibenden bezahlten Anteil mit Korrekturbeleg,
+> bewahrt vorherige Teilkorrekturen und erlaubt die Neuberechnung kostenpflichtiger Absagen.
+> Kontingent wird nur bei tatsächlicher Positionskorrektur verbraucht. Die aktuelle Fachregel
+> steht in der Spezifikation A-DAUER-3/A-RECH-3/A-RECH-4/A-RECH-7; die ursprünglichen
+> Planentscheidungen und Codeblöcke bleiben hier zur Nachvollziehbarkeit erhalten.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Jede Dauerbuchung bekommt bei der Anlage genau eine Saisonrechnung (mit Verrechnung vorhandenen Guthabens) statt des Monatslaufs; Abos gibt es nur für Rechnungskunden und – einstellbar – nur für Mitglieder; Kunden sagen Abo-Termine im Portal ab, bis zu drei davon kostenfrei; jede Gutschrift entsteht nur noch zusammen mit einer (Teil-)Stornorechnung, und zum Saisonende gibt es eine Guthabenliste.

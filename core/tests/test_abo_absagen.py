@@ -66,6 +66,60 @@ def _absagen(db: Session, k: Kunde, b) -> online_buchung.Ergebnis:
     return erg
 
 
+@pytest.mark.parametrize("berechnet", [False, True])
+def test_review_7_ohne_offene_position_keinen_kontingentverbrauch(
+    db: Session, welt, berechnet: bool
+) -> None:
+    from test_saisonrechnung import _altabo
+
+    f, k = welt
+    if berechnet:
+        d, r = _abo(db, f, k)
+        rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+        storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
+    else:
+        d = _altabo(db, f, k)
+    db.commit()
+    vorher = k.guthaben
+    belege = db.query(Rechnung).count()
+    a = _absagen(db, k, d.buchungen[0]).antwort
+    assert a.kostenfrei is True and a.freie_absage is False
+    assert a.verbleibende_freie_absagen == 3
+    assert k.guthaben == vorher and db.query(Rechnung).count() == belege
+    if not berechnet:
+        neu = rechnungen.erzeuge_saisonrechnung(db, d)
+        db.commit()
+        assert neu.brutto == Decimal("90")
+
+
+@pytest.mark.parametrize("abo", [False, True])
+def test_review_6_betreiberentscheidung_in_stornomail(
+    db: Session, welt, mail_ausgang: list, abo: bool
+) -> None:
+    from beachhub_core.services import benachrichtigung, buchungen
+
+    f, k = welt
+    if abo:
+        d, _ = _abo(db, f, k)
+        b = d.buchungen[0]
+    else:
+        b = buchungen.lege_an(
+            db,
+            feld_id=f.id,
+            kunde_id=k.id,
+            beginn=kombiniere(date(2027, 12, 1), time(19)),
+            ende=kombiniere(date(2027, 12, 1), time(20)),
+        )
+    s = storno.storniere(db, b, durch="betreiber", kostenfrei=False)
+    db.commit()
+    benachrichtigung.storno(db, s)
+    text = mail_ausgang[-1]["text"]
+    assert "Betreiber" in text and "kostenpflichtig" in text
+    assert "Frist" not in text and "frist" not in text
+    if abo:
+        assert "übrig: 3" in text
+
+
 def test_freie_absagen_werden_gezaehlt(db: Session, welt) -> None:
     f, k = welt
     d, r = _abo(db, f, k)

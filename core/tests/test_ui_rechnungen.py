@@ -12,6 +12,67 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 
+def test_review_8_rechnungsliste_aggregiert_unabhaengig_von_zeilenzahl(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    from beachhub_core.database import engine
+    from beachhub_core.services import guthaben, storno
+    from sqlalchemy import event
+
+    _, k = welt
+    tag = date(2027, 12, 1)
+
+    def anlegen():
+        return rechnungen._neue_rechnung(
+            db,
+            k,
+            "einzel",
+            [
+                rechnungen.Posten(None, "A", Decimal("30"), Decimal("19")),
+                rechnungen.Posten(None, "B", Decimal("30"), Decimal("19")),
+            ],
+            tag,
+            tag,
+            "offen",
+            quelle="admin",
+        )
+
+    r = anlegen()
+    anlegen()
+    guthaben.buche(db, kunde=k, betrag=Decimal("20"), art="manuell")
+    rechnungen.verrechne_guthaben(db, r, quelle="admin")
+    storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
+    db.commit()
+
+    def messen() -> tuple[int, str]:
+        selects = []
+
+        def zaehlen(conn, cursor, statement, parameters, context, executemany):
+            sql = statement.lower()
+            if sql.lstrip().startswith("select") and (
+                "from rechnung" in sql or "from zahlung" in sql
+            ):
+                selects.append(sql)
+
+        event.listen(engine, "before_cursor_execute", zaehlen)
+        try:
+            db.expire_all()
+            seite = eingeloggt.get("/admin/rechnungen?status=offen")
+            assert seite.status_code == 200
+        finally:
+            event.remove(engine, "before_cursor_execute", zaehlen)
+        return len(selects), seite.text
+
+    klein, html = messen()
+    assert "10,00 €" in html and "60,00 €" in html
+    for _ in range(18):
+        anlegen()
+    db.commit()
+    gross, html = messen()
+    assert "10,00 €" in html and "60,00 €" in html
+    assert gross == klein, f"Rechnungs-SELECTs wachsen von {klein} auf {gross}"
+
+
 @pytest.fixture
 def welt(db: Session) -> tuple[Feld, Kunde]:
     f = Feld(name="F1", reihenfolge=1)
@@ -214,7 +275,7 @@ def test_teilstorno_ungueltige_auswahl_meldet_fehler(
 
 
 @pytest.mark.parametrize("historisch", [False, True])
-def test_teilstorno_auf_vollstornierter_rechnung_bleibt_ohne_gutschrift(
+def test_teilstorno_auf_vollstornierter_rechnung_bleibt_ohne_zweite_gutschrift(
     eingeloggt: TestClient, db: Session, welt, historisch: bool
 ) -> None:
     c = eingeloggt
@@ -237,7 +298,7 @@ def test_teilstorno_auf_vollstornierter_rechnung_bleibt_ohne_gutschrift(
     assert "bereits storniert" in seite.text
     db.expire_all()
     assert db.query(Rechnung).count() == 2
-    assert db.get(Kunde, welt[1].id).guthaben == Decimal("0.00")
+    assert db.get(Kunde, welt[1].id).guthaben == Decimal("60.00")
     assert not mail.TEST_AUSGANG
 
 

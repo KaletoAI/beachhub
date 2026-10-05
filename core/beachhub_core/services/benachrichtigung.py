@@ -43,10 +43,20 @@ def storno(db: Session, s: Storno) -> None:
 
         dauer = db.get(Dauerbuchung, s.buchung.dauerbuchung_id)
         rest = storno_dienst.freie_absagen_rest(db, dauer) if dauer is not None else None
+    if s.durch == "betreiber":
+        kostenpflichtiger_grund = "Der Betreiber hat den Termin kostenpflichtig storniert."
+    elif s.durch == "system":
+        kostenpflichtiger_grund = "Der Termin wurde kostenpflichtig storniert."
+    elif rest == 0:
+        kostenpflichtiger_grund = "Es stehen keine kostenfreien Absagen im Abo zur Verfügung."
+    else:
+        kostenpflichtiger_grund = "Die Absagefrist war bereits abgelaufen."
     mail.sende(
         s.buchung.kunde.email,
         "Stornierung Ihrer Buchung",
-        _text("storno", s=s, b=s.buchung, rest=rest),
+        _text(
+            "storno", s=s, b=s.buchung, rest=rest, kostenpflichtiger_grund=kostenpflichtiger_grund
+        ),
     )
 
 

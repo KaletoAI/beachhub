@@ -5,10 +5,8 @@ Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
 
 {% if s.kostenfrei -%}
 Die Stornierung ist für Sie kostenfrei.{% if s.freie_absage %} Das war eine der kostenfreien Absagen in Ihrem Abo; es bleiben {{ rest }}.{% endif %}
-{%- elif b.dauerbuchung_id -%}
-Der Termin bleibt berechnet: {% if rest == 0 %}Es stehen keine kostenfreien Absagen im Abo zur Verfügung.{% else %}Die Absagefrist war bereits abgelaufen.{% endif %} Der Platz ist trotzdem wieder frei.
 {%- else -%}
-Da die Stornofrist bereits abgelaufen war, bleibt der Betrag fällig.
+Der Termin bleibt berechnet: {{ kostenpflichtiger_grund }} Der Platz ist trotzdem wieder frei.
 {%- endif %}
 {% if b.dauerbuchung_id and not s.freie_absage %}
 Kostenfreie Absagen im Abo übrig: {{ rest }}.

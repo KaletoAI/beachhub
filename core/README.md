@@ -78,7 +78,10 @@ ruff check . && ruff format --check .
 Neue Dauerbuchungen erhalten ihre Saisonrechnung atomar bei der Anlage; einen Monatslauf gibt es
 nicht mehr. Für unberechnete Bestandsabos und die Neuausstellung nach vollständigem Rechnungsstorno
 steht auf der Abo-Detailseite die ausdrückliche Aktion **Saisonrechnung erstellen** bereit. Sie
-berechnet nur aktive unberechnete Termine und lässt historische Belege unverändert. Beim Upgrade
+berechnet aktive sowie kostenpflichtig abgesagte unberechnete Termine und lässt historische
+Belege unverändert. Kostenfreie Absagen und bereits korrigierte Termine bleiben ausgeschlossen.
+Vollstorno gibt den verbleibenden bezahlten Anteil mit Korrekturbeleg als Guthaben zurück;
+vorherige Teilgutschriften werden dabei nicht doppelt erstattet. Beim Upgrade
 muss der Betreiber solche Bestandsabos prüfen; Migrationen rechnen sie nicht automatisch ab.
 Details zu Korrekturbelegen, freien Abo-Absagen und manuellen Auszahlungen stehen im
 [Betriebshandbuch](../docs/betrieb/hauptsystem.md#5-laufender-betrieb).

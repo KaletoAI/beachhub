@@ -15,12 +15,97 @@ from beachhub_core.models import (
     Zahlung,
     utcnow,
 )
-from beachhub_core.services import buchungen, kunden, rechnungen, storno
+from beachhub_core.services import buchungen, guthaben, kunden, rechnungen, storno
 from beachhub_shared.zeit import kombiniere
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 D = date(2027, 12, 1)
+
+
+@pytest.mark.parametrize(
+    "zahlung,bezahlt,teil,gutschrift,gesamt",
+    [
+        ("100", False, False, "100", "100"),
+        ("0", True, False, "500", "500"),
+        ("100", True, False, "500", "500"),
+        ("100", False, True, "100", "100"),
+        ("450", False, True, "400", "450"),
+        ("0", True, True, "400", "500"),
+        ("0", False, False, "0", "0"),
+    ],
+)
+def test_review_1_vollstorno_erhaelt_nur_verbleibenden_bezahlten_anteil(
+    db: Session, welt, zahlung: str, bezahlt: bool, teil: bool, gutschrift: str, gesamt: str
+) -> None:
+    from beachhub_core.models import Audit
+
+    _, k = welt
+    r = rechnungen._neue_rechnung(
+        db,
+        k,
+        "einzel",
+        [
+            rechnungen.Posten(None, "A", Decimal("100"), Decimal("19")),
+            rechnungen.Posten(None, "B", Decimal("400"), Decimal("19")),
+        ],
+        D,
+        D,
+        "offen",
+        quelle="admin",
+    )
+    if Decimal(zahlung):
+        guthaben.buche(db, kunde=k, betrag=Decimal(zahlung), art="manuell")
+        rechnungen.verrechne_guthaben(db, r, quelle="admin")
+    if bezahlt:
+        rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    if teil:
+        storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Teil", quelle="admin")
+    db.commit()
+    vorher = k.guthaben
+    beleg = rechnungen.storniere(db, r, admin_user_id=None, grund="Neuausstellung")
+    db.commit()
+    assert k.guthaben - vorher == Decimal(gutschrift)
+    assert k.guthaben == Decimal(gesamt)
+    assert r.status == "storniert"
+    eintrag = db.scalar(select(GuthabenBuchung).where(GuthabenBuchung.bezug_id == beleg.id))
+    if Decimal(gutschrift):
+        assert eintrag.betrag == Decimal(gutschrift) and eintrag.art == "storno_gutschrift"
+        assert db.scalar(select(Audit.id).where(Audit.objekt_id == eintrag.id)) is not None
+    else:
+        assert eintrag is None
+    with pytest.raises(rechnungen.RechnungsFehler, match="nicht_stornierbar"):
+        rechnungen.storniere(db, r, admin_user_id=None, grund="doppelt")
+    db.rollback()
+    assert k.guthaben == Decimal(gesamt)
+
+
+@pytest.mark.parametrize("zahlung,gutschrift", [("30", "0"), ("40", "10")])
+def test_review_4_teilkorrektur_deckt_forderung_und_auditiert_bezahlt(
+    db: Session, welt, zahlung: str, gutschrift: str
+) -> None:
+    from beachhub_core.models import Audit
+
+    f, k = welt
+    _, r = _rechnung(db, f, k)
+    _zahlung(db, k, r, Decimal(zahlung))
+    db.commit()
+    storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
+    db.commit()
+    assert r.status == "bezahlt" and r.bezahlt_am is not None
+    assert k.guthaben == Decimal(gutschrift)
+    wechsel = [
+        a
+        for a in db.scalars(select(Audit).where(Audit.objekt_id == r.id))
+        if a.vorher_json
+        and a.vorher_json["status"] == "offen"
+        and a.nachher_json["status"] == "bezahlt"
+    ]
+    assert len(wechsel) == 1 and wechsel[0].nachher_json["bezahlt_am"]
+    zeitpunkt = r.bezahlt_am
+    storno.gutschreiben_positionen(db, [r.positionen[1]], grund="Rest", quelle="admin")
+    db.commit()
+    assert r.status == "storniert" and r.bezahlt_am == zeitpunkt
 
 
 @pytest.fixture
@@ -174,7 +259,7 @@ def test_gutschreiben_ohne_rechnung_ist_folgenlos(db: Session, welt) -> None:
     assert k.guthaben == Decimal("0.00") and db.query(Rechnung).count() == 0
 
 
-def test_storno_nach_vollstorno_der_rechnung_ohne_gutschrift(db: Session, welt) -> None:
+def test_storno_nach_vollstorno_der_rechnung_ohne_zweite_gutschrift(db: Session, welt) -> None:
     f, k = welt
     (b1, _), r = _rechnung(db, f, k)
     rechnungen.setze_bezahlt(db, r, admin_user_id=None)
@@ -184,7 +269,7 @@ def test_storno_nach_vollstorno_der_rechnung_ohne_gutschrift(db: Session, welt) 
     db.commit()
     assert s.korrektur_rechnung_id is None
     db.refresh(k)
-    assert k.guthaben == Decimal("0.00") and db.query(Rechnung).count() == 2
+    assert k.guthaben == Decimal("60.00") and db.query(Rechnung).count() == 2
 
 
 def test_gutschreiben_alle_ein_beleg_je_rechnung(db: Session, welt) -> None:
@@ -442,7 +527,7 @@ def test_portalstorno_und_vollstorno_sperren_kunden_vor_buchung(db: Session, wel
         assert future.result(timeout=5) == "ok"
     db.expire_all()
     assert db.get(Buchung, bid).status == "storniert"
-    assert db.get(Kunde, kid).guthaben == Decimal("0.00")
+    assert db.get(Kunde, kid).guthaben == Decimal("60.00")
     assert db.query(Rechnung).count() == 2
 
 

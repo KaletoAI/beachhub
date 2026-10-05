@@ -684,7 +684,7 @@ def dauer_detail(
         )
     )
     rechnung_erstellbar = aktive_rechnung is None and any(
-        b.aktiv and b.rechnung_position_id is None for b in d.buchungen
+        rechnungen.saison_abrechenbar(b) for b in d.buchungen
     )
     return render(
         request,

@@ -146,29 +146,42 @@ sonst offen. Später hinzukommendes Guthaben wird nicht automatisch nachverrechn
 Zahlungseingang per Überweisung haken Sie auf der Rechnungsseite ab. Selbst angelegte Buchungen
 bekommen sofort eine offene Rechnung, bestätigte Onlinebuchungen eine bezahlte.
 
-**Bestandsabos und Neuausstellung.** Beim Upgrade müssen Sie vorhandene Abos auf aktive,
-unberechnete Termine prüfen. Die Migration erstellt keine Rechnungen automatisch. Auf der
+**Bestandsabos und Neuausstellung.** Beim Upgrade müssen Sie vorhandene Abos auf aktive oder
+kostenpflichtig abgesagte, unberechnete Termine prüfen. Die Migration erstellt keine Rechnungen
+automatisch. Auf der
 Abo-Detailseite erzeugt **Saisonrechnung erstellen** auf Ihren ausdrücklichen Aufruf eine Rechnung
-nur über diese Termine. Bereits berechnete oder stornierte Termine bleiben ausgeschlossen und
-historische Belege unverändert. Es kann nur eine nicht stornierte Saisonrechnung je Abo geben.
-Nach vollständigem Storno ist über dieselbe Aktion eine Neuausstellung für freigegebene aktive,
-unberechnete Termine möglich; auch das geschieht nicht automatisch.
+nur über diese Termine. Bereits berechnete oder korrigierte Termine sowie kostenfreie Absagen
+bleiben ausgeschlossen; historische Belege bleiben unverändert. Es kann nur eine nicht stornierte
+Saisonrechnung je Abo geben. Nach vollständigem Storno ist über dieselbe Aktion eine Neuausstellung
+für freigegebene aktive oder kostenpflichtig abgesagte, unberechnete Termine möglich; auch das
+geschieht nicht automatisch.
 
 **Korrekturen.** Wird eine berechnete Buchung kostenfrei storniert (innerhalb der Frist, als freie
 Abo-Absage, per Kulanz, durch eine Sperre oder weil ein Abo endet), entsteht automatisch ein
 Korrekturbeleg über ihre Position. War die Rechnung bezahlt, wird der Betrag Guthaben; war sie
 unbezahlt, sinkt die Forderung. Bei teilweiser Zahlung sinkt zuerst die offene Forderung; nur der
 darüber hinausgehende Betrag wird Guthaben. Sind alle Positionen korrigiert, ist die Rechnung
-storniert. Das Original-PDF bleibt unverändert. Auf der Rechnungsseite können Sie einzelne noch
+storniert. Ist der Restbetrag vollständig gedeckt und bleiben Positionen bestehen, gilt die Rechnung
+als bezahlt. Das Original-PDF bleibt unverändert. Auf der Rechnungsseite können Sie einzelne noch
 nicht korrigierte Positionen mit einem Grund als Teil-Stornorechnung korrigieren. Diese manuelle
 Belegkorrektur ändert den Buchungsstatus nicht und gibt keinen Platz frei. Die Spalte **Offen**
-in der Rechnungsliste berücksichtigt Zahlungen und Korrekturen. Stornoguthaben entsteht immer
-zusammen mit einem Korrekturbeleg; PDF und Mail werden erst nach erfolgreichem Commit versandt.
+in der Rechnungsliste berücksichtigt Zahlungen und Korrekturen. Beim vollständigen Rechnungsstorno
+zur Neuausstellung wird der verbleibende bereits bezahlte Anteil ebenfalls als Guthaben
+zurückgegeben. Frühere Teilgutschriften werden nicht nochmals
+erstattet; bereits korrigierte aktive Termine bleiben von einer Neuausstellung ausgeschlossen.
+Die neuen Belege verrechnen Guthaben entsprechend Ihrer Einstellung; historische Zahlungen
+bleiben an der alten Rechnung. Stornoguthaben entsteht immer zusammen mit einem Korrekturbeleg;
+PDF und Mail werden erst nach erfolgreichem Commit versandt.
 
 **Abo-Absagen.** Kunden sagen Abo-Termine im Portal bis zum Beginn ab. Bis zu `abo_freie_absagen`
 (Vorgabe 3) Absagen je Abo innerhalb der Stornofrist sind kostenfrei; weitere Absagen und Absagen
 nach der Frist geben den Platz frei, der Termin bleibt aber berechnet. `0` schaltet freie
-Kundenabsagen aus. Kulanz, Sperren und Beenden durch den Betreiber verbrauchen kein Kontingent.
+Kundenabsagen aus. Eine kostenfreie Kundenabsage verbraucht nur dann Kontingent, wenn eine
+noch nicht korrigierte Rechnungsposition tatsächlich korrigiert wird. Ein fristgerecht bei
+verfügbarem Kontingent abgesagter unberechneter oder bereits korrigierter Termin bleibt
+kostenfrei, verbraucht kein Kontingent und wird später nicht erneut berechnet. Kulanz, Sperren
+und Beenden durch den Betreiber verbrauchen ebenfalls kein Kontingent. Eine kostenpflichtige
+Betreiberentscheidung wird in der Stornomail als solche benannt.
 Die Portalbestätigung zeigt das verbleibende Kontingent aus dem signierten Kontostand und erklärt
 die Bedingungen und finanziellen Folgen. Über die Absage entscheidet das Hauptsystem bei der
 Verarbeitung; eine ausführlichere Abo-Übersicht im Portal bleibt für den weiteren Ausbau vorgesehen.

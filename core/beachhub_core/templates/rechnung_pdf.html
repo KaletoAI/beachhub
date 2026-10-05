@@ -34,14 +34,16 @@ td.r, th.r { text-align: right; }
   {% endfor %}
   <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
 </table>
-{% if verrechnet > 0 %}
+{% if verrechnet > 0 or korrekturen != 0 %}
 <table class="summe">
-  <tr><td></td><td class="r">abzüglich verrechnetes Guthaben</td><td class="r">{{ (-verrechnet)|euro }}</td></tr>
-  <tr class="gesamt"><td></td><td class="r">Offener Betrag</td><td class="r">{{ offen|euro }}</td></tr>
+  {% if verrechnet > 0 %}<tr><td></td><td class="r">{% if r.status == "offen" %}abzüglich verrechnetes Guthaben{% else %}Ursprünglich verrechnetes Guthaben{% endif %}</td><td class="r">{{ (-verrechnet)|euro }}</td></tr>{% endif %}
+  {% if korrekturen != 0 %}<tr><td></td><td class="r">{% if r.status == "offen" %}abzüglich Korrekturen{% else %}Korrekturbelege{% endif %}</td><td class="r">{{ korrekturen|euro }}</td></tr>{% endif %}
+  {% if r.status == "offen" %}<tr class="gesamt"><td></td><td class="r">Offener Betrag</td><td class="r">{{ offen|euro }}</td></tr>{% endif %}
 </table>
 {% endif %}
 {% if r.art == "storno" %}<p>Diese Stornorechnung korrigiert {% if r.korrigiert %}die Rechnung {{ r.korrigiert.nummer }} vom {{ r.korrigiert.datum|datum }}{% else %}eine frühere Rechnung{% endif %} um die aufgeführten Positionen.</p>
-{% elif offen == 0 %}<p>Der Betrag ist bereits beglichen. Vielen Dank.</p>
+{% elif r.status == "storniert" %}<p>Diese Rechnung wurde vollständig storniert. Es besteht keine Zahlungsforderung aus dieser Rechnung.</p>
+{% elif r.status == "bezahlt" %}<p>Der Betrag ist bereits beglichen. Vielen Dank.</p>
 {% else %}<p>Bitte überweisen Sie {{ offen|euro }} bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer auf:<br>{{ betreiber.bank }}</p>{% endif %}
 <div class="fuss">{{ betreiber.name }} · {{ betreiber.adresse }} · USt-IdNr. {{ betreiber.ust_id }}</div>
 </body></html>

@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, RechnungPosition, Storno
+from beachhub_core.models import Buchung, Dauerbuchung, Rechnung, RechnungPosition, Storno
 from beachhub_core.services import (
     audit,
     buchungen,
@@ -146,7 +146,7 @@ def storniere(
     """Storniert eine Buchung. Ist das Storno kostenfrei, korrigiert es die Rechnung der Buchung
     (`gutschreiben`) – außer mit `korrigieren=False`: Dann bündelt der Aufrufer die Belege mit
     `gutschreiben_alle`."""
-    db.execute(select(Kunde).where(Kunde.id == buchung.kunde_id).with_for_update())
+    kunden.sperre_mehrere(db, [buchung.kunde_id])
     db.refresh(buchung, with_for_update=True)
     if not buchung.aktiv:
         raise StornoFehler("nicht_aktiv")
@@ -171,8 +171,12 @@ def storniere(
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-            freie_absage = bool(kostenfrei and dauer and freie_absagen_rest(db, dauer) > 0)
-            kostenfrei = freie_absage
+            kostenfrei = bool(kostenfrei and dauer and freie_absagen_rest(db, dauer) > 0)
+            # Ohne noch unberichtigte Position bleibt die Absage kostenfrei, verbraucht
+            # aber kein Kontingent. Das verhindert auch eine spätere Bestandsberechnung.
+            freie_absage = bool(
+                kostenfrei and korrigieren and _offene_position(db, buchung) is not None
+            )
     s = Storno(
         buchung_id=buchung.id,
         durch=durch,
@@ -210,7 +214,7 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
     """Stellt ein kostenpflichtiges Storno nachträglich frei – mit Korrekturbeleg (A-STORNO-4,
     A-STORNO-6). Ein bereits kostenfreies Storno bleibt unberührt – sonst entstünde ein zweites
     Mal Guthaben."""
-    db.execute(select(Kunde).where(Kunde.id == s.buchung.kunde_id).with_for_update())
+    kunden.sperre_mehrere(db, [s.buchung.kunde_id])
     db.refresh(s)
     if s.kostenfrei:
         return

@@ -63,7 +63,7 @@ def liste(
         "rechnungen/liste.html",
         admin=admin,
         rechnungen=gefunden,
-        offen_je_rechnung={r.id: rechnungen.offener_betrag(db, r) for r in gefunden},
+        offen_je_rechnung=rechnungen.offene_betraege(db, gefunden),
         status=status,
         von=von,
         bis=bis,

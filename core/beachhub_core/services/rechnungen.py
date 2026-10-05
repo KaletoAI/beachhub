@@ -22,7 +22,7 @@ from beachhub_core.models import (
     Zahlung,
     utcnow,
 )
-from beachhub_core.services import audit, guthaben, konfiguration
+from beachhub_core.services import audit, guthaben, konfiguration, kunden
 
 CENT = Decimal("0.01")
 NULL = Decimal("0.00")
@@ -86,19 +86,57 @@ def verrechnet(db: Session, r: Rechnung) -> Decimal:
     return Decimal(str(summe)).quantize(CENT)
 
 
+def korrektursumme(db: Session, r: Rechnung) -> Decimal:
+    """Negative Bruttosumme der zur Rechnung gehörenden Korrekturbelege."""
+    summe = db.scalar(
+        select(func.coalesce(func.sum(Rechnung.brutto), 0)).where(
+            Rechnung.korrigiert_rechnung_id == r.id
+        )
+    )
+    return Decimal(str(summe)).quantize(CENT)
+
+
 def offener_betrag(db: Session, r: Rechnung) -> Decimal:
     """Was der Kunde auf eine offene Rechnung noch zahlen muss: Brutto abzüglich Korrekturen und
     verrechneter Zahlungen. Bezahlte und stornierte Rechnungen sowie Stornorechnungen sind nie
     offen; den Zahlungseingang per Überweisung hakt der Betreiber ab (A-ZAHL-7)."""
     if r.art == "storno" or r.status != "offen":
         return NULL
-    korrigiert = db.scalar(
-        select(func.coalesce(func.sum(Rechnung.brutto), 0)).where(
-            Rechnung.korrigiert_rechnung_id == r.id
-        )
-    )
-    offen = r.brutto + Decimal(str(korrigiert)) - verrechnet(db, r)
+    offen = r.brutto + korrektursumme(db, r) - verrechnet(db, r)
     return max(NULL, offen.quantize(CENT))
+
+
+def offene_betraege(db: Session, rechnungen: Sequence[Rechnung]) -> dict[uuid.UUID, Decimal]:
+    """Restforderungen einer Liste mit zwei Aggregaten statt Abfragen je Zeile."""
+    ergebnis = {r.id: NULL for r in rechnungen}
+    ids = {r.id for r in rechnungen if r.status == "offen" and r.art != "storno"}
+    if not ids:
+        return ergebnis
+    korrekturen = {
+        rechnung_id: betrag
+        for rechnung_id, betrag in db.execute(
+            select(Rechnung.korrigiert_rechnung_id, func.sum(Rechnung.brutto))
+            .where(Rechnung.korrigiert_rechnung_id.in_(ids))
+            .group_by(Rechnung.korrigiert_rechnung_id)
+        )
+    }
+    zahlungen = {
+        rechnung_id: betrag
+        for rechnung_id, betrag in db.execute(
+            select(Zahlung.rechnung_id, func.sum(Zahlung.betrag))
+            .where(Zahlung.rechnung_id.in_(ids), Zahlung.status == Zahlung.BEZAHLT)
+            .group_by(Zahlung.rechnung_id)
+        )
+    }
+    for r in rechnungen:
+        if r.id in ids:
+            rest = (
+                r.brutto
+                + Decimal(str(korrekturen.get(r.id, NULL)))
+                - Decimal(str(zahlungen.get(r.id, NULL)))
+            )
+            ergebnis[r.id] = max(NULL, rest.quantize(CENT))
+    return ergebnis
 
 
 def sperre(db: Session, rechnung: Rechnung) -> None:
@@ -107,7 +145,7 @@ def sperre(db: Session, rechnung: Rechnung) -> None:
     Dieselbe Reihenfolge gilt für Guthabenverrechnung und Korrekturen. Die Sperren
     bleiben bis zum Commit/Rollback bestehen, auch während der Guthabenberechnung.
     """
-    db.execute(select(Kunde).where(Kunde.id == rechnung.kunde_id).with_for_update())
+    kunden.sperre_mehrere(db, [rechnung.kunde_id])
     db.execute(
         select(Rechnung)
         .where(Rechnung.id == rechnung.id)
@@ -120,6 +158,17 @@ def sperre(db: Session, rechnung: Rechnung) -> None:
         .execution_options(populate_existing=True)
     ).all()
     db.expire(rechnung, ["positionen"])
+
+
+def _aktualisiere_bezahlt(db: Session, rechnung: Rechnung) -> bool:
+    """Deckung nach Zahlung/Korrektur synchronisieren; der Aufrufer auditiert den Wechsel."""
+    if rechnung.status != "offen" or rechnung.art == "storno":
+        return False
+    if offener_betrag(db, rechnung) != NULL:
+        return False
+    rechnung.status = "bezahlt"
+    rechnung.bezahlt_am = rechnung.bezahlt_am or utcnow()
+    return True
 
 
 def korrigiere(
@@ -172,6 +221,7 @@ def korrigiere(
         rechnung.status = "storniert"
         rechnung.storniert_durch_id = beleg.id
     db.flush()
+    _aktualisiere_bezahlt(db, rechnung)
     audit.protokolliere(
         db,
         quelle=quelle,
@@ -210,6 +260,7 @@ def _neue_rechnung(
     *,
     quelle: str,
     zahlungsziel_tage: int | None = None,
+    dauerbuchung_id: uuid.UUID | None = None,
 ) -> Rechnung:
     heute = clock.today(db)
     ziel = (
@@ -221,6 +272,7 @@ def _neue_rechnung(
     r = Rechnung(
         nummer=naechste_nummer(db, heute.year),
         kunde_id=kunde.id,
+        dauerbuchung_id=dauerbuchung_id,
         art=art,
         datum=heute,
         leistung_von=leistung_von,
@@ -321,9 +373,8 @@ def verrechne_guthaben(db: Session, r: Rechnung, *, quelle: str) -> Decimal:
         )
     )
     db.flush()
-    if offener_betrag(db, r) == NULL:
-        vorher = audit.als_dict(r)
-        r.status, r.bezahlt_am = "bezahlt", utcnow()
+    vorher = audit.als_dict(r)
+    if _aktualisiere_bezahlt(db, r):
         db.flush()
         audit.protokolliere(
             db,
@@ -336,14 +387,26 @@ def verrechne_guthaben(db: Session, r: Rechnung, *, quelle: str) -> Decimal:
     return betrag
 
 
+def saison_abrechenbar(buchung: Buchung) -> bool:
+    """Unberechnet und aktiv oder nachweisbar kostenpflichtig abgesagt."""
+    return buchung.rechnung_position_id is None and (
+        buchung.aktiv
+        or (
+            buchung.status == Buchung.STORNIERT
+            and buchung.storno is not None
+            and not buchung.storno.kostenfrei
+        )
+    )
+
+
 def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "admin") -> Rechnung:
-    """Vorausrechnung über die aktiven unberechneten Termine einer Dauerbuchung
+    """Vorausrechnung über die abrechenbaren unberechneten Termine einer Dauerbuchung
     (A-RECH-3): Leistungszeitraum erster bis letzter Termin, Zahlungsziel
     `saison_zahlungsziel_tage`. Ist es eingestellt, wird Guthaben sofort verrechnet (A-ZAHL-4).
     Neuausstellung nach Vollstorno erfolgt ausdrücklich, nie automatisch.
     Kommen später Termine hinzu, ist das eine neue Dauerbuchung mit eigener Saisonrechnung."""
     # Kundensperre vor Dauerbuchung und Nummernkreis; danach keine alten ORM-Marker nutzen.
-    db.execute(select(Kunde).where(Kunde.id == dauer.kunde_id).with_for_update())
+    kunden.sperre_mehrere(db, [dauer.kunde_id])
     db.execute(
         select(Dauerbuchung)
         .where(Dauerbuchung.id == dauer.id)
@@ -364,33 +427,32 @@ def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "a
     termine = db.scalars(
         select(Buchung)
         .where(Buchung.dauerbuchung_id == dauer.id)
+        .options(selectinload(Buchung.storno))
         .order_by(Buchung.beginn)
         .execution_options(populate_existing=True)
     ).all()
-    termine = [b for b in termine if b.aktiv and b.rechnung_position_id is None]
+    termine = [b for b in termine if saison_abrechenbar(b)]
     if not termine:
         raise RechnungsFehler("keine_termine")
     r = _neue_rechnung(
         db,
         dauer.kunde,
         "saison",
-        [Posten(b, _positionstext(b), b.preis, b.ust_satz) for b in termine],
+        [
+            Posten(
+                b,
+                _positionstext(b, " (kostenpflichtig storniert)" if not b.aktiv else ""),
+                b.preis,
+                b.ust_satz,
+            )
+            for b in termine
+        ],
         lokales_datum(termine[0].beginn),
         lokales_datum(termine[-1].beginn),
         "offen",
         quelle=quelle,
         zahlungsziel_tage=konfiguration.hole(db, "saison_zahlungsziel_tage"),
-    )
-    vorher = audit.als_dict(r)
-    r.dauerbuchung_id = dauer.id
-    db.flush()
-    audit.protokolliere(
-        db,
-        quelle=quelle,
-        objekt_typ="rechnung",
-        objekt_id=r.id,
-        vorher=vorher,
-        nachher=audit.als_dict(r),
+        dauerbuchung_id=dauer.id,
     )
     if konfiguration.hole(db, "guthaben_auf_saisonrechnung"):
         verrechne_guthaben(db, r, quelle=quelle)
@@ -422,16 +484,22 @@ def storniere(
     db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID | None, grund: str
 ) -> Rechnung:
     """Voll-Storno zur Korrektur mit Neuausstellung (A-RECH-4): korrigiert alle noch nicht
-    korrigierten Positionen und gibt die Buchungen zur Neuberechnung frei. Schreibt kein Guthaben
-    gut (Abweichung B-8)."""
+    korrigierten Positionen und gibt die Buchungen zur Neuberechnung frei. Der verbleibende
+    bezahlte Anteil wird mit Korrekturbeleg als Guthaben zurückgegeben."""
     sperre(db, rechnung)
     if rechnung.status == "storniert" or rechnung.art == "storno":
         raise RechnungsFehler("nicht_stornierbar")
     offen = [p for p in rechnung.positionen if p.korrigiert_durch_id is None]
     if not offen:
         raise RechnungsFehler("nicht_stornierbar")
-    beleg = korrigiere(db, offen, grund=grund, quelle="admin", admin_user_id=admin_user_id)
-    for p in rechnung.positionen:
+    from beachhub_core.services import storno
+
+    beleg = storno.gutschreiben_positionen(
+        db, offen, grund=grund, quelle="admin", admin_user_id=admin_user_id
+    )
+    # Nur die vor diesem Vollstorno unberichtigten Positionen werden freigegeben.
+    # Frühere Teilkorrekturen bleiben am aktiven Termin als Abrechnungsausschluss erhalten.
+    for p in offen:
         if p.buchung_id:
             b = db.get(Buchung, p.buchung_id)
             if b is not None and b.rechnung_position_id == p.id:

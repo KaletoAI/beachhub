@@ -89,7 +89,11 @@ Mitgliedschaft, Rechnungskunden), Portal-Kern und Hallendienst implementiert.
 Stufe 1a-II ist ebenfalls implementiert: atomare Saisonrechnung mit Guthabenverrechnung,
 freie Abo-Absagen, Korrekturbelege/Teil-Storno, Guthabenliste und manuell abgehakte Auszahlungen.
 Bestandsabos werden nicht automatisch abgerechnet; die ausdrückliche Aktion „Saisonrechnung
-erstellen“ berechnet aktive unberechnete Termine und erlaubt Neuausstellung nach Vollstorno.
+erstellen“ berechnet aktive oder kostenpflichtig abgesagte unberechnete Termine und erlaubt
+Neuausstellung nach Vollstorno. Kostenfreie Absagen und bereits korrigierte Termine bleiben
+ausgeschlossen. Vollstorno gibt nur den verbleibenden bezahlten Anteil als Guthaben zurück;
+vorherige Teilgutschriften bleiben erhalten. Freie Kundenabsagen verbrauchen Kontingent nur
+bei tatsächlicher Positionskorrektur; unberechnete kostenfreie Absagen bleiben kostenfrei.
 Die Portalbestätigung zeigt das freie Absagekontingent und bedingte finanzielle Hinweise;
 eine ausführlichere Abo-Übersicht bleibt für Stufe 2 offen. Die jährliche Guthabenerinnerung
 läuft um 07:05 Europe/Berlin; SMTP-Fehler nach Marker-Commit werden nicht automatisch wiederholt.
