@@ -315,3 +315,49 @@ def test_liste_zeigt_offenen_betrag(eingeloggt: TestClient, db: Session, welt) -
     )
     seite = c.get("/admin/rechnungen?status=offen")
     assert "60,00 €" in seite.text and "30,00 €" in seite.text
+
+
+@pytest.mark.parametrize("rolle", ["kauf", "einloesung", "geldanteil"])
+@pytest.mark.parametrize("aktion", ["storno", "teilstorno", "bezahlt"])
+def test_gutscheinrechnung_direkte_posts_blockiert(eingeloggt, db, gwelt, rolle, aktion):
+    from beachhub_core.models import GuthabenBuchung
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    r = db.get(Rechnung, g.rechnung_id)
+    r.gutschein_rolle = rolle
+    r.status = "offen"
+    db.commit()
+    seite = eingeloggt.get(f"/admin/rechnungen/{r.id}")
+    assert "Gutschein" in seite.text
+    for pfad in ("storno", "teilstorno", "bezahlt"):
+        assert f'action="/admin/rechnungen/{r.id}/{pfad}"' not in seite.text
+    response = eingeloggt.post(
+        f"/admin/rechnungen/{r.id}/{aktion}",
+        data={
+            "csrf_token": eingeloggt.csrf,
+            "grund": "Umgehung",
+            "positionen": str(r.positionen[0].id),
+            "gutschein_umgehen": "1",
+        },
+    )
+    assert (
+        response.status_code == 200
+        and "Gutschein" in response.text
+        and 'class="flash fehler"' in response.text
+    )
+    db.refresh(r)
+    assert r.status == "offen" and db.query(Rechnung).count() == 1
+    assert db.query(GuthabenBuchung).count() == 0
+
+
+def test_historischer_gegenbeleg_ui_verweist_auf_gutschein(db, gwelt, eingeloggt):
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    r = db.get(Rechnung, g.rechnung_id)
+    gegen = rechnungen._korrigiere_positionen(db, r.positionen, grund="Alt", quelle="admin")
+    gegen.gutschein_rolle = None
+    db.commit()
+    seite = eingeloggt.get(f"/admin/rechnungen/{gegen.id}")
+    assert "Gutscheinbeleg" in seite.text and "Gutscheinrückgabe" in seite.text

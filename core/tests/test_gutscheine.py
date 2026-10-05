@@ -387,3 +387,245 @@ def test_verwaltung_unveraendert_kein_zusaetzliches_audit(db: Session) -> None:
     gutscheine.sperre(db, g)
     gutscheine.sperre(db, g)
     assert db.query(Audit).filter_by(objekt_typ="gutschein", objekt_id=g.id).count() == 2
+
+
+@pytest.mark.parametrize("modell", ["einheit", "wert"])
+@pytest.mark.parametrize("steuer", ["beim_kauf", "bei_einloesung"])
+def test_ungenutzter_kauf_rueckgabe_exakte_basis_ohne_wallet(db, gwelt, modell, steuer):
+    from beachhub_core.models import Audit, GuthabenBuchung, Rechnung
+    from beachhub_core.services import gutscheine
+    from hilfen_gutschein import kaufgutschein
+
+    werte = dict(modell=modell, steuer=steuer, inhaber_kunde_id=gwelt.nichtmitglied.id)
+    if modell == "wert":
+        werte.update(minuten=None, nennwert_brutto=Decimal("26"), restwert=Decimal("26"))
+    g = kaufgutschein(db, gwelt, **werte)
+    r = db.get(Rechnung, g.rechnung_id)
+    basis = (r.brutto, r.netto, r.ust)
+    db.commit()
+    ergebnis = gutscheine.gib_zurueck(db, g, grund="  Geschenk zurück  ", admin_user_id=None)
+    db.commit()
+    assert ergebnis.manuell_zu_erstatten == Decimal("26.00")
+    gegen = ergebnis.korrekturbeleg
+    assert gegen is not None and gegen.kunde_id == gwelt.mitglied.id
+    assert (gegen.brutto, gegen.netto, gegen.ust) == tuple(-b for b in basis)
+    assert gegen.gutschein_rolle == "kauf"
+    if steuer == "bei_einloesung":
+        from beachhub_core.services import rechnung_pdf
+
+        html = rechnung_pdf.html(gegen)
+        assert "Mehrzweckgutschein" in html
+        assert "USt-IdNr." not in html and "Nettobetrag" not in html and "zzgl." not in html
+    assert r.status == "storniert" and g.status == "gesperrt"
+    assert g.zurueckgegeben_am is not None
+    assert (g.rueckgabe_betrag, g.rueckgabe_grund) == (Decimal("26"), "Geschenk zurück")
+    assert (gwelt.mitglied.guthaben, gwelt.nichtmitglied.guthaben) == (Decimal("0"), Decimal("0"))
+    assert db.query(GuthabenBuchung).count() == 0
+    audits = db.query(Audit).filter_by(objekt_typ="gutschein", objekt_id=g.id).all()
+    assert len(audits) == 1
+    assert audits[0].nachher_json["kaeufer_kunde_id"] == str(gwelt.mitglied.id)
+    erneut = gutscheine.gib_zurueck(db, g, grund="Nochmal", admin_user_id=None)
+    db.commit()
+    assert erneut.manuell_zu_erstatten == Decimal("0") and erneut.korrekturbeleg is None
+    assert db.query(Rechnung).count() == 2
+    assert db.query(Audit).filter_by(objekt_typ="gutschein", objekt_id=g.id).count() == 1
+    with pytest.raises(ValueError, match="zurückgegeben"):
+        gutscheine.setze_gueltigkeit(db, g, date(2035, 1, 1), reaktivieren=True)
+
+
+@pytest.mark.parametrize("status", ["reserviert", "bestaetigt"])
+def test_rueckgabe_verbietet_aktuelle_nutzung(db, gwelt, status):
+    from beachhub_core.models import Rechnung
+    from beachhub_core.services import gutscheine
+    from hilfen_gutschein import einloesung, kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    einloesung(db, gwelt, g, status=status)
+    db.commit()
+    with pytest.raises(ValueError, match="ungenutzt"):
+        gutscheine.gib_zurueck(db, g, grund="Test", admin_user_id=None)
+    assert g.zurueckgegeben_am is None and db.query(Rechnung).count() == 1
+
+
+def test_rueckgabe_verbietet_restverbrauch_auch_nach_wertstorno(db, gwelt):
+    from beachhub_core.services import gutscheine
+    from hilfen_gutschein import einloesung, kaufgutschein
+
+    g = kaufgutschein(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("20"),
+    )
+    einloesung(db, gwelt, g, status="rueckgaengig", rueckabwicklung_art="guthaben")
+    db.commit()
+    with pytest.raises(ValueError, match="ungenutzt"):
+        gutscheine.gib_zurueck(db, g, grund="Test", admin_user_id=None)
+    assert g.zurueckgegeben_am is None
+
+
+@pytest.mark.parametrize("steuer", ["beim_kauf", "bei_einloesung"])
+def test_einheit_nach_echtem_storno_wieder_ungenutzt_zurueckgeben(db, gwelt, steuer):
+    from beachhub_core.models import Buchung, GuthabenBuchung, Rechnung
+    from beachhub_core.services import gutscheine, storno
+    from test_gutschein_einloesung import buchen, code
+
+    g = code(db, gwelt, steuer=steuer)
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], stunden=2)
+    assert erg.antwort.status == "bestaetigt"
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    storno.storniere(db, b, durch="kunde", admin_user_id=None)
+    db.commit()
+    ergebnis = gutscheine.gib_zurueck(db, g, grund="Rückgabe", admin_user_id=None)
+    db.commit()
+    assert ergebnis.manuell_zu_erstatten == Decimal("26")
+    assert db.query(GuthabenBuchung).count() == 0
+    assert db.query(Rechnung).count() == (4 if steuer == "bei_einloesung" else 2)
+
+
+@pytest.mark.parametrize(
+    "aenderungen",
+    [
+        {"status": "offen", "gueltig_bis": None, "kaufdatum": None},
+        {"status": "abgebrochen", "gueltig_bis": None, "kaufdatum": None},
+    ],
+)
+def test_unabgeschlossener_kauf_keine_rueckgabe(db, gwelt, aenderungen):
+    from beachhub_core.services import gutscheine
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt, **aenderungen)
+    db.commit()
+    with pytest.raises(ValueError, match="Kauf"):
+        gutscheine.gib_zurueck(db, g, grund="Test", admin_user_id=None)
+
+
+@pytest.mark.parametrize("grund", ["", "   ", "a" * 1001])
+def test_rueckgabe_braucht_grund(db, gwelt, grund):
+    from beachhub_core.services import gutscheine
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    db.commit()
+    with pytest.raises(ValueError, match="Grund"):
+        gutscheine.gib_zurueck(db, g, grund=grund, admin_user_id=None)
+
+
+def test_schon_korrigierte_kaufbasis_nicht_nochmal_erstatten(db, gwelt):
+    from beachhub_core.models import Rechnung
+    from beachhub_core.services import gutscheine, rechnungen
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    r = db.get(Rechnung, g.rechnung_id)
+    rechnungen._korrigiere_positionen(db, r.positionen, grund="Altkorrektur", quelle="admin")
+    db.commit()
+    ergebnis = gutscheine.gib_zurueck(db, g, grund="Sperren", admin_user_id=None)
+    db.commit()
+    assert ergebnis.korrekturbeleg is None and ergebnis.manuell_zu_erstatten == 0
+    assert g.zurueckgegeben_am is not None and db.query(Rechnung).count() == 2
+
+
+@pytest.mark.parametrize("rolle", ["kauf", "einloesung", "geldanteil"])
+@pytest.mark.parametrize("aktion", ["storno", "teilstorno", "korrigiere", "bezahlt"])
+def test_allgemeine_finanzdienste_blockieren_gutscheinrollen(db, gwelt, rolle, aktion):
+    from beachhub_core.models import Rechnung
+    from beachhub_core.services import rechnungen, storno
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    r = db.get(Rechnung, g.rechnung_id)
+    r.gutschein_rolle = rolle
+    r.status = "offen"
+    db.commit()
+    with pytest.raises(rechnungen.RechnungsFehler, match="gutschein_fachvorgang"):
+        if aktion == "storno":
+            rechnungen.storniere(db, r, grund="Umgehung", admin_user_id=None)
+        elif aktion == "teilstorno":
+            storno.gutschreiben_positionen(db, r.positionen, grund="Umgehung", quelle="admin")
+        elif aktion == "korrigiere":
+            rechnungen.korrigiere(db, r.positionen, grund="Umgehung", quelle="admin")
+        else:
+            rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    assert r.status == "offen" and db.query(Rechnung).count() == 1
+
+
+def test_freicode_nicht_rueckzahlbar(db):
+    from beachhub_core.services import gutscheine
+
+    g = gutscheine.stelle_freicodes_aus(db, anzahl=1, gueltig_bis=None, admin_user_id=None)[0]
+    db.commit()
+    with pytest.raises(ValueError, match="Kauf"):
+        gutscheine.gib_zurueck(db, g, grund="Test", admin_user_id=None)
+
+
+def test_freicodes_integerobergrenze(db):
+    from beachhub_core.services import gutscheine
+
+    with pytest.raises(ValueError, match="2147483647"):
+        gutscheine.stelle_freicodes_aus(
+            db, anzahl=1, gueltig_bis=None, max_einloesungen=2147483648, admin_user_id=None
+        )
+    g = gutscheine.stelle_freicodes_aus(
+        db, anzahl=1, gueltig_bis=None, max_einloesungen=2147483647, admin_user_id=None
+    )[0]
+    normal = gutscheine.stelle_freicodes_aus(db, anzahl=1, gueltig_bis=None, admin_user_id=None)[0]
+    db.commit()
+    assert g.max_einloesungen == 2147483647 and normal.max_einloesungen == 1
+
+
+@pytest.mark.parametrize("aktion", ["storno", "teilstorno", "bezahlt"])
+def test_historischer_gutschein_gegenbeleg_ohne_rolle_bleibt_geschuetzt(db, gwelt, aktion):
+    from beachhub_core.models import Rechnung
+    from beachhub_core.services import rechnungen, storno
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    r = db.get(Rechnung, g.rechnung_id)
+    gegen = rechnungen._korrigiere_positionen(db, r.positionen, grund="Alt", quelle="admin")
+    gegen.gutschein_rolle = None
+    db.commit()
+    with pytest.raises(rechnungen.RechnungsFehler, match="gutschein_fachvorgang"):
+        if aktion == "storno":
+            rechnungen.storniere(db, gegen, grund="Umgehung", admin_user_id=None)
+        elif aktion == "teilstorno":
+            storno.gutschreiben_positionen(db, gegen.positionen, grund="Umgehung", quelle="admin")
+        else:
+            rechnungen.setze_bezahlt(db, gegen, admin_user_id=None)
+
+
+@pytest.mark.parametrize("basis", ["teilkorrektur", "abweichender_kaufpreis"])
+def test_rueckgabe_unvollstaendige_kaufbasis_keine_teilwirkung(db, gwelt, basis):
+    from beachhub_core.models import Audit, GuthabenBuchung, Rechnung
+    from beachhub_core.services import gutscheine, rechnungen
+    from hilfen_gutschein import D, kaufgutschein
+
+    g = kaufgutschein(db, gwelt)
+    r = db.get(Rechnung, g.rechnung_id)
+    if basis == "teilkorrektur":
+        rechnungen._neue_rechnung(
+            db,
+            gwelt.mitglied,
+            "storno",
+            [rechnungen.Posten(None, "Teilkorrektur", Decimal("-10"), Decimal("7"))],
+            D,
+            D,
+            "bezahlt",
+            quelle="admin",
+            korrigiert_rechnung_id=r.id,
+            gutschein_rolle="kauf",
+        )
+    else:
+        g.kaufpreis_brutto = Decimal("27")
+    db.commit()
+    anzahl = db.query(Rechnung).count()
+    with pytest.raises(ValueError, match="Kaufbasis"):
+        gutscheine.gib_zurueck(db, g, grund="Test", admin_user_id=None)
+    db.rollback()
+    assert g.zurueckgegeben_am is None and r.status == "bezahlt"
+    assert db.query(Rechnung).count() == anzahl
+    assert db.query(GuthabenBuchung).count() == 0
+    assert db.query(Audit).filter_by(objekt_typ="gutschein", objekt_id=g.id).count() == 0

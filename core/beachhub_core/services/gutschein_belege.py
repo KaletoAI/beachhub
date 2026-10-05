@@ -188,3 +188,33 @@ def korrigiere_wertanteil(
         admin_user_id=admin_user_id,
     )
     return beleg
+
+
+def korrigiere_kauf_rueckgabe(
+    db: Session,
+    g: Gutschein,
+    rechnung: Rechnung,
+    *,
+    grund: str,
+    admin_user_id: uuid.UUID | None,
+) -> Rechnung | None:
+    """Private Belegbasis nach vollständiger Rückgabevorbereitung, ohne Guthaben.
+
+    Mehrzweck-Kaufbasis ist steuerfrei; beim Kauf versteuerte Basis wird exakt
+    negiert. Historisch bereits vollständig korrigierte Käufe erzeugen keinen
+    weiteren Gegenbeleg und keine weitere manuelle Erstattungsanweisung.
+    """
+    rechnungen.sperre(db, rechnung)
+    korrektur = -rechnungen.korrektursumme(db, rechnung)
+    if korrektur == rechnung.brutto and rechnung.status == "storniert":
+        return None
+    if (
+        korrektur != NULL
+        or any(p.korrigiert_durch_id is not None for p in rechnung.positionen)
+        or rechnung.status == "storniert"
+        or rechnung.brutto != g.kaufpreis_brutto
+    ):
+        raise ValueError("Die Kaufbasis ist bereits korrigiert oder unvollständig")
+    return rechnungen._korrigiere_positionen(
+        db, rechnung.positionen, grund=grund, quelle="admin", admin_user_id=admin_user_id
+    )

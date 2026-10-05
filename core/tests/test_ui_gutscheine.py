@@ -118,3 +118,76 @@ def test_rueckgabe_ui_verhindert_reaktivierung(eingeloggt: TestClient, db: Sessi
     assert "zurückgegeben" in r.text
     db.refresh(g)
     assert g.status == "gesperrt" and g.gueltig_bis != date(2035, 12, 31)
+
+
+def test_freicodes_integerueberlauf_deutscher_formfehler(eingeloggt, db):
+    r = eingeloggt.post(
+        "/admin/gutscheine/freicodes",
+        data={"csrf_token": eingeloggt.csrf, "anzahl": "1", "max_einloesungen": "2147483648"},
+    )
+    assert r.status_code == 200 and "2147483647" in r.text and 'class="flash fehler"' in r.text
+    assert db.query(Gutschein).count() == 0
+
+
+def test_rueckgabe_ui_manuelle_zahlung_originalkaeufer_repeat(eingeloggt, db, gwelt):
+    from beachhub_core.models import GuthabenBuchung, Rechnung
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt, code="ABCDEFGHJKLMN", inhaber_kunde_id=gwelt.nichtmitglied.id)
+    db.commit()
+    c = eingeloggt
+    assert (
+        "Zurückgeben – Betrag anschließend manuell erstatten"
+        in c.get(f"/admin/gutscheine/{g.id}").text
+    )
+    assert c.post(f"/admin/gutscheine/{g.id}/rueckgabe", data={"grund": "Test"}).status_code == 403
+    r = c.post(
+        f"/admin/gutscheine/{g.id}/rueckgabe", data={"csrf_token": c.csrf, "grund": "Geschenk"}
+    )
+    assert (
+        r.status_code == 200
+        and "26,00 €" in r.text
+        and "Mitglied" in r.text
+        and "manuell" in r.text
+    )
+    assert "Zurückgeben – Betrag anschließend manuell erstatten" not in r.text
+    r = c.post(
+        f"/admin/gutscheine/{g.id}/rueckgabe", data={"csrf_token": c.csrf, "grund": "Doppelt"}
+    )
+    assert "bereits zurückgegeben" in r.text
+    assert db.query(Rechnung).count() == 2 and db.query(GuthabenBuchung).count() == 0
+
+
+def test_rueckgabe_lesend_und_anonym_verboten(eingeloggt, db, gwelt, admin):
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt, code="ABCDEFGHJKLMN")
+    user, _ = admin
+    user.rolle = "lesend"
+    db.commit()
+    assert (
+        eingeloggt.post(
+            f"/admin/gutscheine/{g.id}/rueckgabe",
+            data={"csrf_token": eingeloggt.csrf, "grund": "Test"},
+        ).status_code
+        == 403
+    )
+    assert 'action="/admin/gutscheine/' not in eingeloggt.get(f"/admin/gutscheine/{g.id}").text
+    eingeloggt.cookies.clear()
+    assert eingeloggt.post(
+        f"/admin/gutscheine/{g.id}/rueckgabe", data={"grund": "Test"}, follow_redirects=False
+    ).status_code in (303, 403)
+
+
+@pytest.mark.parametrize("grund", ["", "a" * 1001])
+def test_rueckgabe_ui_fachfehler_rollt_zurueck(eingeloggt, db, gwelt, grund):
+    from hilfen_gutschein import kaufgutschein
+
+    g = kaufgutschein(db, gwelt, code="ABCDEFGHJKLMN")
+    db.commit()
+    r = eingeloggt.post(
+        f"/admin/gutscheine/{g.id}/rueckgabe", data={"csrf_token": eingeloggt.csrf, "grund": grund}
+    )
+    assert r.status_code == 200 and 'class="flash fehler"' in r.text
+    db.refresh(g)
+    assert g.zurueckgegeben_am is None

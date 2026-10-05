@@ -157,7 +157,33 @@ Der Betreiber hat sich am 23.09.2026 für einen Gutschein entschieden, der eine 
 - **A-GUT-8** Der Kauf setzt ein Portalkonto voraus (Betreiber 23.09.2026). Einstellung `gutschein_gastkauf` (Vorgabe nein) ist für einen späteren Kauf ohne Anmeldung vorgesehen, aber nicht Teil von Stufe 2.
   Der Kauf über `gutschein_kaufen` ist im Hauptsystem-Kanal implementiert. Der Wunsch speichert Käufergruppe/Steuersatz, Preis, Modell, Minuten/Wert, Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsdeadline; spätere Änderungen verschieben sie nicht. Guthaben wird beim Kauf nicht verrechnet. Das tatsächliche Abschlussdatum startet die Gültigkeit; `ausgestellt_am` bleibt Zeitpunkt des Wunsches. Verifizierter Anbieter, passende Providerzuordnung und bezahlter Providerstatus mit endlichem positivem Betrag sind Voraussetzung. Auf `now >= kauf_reserviert_bis` gilt der Kauf bereits als abgelaufen, auch ohne den eigenständigen minütlichen Kaufabbruchjob. Unterzahlung beendet den Kauf terminal als `abgebrochen` und schreibt den tatsächlichen Eingang einmal als Käuferguthaben gut; Überzahlung aktiviert genau einen Gutschein und schreibt nur den Überschuss einmal gut. Zahlungen nach Abbruch/Fristablauf erzeugen einmal Käuferguthaben und einen Betreiberhinweis, keine Aktivierung. Doppelte Rückmeldungen erzeugen keinen zusätzlichen Beleg oder Guthabeneintrag. Kunden, Zahlungen und Kaufgutscheine werden vollständig vor weiteren Schreibsperren vorbereitet und frisch revalidiert. Offene und abgebrochene Codes bleiben in Antworten, Oberfläche, CSV, Code-Mails und Audit-Snapshots geheim. Beleg-PDF und Käufer-/Geschenk-Code-Mails laufen nach Commit; das Käufer-PDF geht ausschließlich an den Käufer. Der Mehrzweckkaufbeleg im GB-Kreis zeigt keine Umsatzsteuer und nennt den Steuerzeitpunkt. Käufergruppe und Einlösbarkeit werden getrennt genannt; bei Mehrzweckgutscheinen bleibt die Käufergruppe informativ. PDF-/Versandfehler isolieren den betroffenen Nachlauf, begründen jedoch keine automatische erneute SMTP-Zustellung. Signierter Gutscheinbestand und Verkaufsoberfläche folgen in späteren Tasks.
   Der Kaufhandler übergibt die vertrauenswürdige Konto-ID an den Kaufdienst. Nach dem Erwerb der Kundensperre wird diese mit der frisch geladenen Portalbindung exakt verglichen. Eine während des Wartens geänderte Bindung lehnt den Kauf des alten Kontos vor Wunsch-, Zahlungs- oder Provider-Sitzungsanlage ab; die behauptete Portal-Kunden-ID begründet keine Berechtigung.
-- **A-GUT-9** **Rückgabe.** Zahlt der Betreiber einen gekauften Gutschein zurück (etwa nach Widerruf), sperrt er ihn im Admin-UI; bei `beim_kauf` entsteht dabei eine Stornorechnung zur Kaufrechnung. Das Geld überweist der Betreiber selbst (A-ZAHL-6).
+- **A-GUT-9** **Rückgabe.** Die implementierte Adminaktion gibt vollständig ungenutzte Kaufgutscheine zurück und sperrt sie dauerhaft. Sie erzeugt den exakten Kaufgegenbeleg (`beim_kauf`) bzw. storniert den steuerfreien Mehrzweckkaufbeleg (`bei_einloesung`). Der Betreiber erstattet den Betrag manuell ausschließlich an den ursprünglichen Käufer (A-ZAHL-6); es entsteht kein Kundenguthaben. Die Rückgabe ist mit Grund und Betrag auditiert, wiederholte Aufrufe erzeugen keine weitere Zahlung oder Belegkorrektur. Details des gemeinsamen Finanz- und Sperrvertrags folgen unten.
+
+**Umsetzungsvertrag zur manuellen Gutscheinrückgabe (Stufe 1a-III, 06.10.2026)**
+
+Die Adminaktion gibt ausschließlich abgeschlossene, vollständig ungenutzte Kaufgutscheine
+zurück: keine reservierte oder bestätigte Einlösung, bei Wertgutscheinen voller ursprünglicher
+Restwert und keine frühere Wertgutschrift. Rückgenommene Einheiten und abgebrochene
+Reservierungen dürfen erneut ungenutzt sein. Unter dem vollständigen Sperrkontext
+(Kunden UUID-sortiert → vorhandene Zahlungen → Gutscheine → Rechnungen/Nummernkreis)
+werden alle Zuordnungen frisch revalidiert. Eine Erweiterung bewirkt vollständigen Rollback
+und Neupräparation; spätestens nach drei Versuchen wird ohne Teilwirkung abgebrochen.
+
+Der Kaufgegenbeleg negiert exakt die ursprüngliche Brutto-/Netto-/USt-Basis; beim Mehrzweckkauf
+bleibt der Kaufgegenbeleg ohne Umsatzsteuerausweis. Der Erstattungsbetrag gehört ausschließlich
+dem ursprünglichen Käufer und wird mit Grund, Käuferbezug und dauerhafter Rückgabemarkierung
+auditiert. Die Verwaltung nennt die manuell auszuführende Zahlung. Kein Banktransfer und
+kein Kundenguthaben. Wiederholung liefert null Euro und keinen weiteren Beleg oder Audit.
+Bereits vollständig korrigierte Kaufbasis wird nicht erneut erstattet, Teilkorrekturen verhindern
+Rückgabe. Der dauerhafte Marker verhindert jede spätere Reaktivierung und Einlösung.
+
+Allgemeine Rechnungsdienste verweigern Vollstorno, Teilstorno und Bezahltsetzen für Kauf-,
+Einlösungs- und Geldanteilbelege sowie deren Gegenbelege. Historische Gegenbelege ohne eigene
+Rolle werden über die Herkunft erkannt. Der koordinierte Fachvorgang nutzt ausschließlich
+private gemeinsame Korrekturhilfen nach vollständiger Gutscheinvorbereitung; keine
+HTTP-Nutzlast kann den Guard umgehen. Normale Rechnungen behalten ihre bestehenden Aktionen.
+Freischaltcodes erlauben höchstens 2147483647 Einlösungen; Service und Formular weisen
+größere Werte verständlich zurück, bevor eine Datenbankmutation erfolgt.
 
 ### 3.10 Hallensteuerung
 

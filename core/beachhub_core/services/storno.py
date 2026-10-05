@@ -46,6 +46,11 @@ def gutschreiben_positionen(
     gut. Ohne
     Korrekturbeleg bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG).
     Bei offener Rechnung sinkt zuerst die Forderung (A-RECH-7, Abweichung B-3)."""
+    for position in positionen:
+        rechnungen.pruefe_allgemeinen_rechnungsvorgang(position.rechnung, "teilstorno")
+    if positionen:
+        rechnungen.sperre(db, positionen[0].rechnung)
+        rechnungen.pruefe_allgemeinen_rechnungsvorgang(positionen[0].rechnung, "teilstorno")
     return _gutschreiben_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )

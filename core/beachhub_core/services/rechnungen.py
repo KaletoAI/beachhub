@@ -201,6 +201,19 @@ def _aktualisiere_bezahlt(db: Session, rechnung: Rechnung) -> bool:
     return True
 
 
+def pruefe_allgemeinen_rechnungsvorgang(rechnung: Rechnung, vorgang: str) -> None:
+    """Gutscheinbelege einschließlich Gegenbelegen benötigen den Fachvorgang."""
+    ursprung = rechnung
+    gesehen = set()
+    while ursprung.id not in gesehen:
+        gesehen.add(ursprung.id)
+        if ursprung.gutschein_rolle is not None:
+            raise RechnungsFehler("gutschein_fachvorgang")
+        if ursprung.korrigiert is None:
+            break
+        ursprung = ursprung.korrigiert
+
+
 def korrigiere(
     db: Session,
     positionen: Sequence[RechnungPosition],
@@ -213,6 +226,11 @@ def korrigiere(
     ursprüngliche Rechnung bleibt unverändert (A-RECH-4); sind danach alle ihre Positionen
     korrigiert, gilt sie als storniert (Abweichung B-4). Guthaben entsteht hier nicht – das
     entscheidet `storno.gutschreiben_positionen`."""
+    for position in positionen:
+        pruefe_allgemeinen_rechnungsvorgang(position.rechnung, "teilstorno")
+    if positionen:
+        sperre(db, positionen[0].rechnung)
+        pruefe_allgemeinen_rechnungsvorgang(positionen[0].rechnung, "teilstorno")
     return _korrigiere_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )
@@ -269,6 +287,7 @@ def _korrigiere_positionen(
         "bezahlt",
         quelle=quelle,
         korrigiert_rechnung_id=rechnung.id,
+        gutschein_rolle=rechnung.gutschein_rolle,
         admin_user_id=admin_user_id,
     )
     for p, gegen in zip(positionen, beleg.positionen, strict=True):
@@ -535,7 +554,9 @@ def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "a
 
 
 def setze_bezahlt(db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID | None) -> None:
+    pruefe_allgemeinen_rechnungsvorgang(rechnung, "bezahlt")
     sperre(db, rechnung)
+    pruefe_allgemeinen_rechnungsvorgang(rechnung, "bezahlt")
     if rechnung.status != "offen":
         raise RechnungsFehler("nicht_offen")
     vorher = audit.als_dict(rechnung)
@@ -561,7 +582,9 @@ def storniere(
     """Voll-Storno zur Korrektur mit Neuausstellung (A-RECH-4): korrigiert alle noch nicht
     korrigierten Positionen und gibt die Buchungen zur Neuberechnung frei. Der verbleibende
     bezahlte Anteil wird mit Korrekturbeleg als Guthaben zurückgegeben."""
+    pruefe_allgemeinen_rechnungsvorgang(rechnung, "storno")
     sperre(db, rechnung)
+    pruefe_allgemeinen_rechnungsvorgang(rechnung, "storno")
     if rechnung.status == "storniert" or rechnung.art == "storno":
         raise RechnungsFehler("nicht_stornierbar")
     offen = [p for p in rechnung.positionen if p.korrigiert_durch_id is None]

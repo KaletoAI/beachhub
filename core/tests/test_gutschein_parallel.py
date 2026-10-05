@@ -646,3 +646,159 @@ def test_codeverfall_und_bestaetigter_wertstorno_echte_sessions(db, gwelt, verfa
     assert g.status == "verfallen" and g.restwert == Decimal("20")
     assert gwelt.nichtmitglied.guthaben == Decimal("30") and gwelt.mitglied.guthaben == Decimal("0")
     assert len(db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all()) == 1
+
+
+@pytest.mark.parametrize("zuerst", ["rueckgabe", "bestaetigt", "reserviert"])
+def test_rueckgabe_gegen_echte_einloesung_nur_ein_finanzpfad(db, gwelt, zuerst):
+    from decimal import Decimal
+
+    from beachhub_core.models import GuthabenBuchung, GutscheinEinloesung, Kunde, Rechnung
+    from beachhub_core.services import gutscheine
+    from test_gutschein_einloesung import buchen, code
+
+    rueckgabe = gutscheine.gib_zurueck
+    g = code(db, gwelt, steuer="bei_einloesung", nur_mitglieder=False)
+    db.commit()
+    gid, rawcode, kid = g.id, g.code, gwelt.nichtmitglied.id
+    db.commit()
+
+    def einloesen(s):
+        return buchen(
+            s, gwelt, [rawcode], kunde=s.get(Kunde, kid), stunden=3 if zuerst == "reserviert" else 2
+        ).antwort.status
+
+    def zurueck(s):
+        try:
+            return rueckgabe(
+                s, s.get(Gutschein, gid), grund="Rückgabe", admin_user_id=None
+            ).manuell_zu_erstatten
+        except ValueError as exc:
+            return str(exc)
+
+    if zuerst == "rueckgabe":
+        erster = zurueck(db)
+        assert erster == Decimal("26")
+        pid, future, thread = _starte(einloesen)
+    else:
+        erster = einloesen(db)
+        assert erster == ("reserviert" if zuerst == "reserviert" else "bestaetigt")
+        pid, future, thread = _starte(zurueck)
+    try:
+        _warte_auf_lock(pid)
+        assert not future.done()
+    finally:
+        db.commit()
+    zweiter = future.result(timeout=5)
+    thread.join(timeout=3)
+    db.expire_all()
+    g = db.get(Gutschein, gid)
+    if zuerst == "rueckgabe":
+        assert zweiter == "abgelehnt" and g.zurueckgegeben_am is not None
+        assert db.query(GutscheinEinloesung).count() == 0
+        assert db.query(Rechnung).count() == 2
+    else:
+        assert "ungenutzt" in zweiter and g.zurueckgegeben_am is None
+        assert db.query(GutscheinEinloesung).count() == 1
+        assert db.query(Rechnung).count() == (1 if zuerst == "reserviert" else 2)
+    assert db.query(GuthabenBuchung).count() == 0
+    assert db.get(Kunde, kid).guthaben == 0 and gwelt.mitglied.guthaben == 0
+
+
+def test_rueckgabe_sperrt_gesamte_kundenmenge_vor_zahlung_gutschein_beleg(db, gwelt):
+    from beachhub_core.models import Kunde
+    from beachhub_core.services import gutscheine
+    from hilfen_gutschein import einloesung
+
+    g = kaufgutschein(db, gwelt, inhaber_kunde_id=gwelt.nichtmitglied.id)
+    anderer = Kunde(name="Historischer Einlöser", email="dritter@example.org")
+    db.add(anderer)
+    db.flush()
+    einloesung(
+        db, gwelt, g, kunde_id=anderer.id, status="rueckgaengig", rueckabwicklung_art="gutschein"
+    )
+    db.commit()
+    statements = []
+
+    def beobachte(conn, cursor, statement, parameters, context, executemany):
+        statements.append((statement.lower(), parameters))
+
+    event.listen(engine, "before_cursor_execute", beobachte)
+    try:
+        gutscheine.gib_zurueck(db, g, grund="Test", admin_user_id=None)
+    finally:
+        event.remove(engine, "before_cursor_execute", beobachte)
+    locks = [(i, s, p) for i, (s, p) in enumerate(statements) if "for update" in s]
+    erster_k = next((i, s, p) for i, s, p in locks if "from kunde" in s)
+    assert "order by kunde.id" in erster_k[1]
+    assert set(erster_k[2].values()) == {gwelt.mitglied.id, gwelt.nichtmitglied.id, anderer.id}
+    zlock = next(i for i, s, p in locks if "from zahlung" in s)
+    glock = next(i for i, s, p in locks if "from gutschein" in s)
+    rlock = next(i for i, s, p in locks if "from rechnung" in s)
+    nlock = next(i for i, s, p in locks if "from nummernkreis" in s)
+    assert erster_k[0] < zlock < glock < rlock < nlock
+
+
+def test_rueckgabe_besitzwechsel_bereitet_vollstaendig_neu_vor(db, gwelt):
+    from beachhub_core.models import Kunde
+    from beachhub_core.services import gutscheine
+
+    rueckgabe = gutscheine.gib_zurueck
+    g = kaufgutschein(db, gwelt)
+    neu = Kunde(name="Neuer Inhaber", email="neu@example.org")
+    db.add(neu)
+    db.commit()
+    gid, kid = g.id, neu.id
+    db.commit()
+    gewechselt = False
+    kundenmengen = []
+
+    def wechsel(conn, cursor, statement, parameters, context, executemany):
+        nonlocal gewechselt
+        if "FROM kunde" not in statement or "FOR UPDATE" not in statement:
+            return
+        kundenmengen.append(set(parameters.values()))
+        if gewechselt:
+            return
+        gewechselt = True
+        with SessionLocal() as andere:
+            andere.get(Gutschein, gid).inhaber_kunde_id = kid
+            andere.commit()
+
+    event.listen(engine, "before_cursor_execute", wechsel)
+    try:
+        erg = rueckgabe(db, g, grund="Besitzwechsel", admin_user_id=None)
+        db.commit()
+    finally:
+        event.remove(engine, "before_cursor_execute", wechsel)
+    assert erg.manuell_zu_erstatten == 26
+    assert kid not in kundenmengen[0]
+    assert kid in kundenmengen[1]
+    assert db.get(Gutschein, gid).inhaber_kunde_id == kid
+    assert db.get(Kunde, kid).guthaben == 0 and gwelt.mitglied.guthaben == 0
+
+
+def test_zwei_echte_rueckgaben_nur_eine_manuelle_erstattung(db, gwelt):
+    from beachhub_core.models import Audit, GuthabenBuchung, Rechnung
+    from beachhub_core.services import gutscheine
+
+    g = kaufgutschein(db, gwelt)
+    db.commit()
+    gid = g.id
+    db.commit()
+    erster = gutscheine.gib_zurueck(db, g, grund="Erster", admin_user_id=None)
+    pid, future, thread = _starte(
+        lambda s: gutscheine.gib_zurueck(
+            s, s.get(Gutschein, gid), grund="Zweiter", admin_user_id=None
+        ).manuell_zu_erstatten
+    )
+    try:
+        _warte_auf_lock(pid)
+        assert not future.done()
+    finally:
+        db.commit()
+    assert erster.manuell_zu_erstatten == 26 and future.result(timeout=5) == 0
+    thread.join(timeout=3)
+    db.expire_all()
+    assert db.query(Rechnung).count() == 2 and db.query(GuthabenBuchung).count() == 0
+    assert db.query(Audit).filter_by(objekt_typ="gutschein", objekt_id=gid).count() == 1
+    assert db.get(Gutschein, gid).rueckgabe_grund == "Erster"

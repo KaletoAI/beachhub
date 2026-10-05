@@ -21,7 +21,9 @@ Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit si
 die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
 Buchungen trennen Gutschein-Einlösungsbelege vom Geld-/Guthabenrest; Mehrzweck-Einheiten
 werden mit dem Kaufpreis abgerechnet. Kaufbedingungen und Zahlungsfrist bleiben als Snapshot
-erhalten. Die vollständigen Betriebsabläufe bleiben bis zur Rückgabe und Portalintegration in Arbeit.
+erhalten. Die manuelle Rückgabe vollständig ungenutzter Kaufgutscheine mit dauerhafter Sperre
+und zentralem Schutz der allgemeinen Rechnungsaktionen ist implementiert; dabei entsteht
+kein Kundenguthaben. Signierter Bestand und Portalbedienung bleiben in Arbeit.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`

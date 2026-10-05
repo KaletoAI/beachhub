@@ -211,3 +211,39 @@ def gueltigkeit(
         RedirectResponse(f"/admin/gutscheine/{gutschein_id}", status_code=303),
         "Gültigkeit gespeichert",
     )
+
+
+@router.post("/gutscheine/{gutschein_id}/rueckgabe")
+def rueckgabe(
+    gutschein_id: uuid.UUID,
+    grund: str = Form(""),
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    g = db.get(Gutschein, gutschein_id)
+    if g is None:
+        return mit_flash(
+            RedirectResponse("/admin/gutscheine", status_code=303), "Nicht gefunden", "fehler"
+        )
+    ziel = f"/admin/gutscheine/{gutschein_id}"
+    try:
+        ergebnis = gutscheine.gib_zurueck(db, g, grund=grund, admin_user_id=admin.id)
+        kaeufer = db.get(Kunde, g.kaeufer_kunde_id)
+        assert kaeufer is not None
+        betrag = ergebnis.manuell_zu_erstatten
+        name = kaeufer.name
+        db.commit()
+    except FEHLER as e:
+        db.rollback()
+        return mit_flash(RedirectResponse(ziel, status_code=303), _fehler(e), "fehler")
+    betrag_text = f"{betrag:.2f}".replace(".", ",")
+    hinweis = (
+        f"Gutschein zurückgegeben. {betrag_text} € anschließend manuell "
+        f"an den ursprünglichen Käufer {name} erstatten."
+        if betrag > 0
+        else (
+            "Gutschein bereits zurückgegeben oder Kaufbeleg bereits korrigiert; "
+            "keine weitere Erstattung."
+        )
+    )
+    return mit_flash(RedirectResponse(ziel, status_code=303), hinweis)

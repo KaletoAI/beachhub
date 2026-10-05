@@ -315,6 +315,8 @@ Einrichtung des Hallenrechners und von Home Assistant: `docs/betrieb/hallendiens
 Unter **Gutscheine → Freischaltcodes** stellt die Admin-Rolle 1 bis 1000 Einzelcodes aus.
 Die lesende Rolle kann Übersicht, Details und CSV ansehen. Die Vorgaben sind eine Einlösung
 und 90 Tage Gültigkeit; Dauer und Standardgültigkeit kommen aus den Einstellungen.
+Das Einlösungslimit ist zwischen 1 und 2147483647 wählbar; größere Werte werden als
+Formularfehler abgewiesen.
 Freischaltcodes bleiben auch im Wertgutscheinmodell Buchungseinheiten ohne Geldwert und Steuerbeleg.
 Feld und Buchungszeitraum sind optional. Eine benannte Serie lässt sich über die Übersicht
 als CSV exportieren; der Export enthält alle Freischaltcodes der Serie, unabhängig vom Listenlimit.
@@ -325,6 +327,30 @@ steht bei gesperrten oder verfallenen Codes bereit. Verbrauch und Restwert bleib
 auch wenn der Code bereits vollständig verbraucht ist. Zurückgegebene Kaufgutscheine können
 niemals reaktiviert werden. Bei einer gleichzeitig geänderten Zuordnung wird die Aktion
 vollständig zurückgerollt und fordert zum erneuten Ausführen auf.
+
+**Ungenutzten Kaufgutschein zurückgeben:** Auf der Detailseite als Admin einen Grund angeben
+und **Zurückgeben – Betrag anschließend manuell erstatten** wählen. Reservierte oder bestätigte
+Einlösungen verhindern die Rückgabe. Bei Wertgutscheinen muss der gesamte ursprüngliche
+Nennwert unverbraucht sein; eine frühere Wertgutschrift stellt den Gutscheinrest nicht wieder her.
+Kostenfrei zurückgenommene Einheiten und abgebrochene Gutscheinreservierungen sind wieder
+ungenutzt. Das System prüft Bestand und Kaufbasis gemeinsam, erzeugt den Kaufgegenbeleg und
+sperrt den Gutschein dauerhaft. Bei Mehrzweckgutscheinen wird nur der steuerfreie Kaufbeleg
+storniert. Betrag und Grund erscheinen am Gutschein und im Änderungsprotokoll.
+
+Den angezeigten Betrag anschließend **manuell an den ursprünglichen Käufer** erstatten,
+auch wenn inzwischen jemand anderes Inhaber ist. Diese Aktion führt keinen Banktransfer aus
+und erzeugt kein Kundenguthaben. Ein erneuter Klick erzeugt keinen weiteren Gegenbeleg oder
+Erstattungsauftrag. Ein bereits vollständig korrigierter Kaufbeleg wird nicht erneut korrigiert;
+das System zeigt dann keine weitere Erstattung an. Teilweise korrigierte Kaufbasis muss zunächst
+geklärt werden. Rückgegebene Gutscheine können dauerhaft nicht reaktiviert werden.
+Bei gleichzeitig wechselnder Zuordnung wird die Rückgabe vollständig neu vorbereitet;
+anhaltende Änderungen ergeben einen Fehler ohne Teilwirkung.
+
+Allgemeine Aktionen **Als bezahlt markieren**, **Stornorechnung erzeugen** und **Teil-Storno**
+sind für Gutschein-Kauf-/Einlösungs-/Geldanteilbelege und deren Gegenbelege gesperrt.
+Die Rechnungsseite verweist auf die Gutscheinrückgabe oder den Buchungsstorno. Dort werden
+Gutscheinbestand, Geldanteil und Belege gemeinsam geprüft. Normale Rechnungen behalten die
+vorhandenen Aktionen.
 
 Das Ablaufdatum gilt einschließlich. Täglich um **00:20 Europe/Berlin** setzt der Nachtjob
 noch aktive oder teilweise eingelöste, abgelaufene Codes auf verfallen und aktualisiert die

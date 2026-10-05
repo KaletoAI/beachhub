@@ -1,23 +1,26 @@
-"""Freischaltcodes und Verwaltung ohne finanzielle Rückabwicklung."""
+"""Freischaltcodes, Verwaltung und manuelle Rückgabe ohne Walletmutation."""
 
 import csv
 import io
 import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Feld, Gutschein, GutscheinEinloesung
+from beachhub_core.models import Feld, Gutschein, GutscheinEinloesung, Rechnung
 from beachhub_core.services import (
     audit,
+    gutschein_belege,
     gutschein_codes,
     gutschein_sperren,
     konfiguration,
     lesestand,
 )
+from beachhub_core.services.gutschein_typen import GutscheinRueckgabe
 from beachhub_core.services.rechnungen import csv_sicher
 
 
@@ -72,8 +75,8 @@ def stelle_freicodes_aus(
 ) -> list[Gutschein]:
     if not 1 <= anzahl <= 1000:
         raise ValueError("Bitte zwischen 1 und 1000 Codes ausstellen")
-    if max_einloesungen < 1:
-        raise ValueError("Mindestens eine Einlösung erforderlich")
+    if not 1 <= max_einloesungen <= 2147483647:
+        raise ValueError("Bitte zwischen 1 und 2147483647 Einlösungen wählen")
     if len(serie) > 100 or len(notiz) > 1000:
         raise ValueError("Serie höchstens 100, Notiz höchstens 1000 Zeichen")
     if zeitraum_von and zeitraum_bis and zeitraum_von > zeitraum_bis:
@@ -237,3 +240,61 @@ def serie_csv(db: Session, serie: str) -> str:
             ]
         )
     return buf.getvalue()
+
+
+def gib_zurueck(
+    db: Session,
+    g: Gutschein,
+    *,
+    grund: str,
+    admin_user_id: uuid.UUID | None,
+) -> GutscheinRueckgabe:
+    """Ungenutzten Kauf dauerhaft sperren; Erstattung erfolgt außerhalb des Systems.
+
+    Beziehungserweiterungen brauchen einen vollständigen Transaktionsretry, bevor
+    irgendein Beleg oder Audit entsteht. Ein wiederholter Aufruf erstattet nichts.
+    """
+    grund = grund.strip()
+    if not grund or len(grund) > 1000:
+        raise ValueError("Bitte einen Grund mit höchstens 1000 Zeichen angeben")
+    gid = g.id
+    for versuch in range(3):
+        try:
+            g = gutschein_sperren.bereite_vorgang_vor(
+                db, kunde_ids=(), gutschein_ids=(gid,)
+            ).gutscheine[gid]
+            break
+        except gutschein_sperren.GutscheinVorbereitungWiederholen:
+            db.rollback()
+            if versuch == 2:
+                raise
+    if g.zurueckgegeben_am is not None:
+        return GutscheinRueckgabe(None, Decimal("0.00"))
+    if g.art != "kauf" or g.status in (Gutschein.OFFEN, Gutschein.ABGEBROCHEN):
+        raise ValueError("Nur ein abgeschlossener Kaufgutschein kann zurückgegeben werden")
+    genutzt = db.scalar(
+        select(GutscheinEinloesung.id)
+        .where(
+            GutscheinEinloesung.gutschein_id == gid,
+            (GutscheinEinloesung.status != GutscheinEinloesung.RUECKGAENGIG)
+            | (GutscheinEinloesung.rueckabwicklung_art == "guthaben"),
+        )
+        .limit(1)
+    )
+    if genutzt is not None or (g.modell == "wert" and g.restwert != g.nennwert_brutto):
+        raise ValueError("Nur vollständig ungenutzte Gutscheine können zurückgegeben werden")
+    r = db.get(Rechnung, g.rechnung_id) if g.rechnung_id else None
+    if r is None or r.kunde_id != g.kaeufer_kunde_id or r.gutschein_rolle != "kauf":
+        raise ValueError("Der ursprüngliche Kaufbeleg fehlt oder ist falsch zugeordnet")
+    vorher = audit.als_dict(g)
+    beleg = gutschein_belege.korrigiere_kauf_rueckgabe(
+        db, g, r, grund=grund, admin_user_id=admin_user_id
+    )
+    betrag = g.kaufpreis_brutto if beleg is not None else Decimal("0.00")
+    assert betrag is not None
+    g.status = Gutschein.GESPERRT
+    g.zurueckgegeben_am = clock.now(db)
+    g.rueckgabe_betrag, g.rueckgabe_grund = betrag, grund
+    _aenderung(db, g, vorher, admin_user_id=admin_user_id)
+    db.flush()
+    return GutscheinRueckgabe(beleg, betrag)

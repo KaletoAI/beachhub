@@ -21,6 +21,9 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 GRUND = {
+    "gutschein_fachvorgang": (
+        "Gutscheinbeleg: Bitte die Gutscheinrückgabe oder den Buchungsstorno verwenden."
+    ),
     "nicht_offen": "Rechnung ist nicht offen",
     "nicht_stornierbar": "Rechnung ist bereits storniert oder selbst eine Stornorechnung",
     "pdf_vorhanden": "Rechnungs-PDF existiert bereits",
@@ -98,9 +101,15 @@ def detail(
         return mit_flash(
             RedirectResponse("/admin/rechnungen", status_code=303), "Nicht gefunden", "fehler"
         )  # type: ignore[return-value]
+    gutscheinbeleg = False
+    try:
+        rechnungen.pruefe_allgemeinen_rechnungsvorgang(r, "anzeige")
+    except RechnungsFehler:
+        gutscheinbeleg = True
     return render(
         request,
         "rechnungen/detail.html",
+        gutscheinbeleg=gutscheinbeleg,
         admin=admin,
         r=r,
         steuer=rechnungen.steuer_je_satz(r),

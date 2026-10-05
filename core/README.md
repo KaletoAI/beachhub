@@ -146,7 +146,10 @@ reichen denselben Kontext bis zur letzten Korrektur weiter. `gutschein_belege.ko
 berechnet die Nettodifferenz aus kumulativ korrigiertem Brutto/Netto, unabhängig von der
 Stornoreihenfolge. Ursprungpositionen erhalten ihren Korrekturmarker erst bei vollständiger
 Korrektur. Gegenbelege und Einlöserhinweise werden nach Commit versandt; Käufer-PDFs gehen
-nur an den Käufer. Die öffentlichen Rechnungsaktionsguards folgen in Task 8.
+nur an den Käufer. Allgemeines Bezahltsetzen sowie Voll-/Teilstorno sind für Kauf-,
+Einlösungs- und Geldanteilbelege einschließlich ihrer Gegenbelege zentral gesperrt.
+Auch ältere Gegenbelege ohne Rollenmarker werden über die Belegherkunft erkannt.
+Die Rechnungsseite verweist auf Gutscheinrückgabe oder koordinierten Buchungsstorno.
 
 `gutschein_kauf.anfragen` friert Modell, Minuten/Wert, Kaufpreis, Käufergruppe, Steuersatz,
 Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsdeadline ein. Guthaben wird beim Kauf
@@ -172,3 +175,22 @@ und Code-Mails werden nach Commit erzeugt/versandt. Der Käufer erhält den Bele
 ein Geschenkempfänger bekommt nur den Code mit Gruppen- und Gültigkeitshinweis.
 Versand-/PDFfehler einzelner Nachläufe verhindern die anderen Empfänger nicht;
 es gibt keine neue automatische Zustellgarantie.
+
+
+`gutscheine.gib_zurueck(db, g, *, grund, admin_user_id)` gibt ausschließlich vollständig
+ungenutzte gekaufte Gutscheine zurück. Keine reservierte/bestätigte Einlösung darf bestehen;
+Wertrest muss dem Nennwert entsprechen, frühere Wertgutschriften bleiben Verbrauch.
+Kostenfrei zurückgenommene Einheiten und abgebrochene Reservierungen sind wieder ungenutzt.
+Käufer, Inhaber und historische Einlöser werden vor Zahlungen/Gutschein/Belegen gesperrt;
+Besitzwechsel führen zu höchstens drei vollständigen Transaktionsversuchen.
+Die Rückgabe erzeugt einen exakten Kaufgegenbeleg, dauerhafte Rückgabemarkierung mit
+Betrag/Grund/Käufer und Audit. `GutscheinRueckgabe` liefert optionalen Gegenbeleg und
+`manuell_zu_erstatten`; die Zahlung erfolgt manuell an den ursprünglichen Käufer.
+Kein Banktransfer und kein Kundenguthaben. Wiederholung liefert null Euro ohne weiteren Audit;
+Reaktivierung ist dauerhaft verboten. Schon vollständig korrigierte Kaufbasis erzeugt keinen
+weiteren Gegenbeleg und keine weitere Erstattungsanweisung; Teilkorrekturen verhindern Rückgabe.
+Die steuerfreie Mehrzweck-Kaufbasis wird ohne zweiten Umsatzsteuerausweis storniert.
+Die Adminaktion erfordert Rolle und CSRF. Öffentliche Rechnungsdienste prüfen zentral
+`pruefe_allgemeinen_rechnungsvorgang`; ausschließlich koordinierte Fachpfade nutzen die
+privaten Korrekturhilfen. Keine Ausnahme aus HTTP-Daten. Freicode-Einlösungslimits liegen
+zwischen 1 und 2147483647; größere Werte ergeben einen deutschen Formularfehler.
