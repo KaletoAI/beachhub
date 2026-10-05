@@ -337,8 +337,34 @@ Erst danach werden Wertgutscheine und das Guthaben des Einlösers gegen den Rest
 Die Buchungsbestätigung zeigt Tarifwert, Gutscheindeckung und Geld-/Guthabenanteil getrennt.
 Ein Mehrzweck-Einheitsgutschein über 26 € erzeugt bei Einlösung einen Beleg über 26 €,
 auch wenn er 30 € Tarifwert deckt. Ein Geldrest erhält eine eigene Rechnung.
-Kauf und Portalbedienung folgen in späteren Umsetzungsschritten;
-der vollständige Gutschein-Betriebsablauf bleibt bis dahin in Arbeit.
+Der Kauf ist im Hauptsystem-Kanal implementiert; signierter Gutscheinbestand, Portalbedienung
+und manuelle Kaufgutscheinrückgabe folgen in späteren Umsetzungsschritten.
+Ein Kauf benötigt ein verknüpftes Portalkonto. Rechnungskunden dürfen kaufen, solange
+**Rechnungskunden dürfen Gutscheine kaufen** eingeschaltet ist; bezahlt wird ebenfalls online.
+Einheitspreis **0** deaktiviert den Verkauf für die betreffende Käufergruppe. Wertgutscheine
+sind nur zu den angebotenen Beträgen erhältlich. Vorhandenes Guthaben bezahlt keinen Gutscheinkauf.
+
+Ein Kaufwunsch speichert Preis, Käufergruppe/Steuersatz, Modell, Minuten/Wert,
+Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsfrist. Spätere Einstellungs- oder
+Mitgliedschaftsänderungen verändern diese Kaufbedingungen nicht. Die Gültigkeit beginnt erst
+am tatsächlichen Kaufabschluss. Solange der Kauf offen oder abgebrochen ist, wird kein Code
+angezeigt oder versandt, auch nicht über das Änderungsprotokoll.
+Der eigene Kaufabbruchjob läuft jede Minute, unabhängig vom Verfall der Buchungsreservierungen.
+Die Frist gilt bereits auf der Grenze als abgelaufen; der Callback prüft sie selbst.
+Bei Unterzahlung wird der Kauf abgebrochen und der tatsächlich eingegangene Betrag einmal
+als Käuferguthaben gebucht. Bei Überzahlung wird ein Gutschein aktiviert und nur der Überschuss
+gutgeschrieben. Geld nach Abbruch/Fristablauf wird einmal Käuferguthaben, niemals ein Gutschein.
+Diese Fälle melden dem Betreiber nach Commit den tatsächlichen Eingang und das Guthaben.
+Ein erneuter Kauf benötigt eine neue Anfrage; eine doppelte Zahlungsrückmeldung ändert nichts.
+
+Bei Steuer **beim Kauf** erhält der Käufer die normale Kaufrechnung mit seinem eingefrorenen
+Steuersatz. Bei Steuer **bei Einlösung** erhält er einen **Kaufbeleg GB-JJJJ-NNNNN** ohne
+Umsatzsteuerausweis und mit Mehrzweckhinweis. PDFs und Mails entstehen erst nach Commit.
+Käufer und optionaler Geschenkempfänger erhalten den Code mit Gruppen- und Gültigkeitshinweis;
+der Kaufbeleg geht ausschließlich an den Käufer. Ein Mehrzweck-Mitgliedsgutschein nennt die
+Käufergruppe informativ und ist für alle einlösbar. Ein Fehler eines PDFs oder einer Code-Mail
+verhindert die anderen Nachläufe nicht. SMTP-Zustellung wird dadurch nicht garantiert oder
+automatisch erneut versucht; fehlgeschlagene Nachläufe sind im Log bzw. Betreiberhinweis zu prüfen.
 
 Bei kostenfreiem Storno oder nachträglicher Kulanz gibt das Hauptsystem Einheiten und
 Freischaltcodes an den Einlöser zurück. Das ursprüngliche Ablaufdatum bleibt unverändert;

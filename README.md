@@ -6,7 +6,7 @@ Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`
 Status: Stufe 1 (Hauptsystem) fertig; Stufe 1a-I (feste Kundengruppen mit Steuersatz,
 Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) und 1a-II
 (Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) umgesetzt;
-1a-III (Gutscheine) folgt; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
+1a-III (Gutscheine) in Umsetzung; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
 Gutscheine und echten Zahlungsanbieter) implementiert; Stufe 3 (Hallendienst) implementiert und
 gegen simuliertes Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald
 der Hallenhersteller die Schnittstellen festlegt.
@@ -15,12 +15,13 @@ Für Stufe 1a-III ist die Gutschein-Datenbasis mit Revision `0015` vorbereitet:
 Kauf-Snapshots, Einlösungsbelegbasis und ein eigener Kaufbelegnummernkreis.
 Freischaltcodes, Verwaltung und die atomare Einlösung im Hauptsystem-Kanal sind implementiert;
 Die Rückabwicklung einschließlich Kulanz und Reservierungsverfall ist implementiert;
-Kauf und Portaloberfläche folgen in weiteren Schritten.
+Der Kauf über den Hauptsystem-Kanal mit Zahlung, Kaufabbruch und Beleg-/Codeversand ist
+implementiert; Portaloberfläche und signierter Gutscheinbestand folgen in weiteren Schritten.
 Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit sind vorbereitet;
 die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
 Buchungen trennen Gutschein-Einlösungsbelege vom Geld-/Guthabenrest; Mehrzweck-Einheiten
-werden mit dem Kaufpreis abgerechnet. Die vollständigen Betriebsabläufe bleiben bis zur
-Gutscheinkauf und Portalintegration in Arbeit.
+werden mit dem Kaufpreis abgerechnet. Kaufbedingungen und Zahlungsfrist bleiben als Snapshot
+erhalten. Die vollständigen Betriebsabläufe bleiben bis zur Rückgabe und Portalintegration in Arbeit.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`

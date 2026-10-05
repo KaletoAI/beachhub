@@ -1,0 +1,10 @@
+Hallo,
+
+{{ kaeufer.name }} schenkt Ihnen einen Gutschein.
+
+{{ gruppenhinweis }}
+Code: {{ code }}
+{% if g.modell == "einheit" %}Eine Buchungseinheit bis {{ g.minuten }} Minuten.{% else %}Gutscheinwert: {{ g.nennwert_brutto|euro }}.{% endif %}
+Gültig bis einschließlich {{ g.gueltig_bis|datum }}.
+
+{{ betreiber }}

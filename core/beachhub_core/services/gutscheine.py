@@ -21,6 +21,13 @@ from beachhub_core.services import (
 from beachhub_core.services.rechnungen import csv_sicher
 
 
+def _auditdaten(daten: dict[str, Any] | None) -> dict[str, Any] | None:
+    if daten is not None and daten.get("status") in (Gutschein.OFFEN, Gutschein.ABGEBROCHEN):
+        # Auch das globale Audit zeigt JSON: noch nicht ausgegebene Codes bleiben geheim.
+        return {key: value for key, value in daten.items() if key != "code"}
+    return daten
+
+
 def _aenderung(
     db: Session,
     g: Gutschein,
@@ -37,8 +44,8 @@ def _aenderung(
         quelle=quelle,
         objekt_typ="gutschein",
         objekt_id=g.id,
-        vorher=vorher,
-        nachher=nachher,
+        vorher=_auditdaten(vorher),
+        nachher=_auditdaten(nachher),
         admin_user_id=admin_user_id,
     )
     kunden = {

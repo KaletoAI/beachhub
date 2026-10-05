@@ -20,6 +20,7 @@ from beachhub_core.models import AnfrageVerarbeitet, Kunde, Rechnung
 from beachhub_core.services import (
     audit,
     benachrichtigung,
+    gutschein_kauf,
     gutschein_sperren,
     kunden,
     lesestand,
@@ -135,6 +136,19 @@ def _buchung_stornieren(
     return online_buchung.storniere_fuer_kunde(db, kunde=kunde, buchung_id=n.buchung_id)
 
 
+def _gutschein_kaufen(
+    db: Session, kunde: Kunde, anfrage: kanal.Anfrage, n: kanal.GutscheinKaufen
+) -> Ergebnis:
+    basis = settings.portal_oeffentliche_url.rstrip("/")
+    return gutschein_kauf.anfragen(
+        db,
+        kunde=kunde,
+        empfaenger_email=n.empfaenger_email,
+        betrag=n.betrag,
+        rueckkehr_url=f"{basis}/zahlung/zurueck?anfrage={anfrage.anfrage_id}",
+    )
+
+
 def _rechnung_anfordern(
     db: Session, kunde: Kunde, anfrage: kanal.Anfrage, n: kanal.RechnungAnfordern
 ) -> Ergebnis:
@@ -194,6 +208,7 @@ _MIT_KUNDE: dict[str, Verarbeiter] = {
     "buchung_stornieren": _buchung_stornieren,
     "rechnung_anfordern": _rechnung_anfordern,
     "mitgliedschaft_beantragen": _mitgliedschaft_beantragen,
+    "gutschein_kaufen": _gutschein_kaufen,
 }
 
 

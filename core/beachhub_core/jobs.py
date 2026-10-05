@@ -11,6 +11,7 @@ from beachhub_core.models import Kunde
 from beachhub_core.services import (
     benachrichtigung,
     guthaben,
+    gutschein_kauf,
     gutscheine,
     halle,
     lesestand,
@@ -35,6 +36,21 @@ def gutschein_verfall_ausfuehren(db: Session) -> int:
     anzahl = gutscheine.verfalle(db)
     db.commit()
     return anzahl
+
+
+def gutschein_kaufabbruch_ausfuehren(db: Session) -> int:
+    """Eigene Transaktion: keine neuen Kaufkunden nach Buchungs-/Belegsperren entdecken."""
+    anzahl = gutschein_kauf.brich_abgelaufene_ab(db)
+    db.commit()
+    return anzahl
+
+
+def _job_gutschein_kaufabbruch() -> None:
+    with SessionLocal() as db:
+        try:
+            gutschein_kaufabbruch_ausfuehren(db)
+        except Exception:
+            logger.exception("Abbruch abgelaufener Gutscheinkäufe fehlgeschlagen")
 
 
 def _job_gutschein_verfall() -> None:
@@ -127,6 +143,12 @@ def starte_scheduler() -> BackgroundScheduler:
     s = BackgroundScheduler(timezone="Europe/Berlin")
     s.add_job(_job_lesestand, IntervalTrigger(minutes=5), id="lesestand", replace_existing=True)
     s.add_job(_job_verfall, IntervalTrigger(minutes=1), id="verfall", replace_existing=True)
+    s.add_job(
+        _job_gutschein_kaufabbruch,
+        IntervalTrigger(minutes=1),
+        id="gutschein_kaufabbruch",
+        replace_existing=True,
+    )
     s.add_job(
         _job_mitgliedschaft,
         CronTrigger(hour=7, minute=0),

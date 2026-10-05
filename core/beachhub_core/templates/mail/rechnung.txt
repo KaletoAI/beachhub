@@ -5,12 +5,17 @@ anbei erhalten Sie die Stornorechnung {{ r.nummer }}{% if r.korrigiert %} zur Re
 {% if gutschrift > 0 %}{{ gutschrift|euro }} haben wir Ihrem Guthaben gutgeschrieben; wir verrechnen es mit Ihrer nächsten Buchung oder Rechnung.
 {% endif %}
 {%- else -%}
+{% if kaufbeleg %}
+anbei erhalten Sie den Kaufbeleg {{ r.nummer }} über {{ r.brutto|euro }}.
+Mehrzweckgutschein: Der Kaufbeleg weist keine Umsatzsteuer aus. Die Besteuerung erfolgt erst bei der Einlösung.
+{% else %}
 anbei erhalten Sie die Rechnung {{ r.nummer }} über {{ r.brutto|euro }}.
+{% endif %}
 {% if verrechnet > 0 %}Davon haben wir {{ verrechnet|euro }} mit Ihrem Guthaben verrechnet.
 {% endif %}{% if offen > 0 %}Bitte überweisen Sie {{ offen|euro }} bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer.
 {% endif %}
 {%- endif %}
-Die Rechnung finden Sie als PDF im Anhang dieser E-Mail.
+{{ "Den Kaufbeleg" if kaufbeleg else "Die Rechnung" }} finden Sie als PDF im Anhang dieser E-Mail.
 
 Viele Grüße
 {{ betreiber }}

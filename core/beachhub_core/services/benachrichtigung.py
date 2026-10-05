@@ -140,7 +140,14 @@ def rechnung(db: Session, r: Rechnung) -> None:
             GuthabenBuchung.kunde_id == r.kunde_id,
         )
     )
-    betreff = f"Stornorechnung {r.nummer}" if r.art == "storno" else f"Rechnung {r.nummer}"
+    kaufbeleg = r.gutschein_rolle == "kauf" and r.nummer.startswith("GB-")
+    betreff = (
+        f"Stornorechnung {r.nummer}"
+        if r.art == "storno"
+        else f"Kaufbeleg {r.nummer}"
+        if kaufbeleg
+        else f"Rechnung {r.nummer}"
+    )
     mail.sende(
         r.kunde.email,
         betreff,
@@ -150,6 +157,7 @@ def rechnung(db: Session, r: Rechnung) -> None:
             offen=rechnungen.offener_betrag(db, r),
             verrechnet=rechnungen.verrechnet(db, r),
             gutschrift=Decimal(str(gutschrift)),
+            kaufbeleg=kaufbeleg,
         ),
         anhaenge=anhang,
     )
@@ -183,6 +191,47 @@ def belege_versenden(db: Session, rechnung_ids: Iterable[uuid.UUID | None]) -> N
                 )
             except Exception:
                 logger.exception("Betreiber-Alarm für Rechnung %s fehlgeschlagen", nummer)
+                db.rollback()
+
+
+def gutschein_gekauft(db: Session, gutschein_id: uuid.UUID) -> None:
+    """Nur abgeschlossene Käufe versenden; Geschenkempfänger erhalten kein Käufer-PDF."""
+    from beachhub_core.services.gutschein_kauf import gruppenhinweis
+
+    g = db.get(Gutschein, gutschein_id)
+    if g is None or g.status in (Gutschein.OFFEN, Gutschein.ABGEBROCHEN) or g.rechnung_id is None:
+        return
+    kaeufer = db.get(Kunde, g.kaeufer_kunde_id) if g.kaeufer_kunde_id else None
+    if kaeufer is None:
+        return
+    empfaenger = [(kaeufer.email, "gutschein_gekauft", "Ihr Gutschein")]
+    if g.empfaenger_email and g.empfaenger_email != kaeufer.email:
+        empfaenger.append((g.empfaenger_email, "gutschein_geschenkt", "Ein Gutschein für Sie"))
+    for email, vorlage, betreff in empfaenger:
+        try:
+            mail.sende(
+                email,
+                betreff,
+                _text(
+                    vorlage,
+                    g=g,
+                    kaeufer=kaeufer,
+                    code=gutschein_codes.anzeige(g.code),
+                    gruppenhinweis=gruppenhinweis(db, g),
+                ),
+            )
+        except Exception:
+            logger.exception("Gutscheinmail %s nicht versandt", g.id)
+            db.rollback()
+            try:
+                betreiber_alarm(
+                    "Gutscheinmail nicht versandt",
+                    f"Code-Mail zum Kauf {gutschein_id} fehlgeschlagen. Details im Log.",
+                )
+            except Exception:
+                logger.exception(
+                    "Betreiberhinweis zum Gutscheinkauf %s fehlgeschlagen", gutschein_id
+                )
                 db.rollback()
 
 

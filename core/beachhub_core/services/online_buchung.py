@@ -18,6 +18,7 @@ from beachhub_core import clock, zahlung
 from beachhub_core.models import (
     Buchung,
     Dauerbuchung,
+    Gutschein,
     Kunde,
     Storno,
     Zahlung,
@@ -29,6 +30,7 @@ from beachhub_core.services import (
     guthaben,
     gutschein_belege,
     gutschein_einloesung,
+    gutschein_kauf,
     gutschein_sperren,
     konfiguration,
     kunden,
@@ -228,13 +230,18 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         select(Zahlung.id, Zahlung.kunde_id, Zahlung.buchung_id).where(Zahlung.provider_ref == ref)
     ).first()
     if ids is not None:
+        # Auch Kaufcodes vor der ersten Zahlungs-/Gutscheinsperre entdecken.
+        kauf_id = db.scalar(select(Gutschein.id).where(Gutschein.zahlung_id == ids.id))
         if ids.buchung_id is not None:
             kontext = gutschein_sperren.bereite_buchungen_vor(
                 db, [ids.buchung_id], kunde_ids=[ids.kunde_id]
             )
         else:
             kontext = gutschein_sperren.bereite_vorgang_vor(
-                db, kunde_ids=[ids.kunde_id], gutschein_ids=[], zahlung_ids=[ids.id]
+                db,
+                kunde_ids=[ids.kunde_id],
+                gutschein_ids=[kauf_id] if kauf_id else [],
+                zahlung_ids=[ids.id],
             )
         z = kontext.zahlungen.get(ids.id)
         if z is None or z.kunde_id != ids.kunde_id or z.buchung_id != ids.buchung_id:
@@ -251,13 +258,18 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
             kanal.Antwort(status="ignoriert", grund="zahlung_unbekannt"),
             [alarm("Zahlungsrückmeldung ohne Zuordnung", text)],
         )
+    if z.provider != n.provider or z.provider_ref != ref:
+        return ignoriert("anbieter_unbekannt")
+    aktuell_kauf = db.scalar(select(Gutschein.id).where(Gutschein.zahlung_id == z.id))
+    if aktuell_kauf != kauf_id:
+        raise gutschein_sperren.GutscheinVorbereitungWiederholen("Kaufzuordnung geändert")
     if z.status == Zahlung.BEZAHLT:
         return ok()
     # Dem Anbieter trauen, nie den Rohdaten (A-ZAHL-2).
     zustand, betrag = anbieter.status(ref)
     if zustand == "offen":
         return ignoriert("offen")
-    if zustand == "bezahlt" and betrag <= NULL:
+    if zustand == "bezahlt" and (not betrag.is_finite() or betrag <= NULL):
         # Ein unplausibler Betrag darf die Zahlung nicht als bezahlt markieren – sonst würde
         # eine später eingehende echte Zahlung am frühen `z.status == BEZAHLT`-Ausstieg oben
         # folgenlos verpuffen (Reservierung verfällt, Geld wäre weg).
@@ -266,8 +278,17 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         )
         return ignoriert("betrag_ungueltig")
     if zustand != "bezahlt":
+        if zustand != "abgebrochen":
+            return ignoriert("status_unbekannt")
         z.status = Zahlung.ABGEBROCHEN
+        if aktuell_kauf is not None:
+            gutschein_kauf._brich_ab(db, kontext.gutscheine[aktuell_kauf], quelle="portal")
         return ok()
+
+    z.rohdaten_json = {"provider": n.provider, "rohdaten": n.rohdaten[:4000]}
+    kauf_ergebnis = gutschein_kauf.zahlung_eingegangen(db, z, betrag, sperrkontext=kontext)
+    if kauf_ergebnis is not None:
+        return kauf_ergebnis
 
     z.status = Zahlung.BEZAHLT
     z.empfangen_am = utcnow()

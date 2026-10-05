@@ -1,0 +1,15 @@
+Hallo {{ kaeufer.name }},
+
+Ihr Gutscheinkauf ist abgeschlossen.
+
+{{ gruppenhinweis }}
+Code: {{ code }}
+{% if g.modell == "einheit" %}Eine Buchungseinheit bis {{ g.minuten }} Minuten.{% else %}Gutscheinwert: {{ g.nennwert_brutto|euro }}.{% endif %}
+Gültig bis einschließlich {{ g.gueltig_bis|datum }}.
+{% if g.empfaenger_email %}
+Der Gutschein geht zusätzlich an {{ g.empfaenger_email }}. Ihr Kaufbeleg wird nur Ihnen separat geschickt.
+{% else %}
+Ihr Kaufbeleg wird Ihnen separat geschickt.
+{% endif %}
+
+{{ betreiber }}

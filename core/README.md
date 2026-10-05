@@ -100,7 +100,8 @@ Freischaltcodes lassen sich unter **Gutscheine → Freischaltcodes** ausstellen 
 exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsänderungen mit Audit.
 Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
 dauerhaft gesperrt. Die Einlösung und getrennte Buchungsbelege sind im Hauptsystem-Kanal implementiert;
-Die Rückabwicklung ist implementiert; Kauf und Portaloberfläche folgen in weiteren Schritten.
+Die Rückabwicklung und der Kauf über den Hauptsystem-Kanal sind implementiert;
+signierter Gutscheinbestand und Portaloberfläche folgen in weiteren Schritten.
 Der Gutschein-Nachtjob läuft täglich um 00:20 Europe/Berlin; das Ablaufdatum gilt einschließlich.
 Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
 `gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes
@@ -146,3 +147,24 @@ berechnet die Nettodifferenz aus kumulativ korrigiertem Brutto/Netto, unabhängi
 Stornoreihenfolge. Ursprungpositionen erhalten ihren Korrekturmarker erst bei vollständiger
 Korrektur. Gegenbelege und Einlöserhinweise werden nach Commit versandt; Käufer-PDFs gehen
 nur an den Käufer. Die öffentlichen Rechnungsaktionsguards folgen in Task 8.
+
+`gutschein_kauf.anfragen` friert Modell, Minuten/Wert, Kaufpreis, Käufergruppe, Steuersatz,
+Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsdeadline ein. Guthaben wird beim Kauf
+nicht verrechnet. `online_buchung.zahlung_eingegangen` verifiziert Anbieter und Zahlungsstatus,
+entdeckt den Kaufgutschein vor den Vorgangslocks und übergibt den vollständigen Sperrkontext.
+Bei `now >= kauf_reserviert_bis` entsteht auch ohne vorherigen Job kein aktiver Gutschein.
+Unterzahlung bricht den Kauf ab und schreibt den Eingang einmal als Käuferguthaben gut;
+Überzahlung aktiviert einen Gutschein und schreibt nur den Überschuss gut. Nach Abbruch
+eingehende Zahlungen bleiben Käuferguthaben mit Betreiberhinweis. Der eigene Kaufabbruchjob
+läuft jede Minute in einer getrennten Transaktion vom Buchungsverfall.
+`kaufdatum` und Gültigkeitsbeginn stammen vom tatsächlichen Abschluss, `ausgestellt_am`
+vom Kaufwunsch. Callback-Fristentscheidung, Zahlungseingangszeit und Kaufdatum verwenden
+denselben einmal frisch nach vollständiger Sperrvorbereitung gelesenen Fachuhrzeitpunkt;
+ein Fristwechsel während der Beleganlage erzeugt keine widersprüchliche Entscheidung.
+Die Checkout-URL steht auf `Zahlung`; offene oder abgebrochene Kaufcodes
+erscheinen weder in Antworten, Code-Mails, Übersicht, CSV noch in Audit-Snapshots.
+Kaufrechnung (`beim_kauf`) bzw. Kaufbeleg im GB-Kreis (`bei_einloesung`, ohne Steuerausweis)
+und Code-Mails werden nach Commit erzeugt/versandt. Der Käufer erhält den Beleg;
+ein Geschenkempfänger bekommt nur den Code mit Gruppen- und Gültigkeitshinweis.
+Versand-/PDFfehler einzelner Nachläufe verhindern die anderen Empfänger nicht;
+es gibt keine neue automatische Zustellgarantie.
