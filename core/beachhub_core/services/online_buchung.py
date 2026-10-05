@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 
 from beachhub_shared import kanal
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,6 @@ from beachhub_core import clock, zahlung
 from beachhub_core.models import (
     Buchung,
     Dauerbuchung,
-    GuthabenBuchung,
     Kunde,
     Storno,
     Zahlung,
@@ -95,28 +94,6 @@ def _bestaetige(db: Session, b: Buchung, antwort: kanal.Antwort) -> Ergebnis:
         r.id for r in belege.gutscheinbelege
     ]
     return Ergebnis(antwort, [_bestaetigung_versenden(b.id, ids)])
-
-
-def _buche_verrechnung_zurueck(db: Session, b: Buchung, quelle: str) -> None:
-    """Gibt das bei der Reservierung verrechnete Guthaben zurück. Zählt bereits erfolgte
-    Rückbuchungen mit, damit ein zweiter Aufruf nichts doppelt gutschreibt."""
-    summe = db.scalar(
-        select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0)).where(
-            GuthabenBuchung.bezug_id == b.id,
-            GuthabenBuchung.art.in_(("verrechnung", "rueckbuchung")),
-        )
-    )
-    offen = -Decimal(str(summe))
-    if offen > NULL:
-        guthaben.buche(
-            db,
-            kunde=b.kunde,
-            betrag=offen,
-            art="rueckbuchung",
-            bezug_id=b.id,
-            notiz="Reservierung ohne Zahlung beendet",
-            quelle=quelle,
-        )
 
 
 def anfragen(
@@ -317,7 +294,7 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         gutschein_einloesung.storno_rueckgaengig(
             db, b, grund="Zahlungsfrist abgelaufen", quelle="portal", sperrkontext=kontext
         )
-        _buche_verrechnung_zurueck(db, b, quelle="portal")
+        guthaben._buche_reservierung_zurueck(db, b, quelle="portal", sperrkontext=kontext)
     if b is not None and b.status == Buchung.RESERVIERT and betrag >= z.betrag:
         erg = _bestaetige(db, b, kanal.Antwort(status="ok"))
         ueberzahlt = betrag - z.betrag
@@ -398,7 +375,7 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
         kostenfrei=True if war_reserviert else None,
     )
     if war_reserviert:
-        _buche_verrechnung_zurueck(db, b, quelle="portal")
+        guthaben._buche_reservierung_zurueck(db, b, quelle="portal", sperrkontext=kontext)
     rest = None
     if b.dauerbuchung_id is not None:
         dauer = db.get(Dauerbuchung, b.dauerbuchung_id)
@@ -437,5 +414,5 @@ def verfalle_abgelaufene(db: Session) -> list[Buchung]:
         gutschein_einloesung.storno_rueckgaengig(
             db, b, grund="Zahlungsfrist abgelaufen", quelle="system", sperrkontext=kontext
         )
-        _buche_verrechnung_zurueck(db, b, quelle="system")
+        guthaben._buche_reservierung_zurueck(db, b, quelle="system", sperrkontext=kontext)
     return abgelaufen

@@ -253,9 +253,14 @@ def gutschein_rueckabwicklung(db: Session, b: Buchung) -> None:
         str(
             db.scalar(
                 select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0)).where(
-                    GuthabenBuchung.bezug_id.in_(ids),
+                    (
+                        GuthabenBuchung.bezug_id.in_(ids)
+                        & (GuthabenBuchung.art == "storno_gutschrift")
+                    )
+                    | (
+                        (GuthabenBuchung.bezug_id == b.id) & (GuthabenBuchung.art == "rueckbuchung")
+                    ),
                     GuthabenBuchung.kunde_id == b.kunde_id,
-                    GuthabenBuchung.art == "storno_gutschrift",
                 )
             )
         )

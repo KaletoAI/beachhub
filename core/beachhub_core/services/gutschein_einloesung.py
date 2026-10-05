@@ -325,6 +325,16 @@ def storno_rueckgaengig(
     belege: list[Rechnung] = []
     frei: list[Gutschein] = []
     betrag = NULL
+    if buchung.rechnung_position_id is None and any(
+        e.status == GutscheinEinloesung.RESERVIERT for e in es
+    ):
+        betrag += guthaben._buche_reservierung_zurueck(
+            db,
+            buchung,
+            quelle=quelle,
+            sperrkontext=sperrkontext,
+            admin_user_id=admin_user_id,
+        )
     for e in es:
         if e.status == GutscheinEinloesung.RUECKGAENGIG:
             continue

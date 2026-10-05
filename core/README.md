@@ -135,10 +135,12 @@ der Gutscheinrest bleibt unverändert. Einheiten/Freicodes erhalten ihren Bestan
 Mehrzweck-Einheiten einen steuerlichen Gegenbeleg ohne Gutscheinwertguthaben. Die ursprüngliche
 Gültigkeit bleibt bestehen; gesperrte/verfallene Codes werden nicht reaktiviert. Geldrest und
 Käuferbeleg bleiben getrennt. Reservierungsabbruch/-verfall stellt lediglich den ursprünglichen
-Bestand wieder her. Der Zahlungs-Callback prüft `reserviert_bis` selbst; nach Ablauf entstehen
+Bestand und das reservierte Kundenguthaben wieder her, auch beim Betreiberstorno oder
+in Batches. Der Zahlungs-Callback prüft `reserviert_bis` selbst; nach Ablauf entstehen
 Rücknahme und Spätzahlungsguthaben atomar, auch wenn der Job noch nicht gelaufen ist.
 `gutschein_einloesung.storno_rueckgaengig` konsumiert den vollständigen Sperrkontext und liefert
-freigegebene Gutscheine, tatsächliches Guthaben und sämtliche Gegenbelege. Batch-Einstiege
+freigegebene Gutscheine, tatsächliches Guthaben (einschließlich Reservierungsrückbuchung)
+und sämtliche Gegenbelege. Batch-Einstiege
 reichen denselben Kontext bis zur letzten Korrektur weiter. `gutschein_belege.korrigiere_wertanteil`
 berechnet die Nettodifferenz aus kumulativ korrigiertem Brutto/Netto, unabhängig von der
 Stornoreihenfolge. Ursprungpositionen erhalten ihren Korrekturmarker erst bei vollständiger

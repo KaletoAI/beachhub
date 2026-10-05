@@ -971,3 +971,142 @@ def test_dauerbeenden_wiederholt_keine_alten_rueckgabehinweise(db, gwelt, eingel
             assert sum(m["betreff"] == "Gutschein-Rückabwicklung" for m in mail_ausgang) == 1
         else:
             assert mail_ausgang == []
+
+
+@pytest.mark.parametrize("pfad", ["betreiber", "sperrbatch", "daueranlage", "beenden"])
+def test_pending_gutscheinstorno_gibt_reservierungswallet_zurueck(db, gwelt, pfad):
+    from beachhub_core.models import Dauerbuchung, GuthabenBuchung
+    from beachhub_core.services import dauerbuchungen, gutschein_einloesung, sperren, storno
+
+    g = code(db, gwelt, steuer="bei_einloesung", nur_mitglieder=False)
+    guthaben.buche(db, kunde=gwelt.nichtmitglied, betrag=Decimal("5"), art="manuell")
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    z = db.scalar(select(Zahlung).where(Zahlung.buchung_id == b.id))
+    assert b.status == "reserviert" and b.rechnung_position_id is None
+    assert gwelt.nichtmitglied.guthaben == Decimal("0") and z.betrag == Decimal("10")
+    assert (erg.antwort.preis, erg.antwort.gutschein_verrechnet) == (Decimal("45"), Decimal("30"))
+    kauf_id = g.rechnung_id
+    if pfad == "betreiber":
+        storno.storniere(db, b, durch="betreiber", kostenfrei=True)
+    elif pfad == "sperrbatch":
+        sperren.lege_an(
+            db,
+            feld_ids=[b.feld_id],
+            beginn=b.beginn,
+            ende=b.ende,
+            grund="Sperre",
+            admin_user_id=None,
+            entscheidungen={b.id: "stornieren"},
+        )
+    elif pfad == "daueranlage":
+        dauerbuchungen.lege_an(
+            db,
+            kunde_id=gwelt.mitglied.id,
+            feld_id=b.feld_id,
+            wochentag=2,
+            start=time(19),
+            ende=time(22),
+            gueltig_von=TERMIN,
+            gueltig_bis=TERMIN,
+            admin_user_id=None,
+            auslassen=set(),
+            entscheidungen={b.id: "stornieren"},
+            rechnungskunde_setzen=True,
+        )
+    else:
+        dauer = Dauerbuchung(
+            kunde_id=b.kunde_id,
+            feld_id=b.feld_id,
+            wochentag=2,
+            start=time(19),
+            ende=time(22),
+            gueltig_von=TERMIN,
+            gueltig_bis=TERMIN,
+            pin_hash="test",
+            pin_verschluesselt="test",
+        )
+        db.add(dauer)
+        db.flush()
+        b.dauerbuchung_id = dauer.id
+        db.commit()
+        dauerbuchungen.beende(db, dauer, ab=TERMIN, admin_user_id=None)
+    db.commit()
+    assert b.status == "storniert" and g.status == "aktiv"
+    assert gwelt.nichtmitglied.guthaben == Decimal("5") and gwelt.mitglied.guthaben == Decimal("0")
+    e = db.scalar(select(GutscheinEinloesung).where(GutscheinEinloesung.buchung_id == b.id))
+    assert e.status == "rueckgaengig" and e.korrektur_rechnung_id is None
+    assert e.rueckabwicklung_art == "gutschein" and b.rechnung_position_id is None
+    assert db.get(Rechnung, kauf_id).status == "bezahlt"
+    assert db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all() == []
+    rueckbuchungen = db.scalars(
+        select(GuthabenBuchung).where(
+            GuthabenBuchung.bezug_id == b.id, GuthabenBuchung.art == "rueckbuchung"
+        )
+    ).all()
+    assert [r.betrag for r in rueckbuchungen] == [Decimal("5")]
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, [b.id])
+    wieder = gutschein_einloesung.storno_rueckgaengig(
+        db, b, grund="Wiederholung", quelle="admin", sperrkontext=kontext
+    )
+    db.commit()
+    assert wieder.guthaben_betrag == Decimal("0") and wieder.korrekturbelege == []
+    assert wieder.freigegebene_gutscheine == [] and gwelt.nichtmitglied.guthaben == Decimal("5")
+    assert (
+        len(
+            db.scalars(
+                select(GuthabenBuchung).where(
+                    GuthabenBuchung.bezug_id == b.id, GuthabenBuchung.art == "rueckbuchung"
+                )
+            ).all()
+        )
+        == 1
+    )
+    online_buchung.zahlung_eingegangen(db, rueckmeldung(z.provider_ref, "10.00"))
+    db.commit()
+    assert gwelt.nichtmitglied.guthaben == Decimal("15") and g.status == "aktiv"
+    assert (
+        online_buchung.zahlung_eingegangen(db, rueckmeldung(z.provider_ref, "10.00")).nach_commit
+        == []
+    )
+    db.commit()
+    assert gwelt.nichtmitglied.guthaben == Decimal("15")
+    assert (
+        db.scalars(
+            select(Rechnung).where(Rechnung.gutschein_rolle.in_(["einloesung", "geldanteil"]))
+        ).all()
+        == []
+    )
+
+    wiederverwendet = buchen(
+        db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2, tag=date(2027, 12, 2)
+    )
+    db.commit()
+    assert wiederverwendet.antwort.status == "bestaetigt"
+    assert wiederverwendet.antwort.gutschein_verrechnet == Decimal("30")
+    assert gwelt.nichtmitglied.guthaben == Decimal("15")
+
+
+def test_pending_rueckabwicklung_ergebnis_enthaelt_tatsaechliches_reservierungswallet(
+    db, gwelt, mail_ausgang
+):
+    from beachhub_core.services import benachrichtigung, gutschein_einloesung
+
+    g = code(db, gwelt, steuer="bei_einloesung", nur_mitglieder=False)
+    guthaben.buche(db, kunde=gwelt.nichtmitglied, betrag=Decimal("5"), art="manuell")
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, [b.id])
+    rueck = gutschein_einloesung.storno_rueckgaengig(
+        db, b, grund="Reservierung beendet", quelle="admin", sperrkontext=kontext
+    )
+    db.commit()
+    assert rueck.guthaben_betrag == Decimal("5") and rueck.korrekturbelege == []
+    assert [g.id for g in rueck.freigegebene_gutscheine] == [g.id]
+    benachrichtigung.gutschein_rueckabwicklung(db, b)
+    hinweis = next(m for m in mail_ausgang if m["betreff"] == "Gutschein-Rückabwicklung")
+    assert hinweis["an"] == gwelt.nichtmitglied.email and "5,00" in hinweis["text"]

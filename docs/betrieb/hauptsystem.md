@@ -353,7 +353,11 @@ korrigiert. Beim 26-€-Einheitsgutschein mit 15 € Geldrest entstehen genau 15
 Kostenpflichtige Absagen lassen den Gutscheinverbrauch bestehen. Wiederholung einer bereits
 vollständigen Rückabwicklung erzeugt kein neues Guthaben und keinen neuen Beleg.
 Reservierungen ohne Bestätigung geben bei Abbruch oder Verfall den ursprünglichen Bestand
-zurück, einschließlich Wertgutscheinrest, ohne Wertgutschein-Gutschrift. Ein Zahlungseingang
+zurück, einschließlich Wertgutscheinrest, ohne Wertgutschein-Gutschrift. Das zuvor reservierte
+Kundenguthaben wird ebenfalls genau einmal zurückgebucht, auch bei kostenfreiem Betreiberstorno,
+Sperranlage und verdrängender Daueranlage. Bei 5 € Guthaben und noch offenen 10 € Checkout
+stehen die 5 € nach dem Abbruch wieder zur Verfügung; eine spätere Zahlung fügt nur ihre
+tatsächlichen 10 € hinzu. Ein Zahlungseingang
 nach der gespeicherten Reservierungsfrist bestätigt nichts mehr, auch vor dem Minutenjob;
 der Geldbetrag wird genau einmal als Spätzahlungsguthaben verbucht. Genau auf der Frist gilt
 wie im Verfallsjob noch kein Verfall. Nach dem Commit werden sämtliche Gegenbelege und
