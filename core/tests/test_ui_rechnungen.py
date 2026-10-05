@@ -1,12 +1,14 @@
+import uuid
 from datetime import date, time
 from decimal import Decimal
 
 import pytest
 from beachhub_core import clock, mail
-from beachhub_core.models import Betriebszeit, Feld, FeldRaster, Kunde, Rechnung, Tarif
+from beachhub_core.models import Betriebszeit, Buchung, Feld, FeldRaster, Kunde, Rechnung, Tarif
 from beachhub_core.services import buchungen, kunden, rechnungen
 from beachhub_shared.zeit import kombiniere
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 
@@ -127,3 +129,128 @@ def test_kein_monatslauf_mehr(eingeloggt: TestClient) -> None:
         data={"csrf_token": c.csrf, "jahr": "2027", "monat": "12"},
     )
     assert r.status_code == 405
+
+
+@pytest.mark.parametrize("bezahlt", [False, True])
+def test_teilstorno_ueber_ausgewaehlte_positionen(
+    eingeloggt: TestClient, db: Session, welt, bezahlt: bool
+) -> None:
+    c = eingeloggt
+    _abo(c, *welt)
+    r = db.query(Rechnung).one()
+    if bezahlt:
+        rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+        db.commit()
+    erste, zweite = r.positionen
+    erste_id, zweite_id, rechnung_id = erste.id, zweite.id, r.id
+    buchung_id, position_betrag = erste.buchung_id, erste.brutto
+    original_pdf = r.pdf_sha256
+    mail.TEST_AUSGANG.clear()
+    seite = c.get(f"/admin/rechnungen/{rechnung_id}")
+    assert f'name="positionen" value="{erste_id}"' in seite.text
+    antwort = c.post(
+        f"/admin/rechnungen/{rechnung_id}/teilstorno",
+        data={"csrf_token": c.csrf, "grund": "Halle gesperrt", "positionen": [str(erste_id)]},
+        follow_redirects=False,
+    )
+    assert antwort.status_code == 303
+    db.expire_all()
+    beleg = db.scalars(select(Rechnung).where(Rechnung.korrigiert_rechnung_id == rechnung_id)).one()
+    assert antwort.headers["location"] == f"/admin/rechnungen/{beleg.id}"
+    assert beleg.brutto == -position_betrag and len(beleg.positionen) == 1
+    assert beleg.pdf_sha256
+    assert db.get(Kunde, welt[1].id).guthaben == (position_betrag if bezahlt else Decimal("0.00"))
+    assert rechnungen.offener_betrag(db, db.get(Rechnung, rechnung_id)) == (
+        Decimal("0.00") if bezahlt else position_betrag
+    )
+    assert db.get(Rechnung, rechnung_id).pdf_sha256 == original_pdf
+    assert db.get(Buchung, buchung_id).status == Buchung.BESTAETIGT
+    assert db.get(Buchung, buchung_id).rechnung_position_id == erste_id
+    assert [m["betreff"] for m in mail.TEST_AUSGANG] == [f"Stornorechnung {beleg.nummer}"]
+    seite = c.get(f"/admin/rechnungen/{rechnung_id}")
+    assert f'name="positionen" value="{erste_id}"' not in seite.text
+    assert f'name="positionen" value="{zweite_id}"' in seite.text
+    # Direkter Wiederholungs-POST bleibt ohne weiteren Beleg oder Guthaben.
+    seite = c.post(
+        f"/admin/rechnungen/{rechnung_id}/teilstorno",
+        data={"csrf_token": c.csrf, "positionen": str(erste_id)},
+    )
+    assert "bereits korrigiert" in seite.text
+    db.expire_all()
+    assert db.query(Rechnung).count() == 2
+    assert db.get(Kunde, welt[1].id).guthaben == (position_betrag if bezahlt else Decimal("0.00"))
+    assert len(mail.TEST_AUSGANG) == 1
+
+
+@pytest.mark.parametrize("auswahl", [[], ["falsch"], ["fremd"], ["doppelt"]])
+def test_teilstorno_ungueltige_auswahl_meldet_fehler(
+    eingeloggt: TestClient, db: Session, welt, auswahl: list[str]
+) -> None:
+    c = eingeloggt
+    _abo(c, *welt)
+    r = db.query(Rechnung).one()
+    positionen = auswahl
+    if auswahl == ["fremd"]:
+        positionen = [str(uuid.uuid4())]
+    elif auswahl == ["doppelt"]:
+        positionen = [str(r.positionen[0].id)] * 2
+    mail.TEST_AUSGANG.clear()
+    seite = c.post(
+        f"/admin/rechnungen/{r.id}/teilstorno",
+        data={"csrf_token": c.csrf, "grund": "x", "positionen": positionen},
+    )
+    erwartet = (
+        "mindestens eine Position"
+        if not auswahl
+        else "Ungültige Auswahl"
+        if auswahl == ["falsch"]
+        else "gehören nicht zu dieser Rechnung"
+    )
+    assert erwartet in seite.text
+    db.expire_all()
+    assert db.query(Rechnung).count() == 1
+    assert db.get(Kunde, welt[1].id).guthaben == Decimal("0.00")
+    assert not mail.TEST_AUSGANG
+
+
+@pytest.mark.parametrize("historisch", [False, True])
+def test_teilstorno_auf_vollstornierter_rechnung_bleibt_ohne_gutschrift(
+    eingeloggt: TestClient, db: Session, welt, historisch: bool
+) -> None:
+    c = eingeloggt
+    _abo(c, *welt)
+    r = db.query(Rechnung).one()
+    rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    rechnungen.storniere(db, r, admin_user_id=None, grund="Fehler")
+    if historisch:
+        # Altbestand aus 0013: Vollstorno verknüpft, Positionsmarker fehlen.
+        for p in r.positionen:
+            p.korrigiert_durch_id = None
+    rechnung_id, position_id = r.id, r.positionen[0].id
+    db.commit()
+    mail.TEST_AUSGANG.clear()
+    assert 'name="positionen"' not in c.get(f"/admin/rechnungen/{rechnung_id}").text
+    seite = c.post(
+        f"/admin/rechnungen/{rechnung_id}/teilstorno",
+        data={"csrf_token": c.csrf, "grund": "nochmals", "positionen": str(position_id)},
+    )
+    assert "bereits storniert" in seite.text
+    db.expire_all()
+    assert db.query(Rechnung).count() == 2
+    assert db.get(Kunde, welt[1].id).guthaben == Decimal("0.00")
+    assert not mail.TEST_AUSGANG
+
+
+def test_liste_zeigt_offenen_betrag(eingeloggt: TestClient, db: Session, welt) -> None:
+    c = eingeloggt
+    _abo(c, *welt)
+    seite = c.get("/admin/rechnungen")
+    assert '<th class="rechts">Offen</th>' in seite.text
+    assert seite.text.count("60,00 €") == 2
+    r = db.query(Rechnung).one()
+    c.post(
+        f"/admin/rechnungen/{r.id}/teilstorno",
+        data={"csrf_token": c.csrf, "positionen": str(r.positionen[0].id)},
+    )
+    seite = c.get("/admin/rechnungen?status=offen")
+    assert "60,00 €" in seite.text and "30,00 €" in seite.text

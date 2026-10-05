@@ -41,15 +41,25 @@
 
 <div class="karte">
   <h2>Positionen</h2>
+  {% set auswaehlbar = r.art != "storno" and r.status != "storniert" %}
   <table>
-    <tr><th>Text</th><th class="rechts">USt</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
+    <tr>{% if auswaehlbar %}<th></th>{% endif %}<th>Text</th><th class="rechts">USt</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
     {% for p in r.positionen %}<tr>
+      {% if auswaehlbar %}<td>{% if p.korrigiert_durch_id is none %}<input type="checkbox" form="teilstorno" name="positionen" value="{{ p.id }}" aria-label="Position {{ p.reihenfolge }} auswählen">{% else %}<span class="badge">korrigiert</span>{% endif %}</td>{% endif %}
       <td>{{ p.text }}</td>
       <td class="rechts">{{ p.ust_satz|prozent }}</td>
       <td class="rechts">{{ p.menge }}</td>
       <td class="rechts">{{ p.brutto|euro }}</td>
     </tr>{% endfor %}
   </table>
+  {% if auswaehlbar %}
+  <form id="teilstorno" method="post" action="/admin/rechnungen/{{ r.id }}/teilstorno" class="zeile">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Grund <input name="grund" placeholder="z. B. Halle gesperrt"></label>
+    <button class="gefahr">Teil-Stornorechnung für ausgewählte Positionen</button>
+  </form>
+  <p class="small">Bereits bezahlte Beträge werden dem Kunden als Guthaben gutgeschrieben; bei offener Rechnung sinkt die Forderung.</p>
+  {% endif %}
   <table>
     <tr><th>Steuersatz</th><th class="rechts">Netto</th><th class="rechts">USt</th><th class="rechts">Brutto</th></tr>
     {% for z in steuer %}<tr>

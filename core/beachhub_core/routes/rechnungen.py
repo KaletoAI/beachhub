@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from beachhub_core import auth
 from beachhub_core.database import get_db
 from beachhub_core.models import AdminUser, Kunde, Rechnung
-from beachhub_core.routes._form import fehlertext, t_datum
+from beachhub_core.routes._form import fehlertext, t_datum, t_uuid
 from beachhub_core.services import benachrichtigung, rechnung_pdf, rechnungen
+from beachhub_core.services import storno as storno_dienst
 from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_core.templating import mit_flash, render
 
@@ -23,6 +24,9 @@ GRUND = {
     "nicht_offen": "Rechnung ist nicht offen",
     "nicht_stornierbar": "Rechnung ist bereits storniert oder selbst eine Stornorechnung",
     "pdf_vorhanden": "Rechnungs-PDF existiert bereits",
+    "bereits_korrigiert": "Eine der Positionen wurde bereits korrigiert",
+    "keine_positionen": "Bitte mindestens eine Position auswählen",
+    "verschiedene_rechnungen": "Die Positionen gehören nicht zu dieser Rechnung",
 }
 
 
@@ -53,11 +57,13 @@ def liste(
         stmt = stmt.where(Rechnung.datum <= bis_d)
     if q:
         stmt = stmt.where(Kunde.name.ilike(f"%{q}%"))
+    gefunden = db.scalars(stmt.limit(500)).all()
     return render(
         request,
         "rechnungen/liste.html",
         admin=admin,
-        rechnungen=db.scalars(stmt.limit(500)).all(),
+        rechnungen=gefunden,
+        offen_je_rechnung={r.id: rechnungen.offener_betrag(db, r) for r in gefunden},
         status=status,
         von=von,
         bis=bis,
@@ -212,4 +218,49 @@ def storno(
     return mit_flash(
         RedirectResponse(f"/admin/rechnungen/{s.id}", status_code=303),
         f"Stornorechnung {s.nummer} erzeugt",
+    )
+
+
+@router.post("/rechnungen/{rechnung_id}/teilstorno", response_model=None)
+async def teilstorno(
+    request: Request,
+    rechnung_id: uuid.UUID,
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Korrigiert ausgewählte Rechnungspositionen; bezahlte Anteile werden Guthaben.
+
+    Die zugehörigen Buchungen bleiben unverändert (A-ADM-4, Abweichung B-8).
+    """
+    r = db.get(Rechnung, rechnung_id)
+    if r is None:
+        return mit_flash(
+            RedirectResponse("/admin/rechnungen", status_code=303), "Nicht gefunden", "fehler"
+        )
+    form = await request.form()
+    try:
+        ids = [t_uuid(str(v)) for v in form.getlist("positionen")]
+        positionen = [p for p in r.positionen if p.id in ids]
+        if len(positionen) != len(ids):
+            raise RechnungsFehler("verschiedene_rechnungen")
+        beleg = storno_dienst.gutschreiben_positionen(
+            db,
+            positionen,
+            grund=str(form.get("grund", "")).strip() or "Teil-Storno",
+            quelle="admin",
+            admin_user_id=admin.id,
+        )
+        beleg_id = beleg.id
+        db.commit()
+    except (RechnungsFehler, ValueError, IntegrityError) as e:
+        db.rollback()
+        return mit_flash(
+            RedirectResponse(f"/admin/rechnungen/{rechnung_id}", status_code=303),
+            fehlertext(e, GRUND),
+            "fehler",
+        )
+    benachrichtigung.belege_versenden(db, [beleg_id])
+    return mit_flash(
+        RedirectResponse(f"/admin/rechnungen/{beleg_id}", status_code=303),
+        "Teil-Stornorechnung erzeugt",
     )

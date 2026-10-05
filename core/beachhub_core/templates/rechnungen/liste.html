@@ -17,13 +17,14 @@
 
 <div class="karte">
 <table>
-  <tr><th>Nummer</th><th>Datum</th><th>Kunde</th><th>Art</th><th class="rechts">Brutto</th><th>Status</th><th>Fällig</th><th></th></tr>
+  <tr><th>Nummer</th><th>Datum</th><th>Kunde</th><th>Art</th><th class="rechts">Brutto</th><th class="rechts">Offen</th><th>Status</th><th>Fällig</th><th></th></tr>
   {% for r in rechnungen %}<tr>
     <td>{{ r.nummer }}</td>
     <td>{{ r.datum|datum }}</td>
     <td>{{ r.adresse_snapshot.get("name", "") }}</td>
     <td>{{ r.art }}</td>
     <td class="rechts">{{ r.brutto|euro }}</td>
+    <td class="rechts">{{ offen_je_rechnung[r.id]|euro if offen_je_rechnung[r.id] else "–" }}</td>
     <td>{{ r.status }}</td>
     <td>{{ r.faellig_am|datum }}</td>
     <td><a class="aktion" href="/admin/rechnungen/{{ r.id }}">öffnen</a> · <a class="aktion" href="/admin/rechnungen/{{ r.id }}/pdf">PDF</a></td>
