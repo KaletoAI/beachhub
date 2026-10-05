@@ -151,7 +151,7 @@ def anfragen(
         return ablehnen("rechnungskunde")
     try:
         with db.begin_nested():
-            b = buchungen.lege_an(
+            anlage = buchungen.lege_an_mit_preisstand(
                 db,
                 feld_id=feld_id,
                 kunde_id=kunde.id,
@@ -163,8 +163,14 @@ def anfragen(
                 anfrage_id=anfrage_id,
                 zahlungsart="online",
             )
+            b = anlage.buchung
             deckung = gutschein_einloesung.loese_ein(
-                db, b, kunde, gutschein_codes, sperrkontext=kontext
+                db,
+                b,
+                kunde,
+                gutschein_codes,
+                sperrkontext=kontext,
+                preisstand=anlage.preisstand,
             )
     except (buchungen.BuchungsFehler, gutschein_einloesung.GutscheinFehler) as e:
         return ablehnen(_GRUND.get(e.grund, e.grund))

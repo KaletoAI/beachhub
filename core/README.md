@@ -122,3 +122,10 @@ Historische Minuten und Mitgliedsvoraussetzung bleiben Kauf-Snapshots. Nicht vol
 zeitproportional gedeckt und kumulativ auf Cent gerundet.
 Ein Downgrade verweigert vorhandenen Gutscheinbestand, Gutscheinbelege und verbrauchte
 Gutschein-Nummernkreise ausdrücklich. Es löscht diese Daten nicht.
+
+Für Buchungspreis und Gutschein-Tarifdeckung gilt derselbe unveränderliche Slotpreisstand.
+`buchungen.lege_an_mit_preisstand` liefert intern `Buchungsanlage(buchung, preisstand)`;
+`lege_an` behält seine bisherige Signatur und Buchungsrückgabe. Die Einlösung erhält
+`preisstand` explizit, prüft Feld, Zeitraum, Gruppe, Slotfolge und Summe und liest keine
+aktuellen Tarife nach. Alle Tarifregeln der Slotpreisliste stammen aus einer einzigen Abfrage.
+Der Preisstand ist kein Feld des Portal-Kanalvertrags.

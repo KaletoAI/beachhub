@@ -547,3 +547,79 @@ def test_unterschiedliche_minutensnapshots_erlauben_zwei_volle_einheiten(db, gwe
     es = db.scalars(select(GutscheinEinloesung).order_by(GutscheinEinloesung.created_at)).all()
     assert [e.minuten_gedeckt for e in es] == list(minuten)
     assert [e.betrag for e in es] == [Decimal(m) / 4 for m in minuten]
+
+
+@pytest.mark.parametrize("neuer_preis", [Decimal("20"), Decimal("30")])
+def test_tarifpflege_zwischen_anlage_und_einloesung_behaelt_einen_preisstand(
+    db, gwelt, monkeypatch, neuer_preis
+):
+    from beachhub_core.database import SessionLocal
+    from beachhub_core.services import buchungen
+
+    g = code(db, gwelt)
+    db.commit()
+
+    def tarif_aendern(session, buchung):
+        # Echte separate Transaktion: globaler Tarif hat keinen Feld-FK und wartet
+        # weder auf die Feldsperre noch auf die Kundenmenge der Buchungsanlage.
+        with SessionLocal() as admin_session:
+            admin_session.add(
+                Tarif(
+                    name="Neuer Abendtarif",
+                    preis=neuer_preis,
+                    uhrzeit_von=time(19),
+                    uhrzeit_bis=time(21),
+                )
+            )
+            admin_session.commit()
+
+    monkeypatch.setattr(buchungen, "NACH_ANLAGE", [tarif_aendern])
+    erg = buchen(db, gwelt, [g.code])
+    assert (erg.antwort.preis, erg.antwort.gutschein_verrechnet, erg.antwort.zu_zahlen) == (
+        Decimal("45"),
+        Decimal("30"),
+        Decimal("15"),
+    )
+    assert db.scalar(select(GutscheinEinloesung)).betrag == Decimal("30")
+    z = db.scalar(select(Zahlung).where(Zahlung.buchung_id == erg.antwort.buchung_id))
+    assert z.betrag == Decimal("15")
+
+
+@pytest.mark.parametrize("abweichung", ["feld", "beginn", "ende", "gruppe", "summe"])
+def test_einloesung_weist_fremden_oder_veraenderten_preisstand_zurueck(db, gwelt, abweichung):
+    from dataclasses import replace
+    from datetime import timedelta
+
+    from beachhub_core.services import buchungen, gutschein_einloesung
+
+    g = code(db, gwelt)
+    db.commit()
+    kontext = gutschein_einloesung.bereite_codes_vor(db, gwelt.mitglied, [g.code])
+    anlage = buchungen.lege_an_mit_preisstand(
+        db,
+        feld_id=gwelt.feld.id,
+        kunde_id=gwelt.mitglied.id,
+        beginn=kombiniere(TERMIN, time(19)),
+        ende=kombiniere(TERMIN, time(22)),
+        status=Buchung.RESERVIERT,
+    )
+    stand = anlage.preisstand
+    if abweichung == "feld":
+        stand = replace(stand, feld_id=uuid.uuid4())
+    elif abweichung == "beginn":
+        stand = replace(stand, beginn=stand.beginn + timedelta(minutes=1))
+    elif abweichung == "ende":
+        stand = replace(stand, ende=stand.ende + timedelta(minutes=1))
+    elif abweichung == "gruppe":
+        stand = replace(stand, kundengruppe_id=gwelt.nichtmitglied_gruppe.id)
+    else:
+        stand = replace(
+            stand,
+            slotpreise=tuple((slot, preis + Decimal("1")) for slot, preis in stand.slotpreise),
+        )
+    with pytest.raises(ValueError, match="Slotpreisstand passt nicht"):
+        gutschein_einloesung.loese_ein(
+            db, anlage.buchung, gwelt.mitglied, [g.code], sperrkontext=kontext, preisstand=stand
+        )
+    assert db.scalars(select(GutscheinEinloesung)).all() == []
+    assert g.status == "aktiv"

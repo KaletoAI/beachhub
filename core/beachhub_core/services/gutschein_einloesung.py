@@ -140,7 +140,16 @@ def loese_ein(
     codes: Sequence[str],
     *,
     sperrkontext: GutscheinSperrkontext,
+    preisstand: tarife.Slotpreisstand,
 ) -> GutscheinDeckung:
+    if not preisstand.passt_zu(
+        feld_id=buchung.feld_id,
+        beginn=buchung.beginn,
+        ende=buchung.ende,
+        kundengruppe_id=buchung.kundengruppe_id,
+        preis=buchung.preis,
+    ):
+        raise ValueError("Slotpreisstand passt nicht zur Buchung")
     if kunde.id not in sperrkontext.kunde_ids:
         raise ValueError("Einlöser nicht vorbereitet")
     normalisiert = normalisierte_codes(codes)
@@ -157,15 +166,7 @@ def loese_ein(
         len(einheiten) > 1 and sum(g.minuten or 0 for g in einheiten) > dauer
     ):
         raise GutscheinFehler("zu_viele_gutscheine")
-    preise = tarife.preise_je_slot(
-        db,
-        feld_id=buchung.feld_id,
-        beginn=buchung.beginn,
-        ende=buchung.ende,
-        kundengruppe_id=buchung.kundengruppe_id,
-    )
-    if preise is None:
-        raise GutscheinFehler("kein_tarif")
+    preise = preisstand.slotpreise
     es = []
     minuten_bisher, deckung = 0, NULL
     for g in [*einheiten, *(g for g in gs if g.modell == "wert")]:

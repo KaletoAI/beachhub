@@ -1,5 +1,6 @@
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -72,7 +73,15 @@ def _pruefe_zeitraum(
             raise BuchungsFehler("ausserhalb_fenster")
 
 
-def lege_an(
+@dataclass(frozen=True)
+class Buchungsanlage:
+    """Interne Anlage samt ursprünglichem Slotpreisstand für die Einlösung."""
+
+    buchung: Buchung
+    preisstand: tarife.Slotpreisstand
+
+
+def lege_an_mit_preisstand(
     db: Session,
     *,
     feld_id: uuid.UUID,
@@ -88,7 +97,7 @@ def lege_an(
     pin_klar: str | None = None,
     zahlungsart: str = "manuell",
     ust_satz: Decimal | None = None,
-) -> Buchung:
+) -> Buchungsanlage:
     if zahlungsart not in ZAHLUNGSARTEN:
         raise BuchungsFehler("zahlungsart_unbekannt")
     # Wie Daueranlage und Finanzvorgänge zuerst den Kunden sperren: Auch die
@@ -109,10 +118,10 @@ def lege_an(
         raise BuchungsFehler("belegt")
     # Preis und Satz nach der Gruppe am Tag des Termins, nicht am Buchungstag (A-KUND-6).
     gruppe = kundengruppen.effektive_gruppe(db, kunde, lokales_datum(beginn))
-    preis = tarife.ermittle_preis(
+    preisstand = tarife.preisstand_fuer_buchung(
         db, feld_id=feld_id, beginn=beginn, ende=ende, kundengruppe_id=gruppe.id
     )
-    if preis is None:
+    if preisstand is None:
         raise BuchungsFehler("kein_tarif")
     if pin_klar is None:
         pin_klar = pin.finde_freien(
@@ -128,7 +137,7 @@ def lege_an(
         beginn=beginn,
         ende=ende,
         status=status,
-        preis=preis,
+        preis=preisstand.summe,
         zahlungsart=zahlungsart,
         kundengruppe_id=gruppe.id,
         ust_satz=gruppe.ust_satz if ust_satz is None else ust_satz,
@@ -154,7 +163,43 @@ def lege_an(
     lesestand.markiere_geaendert(db, "belegung", f"konto:{b.kunde_id}")
     for hook in NACH_ANLAGE:
         hook(db, b)
-    return b
+    return Buchungsanlage(b, preisstand)
+
+
+def lege_an(
+    db: Session,
+    *,
+    feld_id: uuid.UUID,
+    kunde_id: uuid.UUID,
+    beginn: datetime,
+    ende: datetime,
+    quelle: str = "admin",
+    admin_user_id: uuid.UUID | None = None,
+    pruefe_fenster: bool = False,
+    status: str = Buchung.BESTAETIGT,
+    anfrage_id: uuid.UUID | None = None,
+    dauerbuchung_id: uuid.UUID | None = None,
+    pin_klar: str | None = None,
+    zahlungsart: str = "manuell",
+    ust_satz: Decimal | None = None,
+) -> Buchung:
+    """Bestehende Buchungsanlage mit unveränderter Signatur und Modellrückgabe."""
+    return lege_an_mit_preisstand(
+        db,
+        feld_id=feld_id,
+        kunde_id=kunde_id,
+        beginn=beginn,
+        ende=ende,
+        quelle=quelle,
+        admin_user_id=admin_user_id,
+        pruefe_fenster=pruefe_fenster,
+        status=status,
+        anfrage_id=anfrage_id,
+        dauerbuchung_id=dauerbuchung_id,
+        pin_klar=pin_klar,
+        zahlungsart=zahlungsart,
+        ust_satz=ust_satz,
+    ).buchung
 
 
 def setze_status(

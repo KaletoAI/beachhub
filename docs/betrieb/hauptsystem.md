@@ -331,6 +331,8 @@ noch aktive oder teilweise eingelöste, abgelaufene Codes auf verfallen und aktu
 betroffenen Kontodokumente. Er erzeugt keine Rechnung und kein Guthaben.
 Die Einlösung ist im Hauptsystem-Kanal implementiert. Einheiten decken chronologisch die
 im Code gespeicherten Minuten; ein angeschnittener Slot wird zeitproportional bewertet.
+Tarifwert, Gutscheindeckung und Rest verwenden denselben Preisstand der Buchungsanlage,
+auch wenn währenddessen neue Tarife gespeichert werden.
 Erst danach werden Wertgutscheine und das Guthaben des Einlösers gegen den Rest verrechnet.
 Die Buchungsbestätigung zeigt Tarifwert, Gutscheindeckung und Geld-/Guthabenanteil getrennt.
 Ein Mehrzweck-Einheitsgutschein über 26 € erzeugt bei Einlösung einen Beleg über 26 €,
