@@ -1,0 +1,17 @@
+{% extends "base.html" %}{% block title %}Gutscheine{% endblock %}
+{% block content %}
+<h1>Gutscheine</h1>
+<form method="get" action="/admin/gutscheine" class="karte zeile">
+  <label>Art <select name="art"><option value="">alle</option><option value="kauf" {% if art == "kauf" %}selected{% endif %}>Kaufgutscheine</option><option value="frei" {% if art == "frei" %}selected{% endif %}>Freischaltcodes</option></select></label>
+  <label>Status <select name="status"><option value="">alle</option>{% for s in ["offen", "aktiv", "teilweise_eingeloest", "eingeloest", "gesperrt", "verfallen", "abgebrochen"] %}<option value="{{ s }}" {% if status == s %}selected{% endif %}>{{ s|replace("_", " ") }}</option>{% endfor %}</select></label>
+  <label>Serie <input name="serie" value="{{ serie }}" maxlength="100"></label><button>Filtern</button>
+  <a class="aktion" href="/admin/gutscheine/serie.csv?serie={{ serie|urlencode }}">Freischaltcode-Serie als CSV</a>
+</form>
+<div class="karte"><p>Bis zu 500 Gutscheine. Für weitere Ergebnisse bitte filtern.</p>
+<table><tr><th>Code</th><th>Art</th><th>Einheit / Restwert</th><th>Gültig bis</th><th>Status</th><th>Serie</th><th></th></tr>
+{% for g in gutscheine %}<tr>
+  <td>{% if g.status not in ["offen", "abgebrochen"] %}{{ g.code|gutscheincode }}{% else %}Kauf nicht abgeschlossen{% endif %}</td>
+  <td>{{ "Freischaltcode" if g.art == "frei" else "Kaufgutschein" }}</td><td>{{ (g.minuten|string + " Minuten") if g.modell == "einheit" else g.restwert|euro }}</td>
+  <td>{{ g.gueltig_bis|datum if g.gueltig_bis else "–" }}</td><td>{{ g.status|replace("_", " ") }}</td><td>{{ g.serie }}</td><td><a href="/admin/gutscheine/{{ g.id }}">öffnen</a></td>
+</tr>{% else %}<tr><td colspan="7">Keine Gutscheine gefunden.</td></tr>{% endfor %}</table></div>
+{% endblock %}

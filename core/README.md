@@ -96,7 +96,11 @@ Revision `0015` bereitet Kauf-Snapshots, Einlösungszustände und die genaue Bel
 Offene Käufe haben noch kein Ablaufdatum; Gültigkeitsdauer und Zahlungsfrist bleiben gespeichert.
 Der Rechnungskreis behält seine bisherigen Jahreszähler; steuerfreie Kaufbelege erhalten einen
 eigenen Kreis `gutschein` mit Nummern `GB-JJJJ-NNNNN`. Freischaltcodes haben Steuer `keine`.
-Kauf-, Einlösungs- und Verwaltungsdienste folgen in den weiteren Umsetzungsschritten.
+Freischaltcodes lassen sich unter **Gutscheine → Freischaltcodes** ausstellen und als Serie
+exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsänderungen mit Audit.
+Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
+dauerhaft gesperrt. Kauf- und Einlösungsdienste folgen in den weiteren Umsetzungsschritten.
+Der Gutschein-Nachtjob läuft täglich um 00:20 Europe/Berlin; das Ablaufdatum gilt einschließlich.
 Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
 `gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes
 mit einem separaten Insert-Savepoint kollisionsfest ein. Die 32 Symbole schließen `0/O/1/I` aus.

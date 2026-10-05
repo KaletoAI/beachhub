@@ -310,6 +310,27 @@ Mail an `EMAIL_FROM`; nachgelieferte Alarme nach einem Ausfall gesammelt in eine
 
 Einrichtung des Hallenrechners und von Home Assistant: `docs/betrieb/hallendienst.md`.
 
+### Freischaltcodes und Gutscheinverwaltung
+
+Unter **Gutscheine → Freischaltcodes** stellt die Admin-Rolle 1 bis 1000 Einzelcodes aus.
+Die lesende Rolle kann Übersicht, Details und CSV ansehen. Die Vorgaben sind eine Einlösung
+und 90 Tage Gültigkeit; Dauer und Standardgültigkeit kommen aus den Einstellungen.
+Freischaltcodes bleiben auch im Wertgutscheinmodell Buchungseinheiten ohne Geldwert und Steuerbeleg.
+Feld und Buchungszeitraum sind optional. Eine benannte Serie lässt sich über die Übersicht
+als CSV exportieren; der Export enthält alle Freischaltcodes der Serie, unabhängig vom Listenlimit.
+
+Die Detailseite zeigt Käufer, Inhaber, Einlösungen und Änderungen. **Sperren** verhindert weitere
+Nutzungen. **Gültigkeit speichern** ändert allein das Ablaufdatum; die optionale Reaktivierung
+steht bei gesperrten oder verfallenen Codes bereit. Verbrauch und Restwert bleiben erhalten,
+auch wenn der Code bereits vollständig verbraucht ist. Zurückgegebene Kaufgutscheine können
+niemals reaktiviert werden. Bei einer gleichzeitig geänderten Zuordnung wird die Aktion
+vollständig zurückgerollt und fordert zum erneuten Ausführen auf.
+
+Das Ablaufdatum gilt einschließlich. Täglich um **00:20 Europe/Berlin** setzt der Nachtjob
+noch aktive oder teilweise eingelöste, abgelaufene Codes auf verfallen und aktualisiert die
+betroffenen Kontodokumente. Er erzeugt keine Rechnung und kein Guthaben.
+Kauf, Einlösung und finanzielle Rückgabe folgen in späteren Umsetzungsschritten.
+
 ## 6. Backup und Wiederherstellung
 
 Das Skript `core/deploy/backup.sh` erstellt ein verschlüsseltes Backup aus Datenbank-Dump und dem

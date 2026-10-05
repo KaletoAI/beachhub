@@ -128,6 +128,13 @@ Nummerierung `A-<Bereich>-<Nr>` zur Referenz in Tickets und Tests.
 
 ### 3.9a Gutscheine und Freischaltcodes
 
+**Umsetzungsstand 05.10.2026 (Verwaltung):** Ausgabe von 1–1000 Freischaltcodes,
+Serien-CSV, Verwaltungsübersicht, Sperren, Gültigkeitsänderung und der Nachtjob um 00:20
+Europe/Berlin sind vorhanden. Freicodes speichern die Ausgabedauer und bleiben Einheiten
+auch beim globalen Wertmodell. Das Ablaufdatum gilt einschließlich; Reaktivierung erhält
+Verbrauch und Restwert. Ein Rückgabemarker verbietet jede Reaktivierung dauerhaft.
+Kauf, Einlösung und finanzielle Rückgabe sind damit noch nicht implementiert.
+
 Zwei Vorgänge, die der Betreiber unterscheidet: Jemand **kauft** einen Slot in der Zukunft ohne Datum und Zeit, und jemand **löst** einen Code bei der Platzbuchung ein – wobei der Code entweder gekauft oder vom Betreiber ausgestellt sein kann.
 
 Der Betreiber hat sich am 23.09.2026 für einen Gutschein entschieden, der eine **Buchungseinheit** deckt, unabhängig vom dann gültigen Preis. Der frühere Vorschlag (Eurobetrag mit Restwert) bleibt als Einstellung erhalten; beide Modelle teilen Code, Einlösung in der Buchungstransaktion, Zustände und Missbrauchsschutz.

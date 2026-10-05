@@ -11,6 +11,7 @@ from beachhub_core.models import Kunde
 from beachhub_core.services import (
     benachrichtigung,
     guthaben,
+    gutscheine,
     halle,
     lesestand,
     mitgliedschaft,
@@ -28,6 +29,20 @@ def verfall_ausfuehren(db: Session) -> int:
     for b in verfallen:
         benachrichtigung.zahlungsfrist_abgelaufen(db, b)
     return len(verfallen)
+
+
+def gutschein_verfall_ausfuehren(db: Session) -> int:
+    anzahl = gutscheine.verfalle(db)
+    db.commit()
+    return anzahl
+
+
+def _job_gutschein_verfall() -> None:
+    with SessionLocal() as db:
+        try:
+            gutschein_verfall_ausfuehren(db)
+        except Exception:
+            logger.exception("Verfall der Gutscheine fehlgeschlagen")
 
 
 def _job_lesestand() -> None:
@@ -131,6 +146,12 @@ def starte_scheduler() -> BackgroundScheduler:
         _job_hallenplan,
         CronTrigger(hour=0, minute=5),
         id="hallenplan_nachts",
+        replace_existing=True,
+    )
+    s.add_job(
+        _job_gutschein_verfall,
+        CronTrigger(hour=0, minute=20, timezone="Europe/Berlin"),
+        id="gutschein_verfall",
         replace_existing=True,
     )
     s.start()

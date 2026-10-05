@@ -13,7 +13,7 @@ der Hallenhersteller die Schnittstellen festlegt.
 
 Für Stufe 1a-III ist die Gutschein-Datenbasis mit Revision `0015` vorbereitet:
 Kauf-Snapshots, Einlösungsbelegbasis und ein eigener Kaufbelegnummernkreis.
-Kauf, Einlösung und Verwaltung folgen in weiteren Schritten und sind noch nicht verfügbar.
+Freischaltcodes und ihre Verwaltung sind verfügbar; Kauf und Einlösung folgen in weiteren Schritten.
 Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit sind vorbereitet;
 die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
 

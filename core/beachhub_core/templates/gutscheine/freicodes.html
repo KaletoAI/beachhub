@@ -1,0 +1,15 @@
+{% extends "base.html" %}{% block title %}Freischaltcodes{% endblock %}
+{% block content %}
+<h1>Freischaltcodes ausstellen</h1>
+<p>Jeder Code deckt eine Buchungseinheit von {{ minuten }} Minuten ab. Freischaltcodes haben keinen Geldwert und keinen Steuerbeleg.</p>
+{% if admin.rolle == "admin" %}<form method="post" action="/admin/gutscheine/freicodes" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <div class="zeile"><label>Anzahl <input type="number" name="anzahl" min="1" max="1000" value="1" required></label>
+  <label>Gültig bis einschließlich <input type="date" name="gueltig_bis" value="{{ gueltig_bis }}" required></label>
+  <label>Einlösungen je Code <input type="number" name="max_einloesungen" min="1" value="1" required></label></div>
+  <div class="zeile"><label>Feld <select name="feld_id"><option value="">alle Felder</option>{% for f in felder %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}</select></label>
+  <label>Buchungszeitraum von <input type="date" name="zeitraum_von"></label><label>bis <input type="date" name="zeitraum_bis"></label></div>
+  <label>Serie <input name="serie" maxlength="100"></label><label>Notiz <textarea name="notiz" maxlength="1000"></textarea></label>
+  <button>Codes ausstellen</button>
+</form>{% else %}<p>Die lesende Rolle kann keine Codes ausstellen.</p>{% endif %}
+{% endblock %}

@@ -45,6 +45,14 @@ NAVIGATION: list[Bereich] = [
     ),
     Bereich("Rechnungen", "/admin/rechnungen"),
     Bereich(
+        "Gutscheine",
+        "/admin/gutscheine",
+        [
+            Punkt("Übersicht", "/admin/gutscheine"),
+            Punkt("Freischaltcodes", "/admin/gutscheine/freicodes"),
+        ],
+    ),
+    Bereich(
         "Stammdaten",
         "/admin/felder",
         [

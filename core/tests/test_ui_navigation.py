@@ -21,6 +21,8 @@ SEITEN = [
     "/admin/kunden/abgleich",
     "/admin/kunden/guthabenliste",
     "/admin/rechnungen",
+    "/admin/gutscheine",
+    "/admin/gutscheine/freicodes",
     "/admin/felder",
     "/admin/betriebszeiten",
     "/admin/ausnahmetage",
