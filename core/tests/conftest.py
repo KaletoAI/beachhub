@@ -40,7 +40,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 
 # Fixture `welt` (Task 13/14/16 rund um den Hallenplan): einmal in core/tests/hilfen_halle.py,
 # hier für alle Testmodule registriert statt in jedem einzeln importiert oder dupliziert.
-pytest_plugins = ["hilfen_halle"]
+pytest_plugins = ["hilfen_halle", "hilfen_gutschein"]
 
 
 @pytest.fixture(autouse=True)

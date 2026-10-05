@@ -89,3 +89,13 @@ Details zu Korrekturbelegen, freien Abo-Absagen und manuellen Auszahlungen stehe
 Bei Buchungsanlagen gilt die Sperrreihenfolge Kunde vor Feld, auch für Portal-Einzelbuchungen.
 Daueranlagen sperren vorher die vollständige Menge beteiligter Kunden nach UUID; die
 Fremdschlüsselprüfungen von PostgreSQL sind bei weiteren Änderungen mitzuberücksichtigen.
+
+## Gutschein-Datenbasis (Stufe 1a-III, in Arbeit)
+
+Revision `0015` bereitet Kauf-Snapshots, Einlösungszustände und die genaue Belegbasis vor.
+Offene Käufe haben noch kein Ablaufdatum; Gültigkeitsdauer und Zahlungsfrist bleiben gespeichert.
+Der Rechnungskreis behält seine bisherigen Jahreszähler; steuerfreie Kaufbelege erhalten einen
+eigenen Kreis `gutschein` mit Nummern `GB-JJJJ-NNNNN`. Freischaltcodes haben Steuer `keine`.
+Kauf-, Einlösungs- und Verwaltungsdienste folgen in den weiteren Umsetzungsschritten.
+Ein Downgrade verweigert vorhandenen Gutscheinbestand, Gutscheinbelege und verbrauchte
+Gutschein-Nummernkreise ausdrücklich. Es löscht diese Daten nicht.

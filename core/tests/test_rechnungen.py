@@ -58,6 +58,132 @@ def test_nummern_lueckenlos_je_jahr(db: Session) -> None:
     assert rechnungen.naechste_nummer(db, 2028) == "2028-00001"
 
 
+def test_nummernkreise_sind_getrennt(db: Session) -> None:
+    assert rechnungen.naechste_nummer(db, 2027, "gutschein") == "GB-2027-00001"
+    assert rechnungen.naechste_nummer(db, 2027) == "2027-00001"
+    assert rechnungen.naechste_nummer(db, 2027, "gutschein") == "GB-2027-00002"
+
+
+def test_exakte_gegenbetraege(db: Session, welt) -> None:
+    _, kunde, _ = welt
+    gegen = rechnungen._neue_rechnung(
+        db,
+        kunde,
+        "storno",
+        [
+            rechnungen.Posten(
+                None,
+                "Centrest",
+                Decimal("-0.03"),
+                Decimal("19"),
+                netto_vorgegeben=Decimal("-0.02"),
+                ust_vorgegeben=Decimal("-0.01"),
+            )
+        ],
+        date(2027, 11, 25),
+        date(2027, 11, 25),
+        "bezahlt",
+        quelle="system",
+    )
+    assert (gegen.netto, gegen.ust, gegen.brutto) == (
+        Decimal("-0.02"),
+        Decimal("-0.01"),
+        Decimal("-0.03"),
+    )
+    assert gegen.netto + gegen.ust == gegen.brutto
+
+
+def test_korrektur_negiert_exakte_belegbasis(db: Session, welt) -> None:
+    _, kunde, _ = welt
+    r = rechnungen._neue_rechnung(
+        db,
+        kunde,
+        "einzel",
+        [
+            rechnungen.Posten(
+                None,
+                "Centrest",
+                Decimal("0.03"),
+                Decimal("19"),
+                netto_vorgegeben=Decimal("0.02"),
+                ust_vorgegeben=Decimal("0.01"),
+            )
+        ],
+        date(2027, 11, 25),
+        date(2027, 11, 25),
+        "bezahlt",
+        quelle="system",
+    )
+    gegen = rechnungen.korrigiere(db, r.positionen, grund="Test", quelle="system")
+    assert (gegen.netto, gegen.ust, gegen.brutto) == (
+        Decimal("-0.02"),
+        Decimal("-0.01"),
+        Decimal("-0.03"),
+    )
+
+
+@pytest.mark.parametrize(
+    "netto,ust",
+    [
+        (Decimal("0.02"), None),
+        (None, Decimal("0.01")),
+        (Decimal("0.02"), Decimal("0.02")),
+        (Decimal("0.021"), Decimal("0.009")),
+        (Decimal("NaN"), Decimal("0.01")),
+        (Decimal("Infinity"), Decimal("0.01")),
+        (0.02, Decimal("0.01")),
+        (Decimal("1E100"), Decimal("-1E100")),
+    ],
+)
+def test_ungueltige_exakte_betraege(netto, ust) -> None:
+    with pytest.raises(rechnungen.RechnungsFehler, match="ungueltige_belegbasis"):
+        rechnungen.Posten(
+            None, "Teil", Decimal("0.03"), Decimal("19"), netto_vorgegeben=netto, ust_vorgegeben=ust
+        )
+
+
+def test_gutschein_anlageaudit_vollstaendig(db: Session, welt, admin) -> None:
+    import uuid
+
+    _, kunde, _ = welt
+    user, _ = admin
+    ursprung = rechnungen._neue_rechnung(
+        db,
+        kunde,
+        "gutschein",
+        [rechnungen.Posten(None, "Kauf", Decimal("26"), Decimal("7"))],
+        date(2027, 11, 25),
+        date(2027, 11, 25),
+        "bezahlt",
+        quelle="system",
+        gutschein_rolle="kauf",
+    )
+    gutschein_id, einloesung_id = uuid.uuid4(), uuid.uuid4()
+    r = rechnungen._neue_rechnung(
+        db,
+        kunde,
+        "storno",
+        [rechnungen.Posten(None, "Teil", Decimal("-1"), Decimal("7"))],
+        date(2027, 11, 25),
+        date(2027, 11, 25),
+        "bezahlt",
+        quelle="admin",
+        gutschein_rolle="einloesung",
+        korrigiert_rechnung_id=ursprung.id,
+        admin_user_id=user.id,
+        gutschein_ids=[gutschein_id],
+        einloesung_ids=[einloesung_id],
+    )
+    db.flush()
+    eintrag = db.scalars(select(Audit).where(Audit.objekt_id == r.id)).one()
+    assert eintrag.vorher_json is None
+    assert eintrag.admin_user_id == user.id
+    assert eintrag.nachher_json["gutschein_rolle"] == "einloesung"
+    assert eintrag.nachher_json["korrigiert_rechnung_id"] == str(ursprung.id)
+    assert eintrag.nachher_json["gutschein_ids"] == [str(gutschein_id)]
+    assert eintrag.nachher_json["einloesung_ids"] == [str(einloesung_id)]
+
+
 def test_einzelrechnung_mit_ust(db: Session, welt) -> None:
     f, a, _ = welt
     b = buchungen.lege_an(

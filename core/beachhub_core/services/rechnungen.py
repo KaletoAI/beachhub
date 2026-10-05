@@ -30,13 +30,32 @@ NULL = Decimal("0.00")
 
 @dataclass(frozen=True)
 class Posten:
-    """Eine Rechnungsposition vor dem Anlegen. Netto und Steuer rechnet `_neue_rechnung` je
-    Position (A-RECH-8)."""
+    """Eine Rechnungsposition vor dem Anlegen. Standardmäßig wird je Position gerundet
+    (A-RECH-8); vorgegebene Gegenbeträge bewahren die ursprüngliche Belegbasis exakt."""
 
     buchung: Buchung | None
     text: str
     brutto: Decimal
     ust_satz: Decimal
+    netto_vorgegeben: Decimal | None = None
+    ust_vorgegeben: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        if self.netto_vorgegeben is None and self.ust_vorgegeben is None:
+            return
+        werte = (self.brutto, self.netto_vorgegeben, self.ust_vorgegeben)
+        if not all(
+            isinstance(w, Decimal)
+            and w.is_finite()
+            and abs(w) <= Decimal("99999999.99")
+            and w == w.quantize(CENT)
+            for w in werte
+        ):
+            raise RechnungsFehler("ungueltige_belegbasis")
+        if self.netto_vorgegeben is None or self.ust_vorgegeben is None:
+            raise RechnungsFehler("ungueltige_belegbasis")
+        if self.netto_vorgegeben + self.ust_vorgegeben != self.brutto:
+            raise RechnungsFehler("ungueltige_belegbasis")
 
 
 @dataclass(frozen=True)
@@ -51,14 +70,25 @@ class RechnungsFehler(Exception):  # noqa: N818
     pass
 
 
-def naechste_nummer(db: Session, jahr: int) -> str:
-    db.execute(insert(Nummernkreis).values(jahr=jahr, letzte_nummer=0).on_conflict_do_nothing())
-    kreis = db.scalar(select(Nummernkreis).where(Nummernkreis.jahr == jahr).with_for_update())
-    if kreis is None:
+def naechste_nummer(db: Session, jahr: int, kreis: str = "rechnung") -> str:
+    if kreis not in ("rechnung", "gutschein"):
+        raise RechnungsFehler("ungueltiger_nummernkreis")
+    db.execute(
+        insert(Nummernkreis)
+        .values(kreis=kreis, jahr=jahr, letzte_nummer=0)
+        .on_conflict_do_nothing()
+    )
+    zaehler = db.scalar(
+        select(Nummernkreis)
+        .where(Nummernkreis.kreis == kreis, Nummernkreis.jahr == jahr)
+        .with_for_update()
+    )
+    if zaehler is None:
         raise RuntimeError("Nummernkreis konnte nicht angelegt werden")
-    kreis.letzte_nummer += 1
+    zaehler.letzte_nummer += 1
     db.flush()
-    return f"{jahr}-{kreis.letzte_nummer:05d}"
+    praefix = "GB-" if kreis == "gutschein" else ""
+    return f"{praefix}{jahr}-{zaehler.letzte_nummer:05d}"
 
 
 def netto_ust(brutto: Decimal, satz: Decimal) -> tuple[Decimal, Decimal]:
@@ -206,15 +236,23 @@ def korrigiere(
         rechnung.kunde,
         "storno",
         [
-            Posten(None, f"Storno zu Rechnung {rechnung.nummer}: {p.text}", -p.brutto, p.ust_satz)
+            Posten(
+                None,
+                f"Storno zu Rechnung {rechnung.nummer}: {p.text}",
+                -p.brutto,
+                p.ust_satz,
+                netto_vorgegeben=-p.netto,
+                ust_vorgegeben=-p.ust,
+            )
             for p in positionen
         ],
         von,
         bis,
         "bezahlt",
         quelle=quelle,
+        korrigiert_rechnung_id=rechnung.id,
+        admin_user_id=admin_user_id,
     )
-    beleg.korrigiert_rechnung_id = rechnung.id
     for p, gegen in zip(positionen, beleg.positionen, strict=True):
         p.korrigiert_durch_id = gegen.id
     if all(p.korrigiert_durch_id is not None for p in rechnung.positionen):
@@ -261,6 +299,12 @@ def _neue_rechnung(
     quelle: str,
     zahlungsziel_tage: int | None = None,
     dauerbuchung_id: uuid.UUID | None = None,
+    kreis: str = "rechnung",
+    gutschein_rolle: str | None = None,
+    korrigiert_rechnung_id: uuid.UUID | None = None,
+    admin_user_id: uuid.UUID | None = None,
+    gutschein_ids: Sequence[uuid.UUID] = (),
+    einloesung_ids: Sequence[uuid.UUID] = (),
 ) -> Rechnung:
     heute = clock.today(db)
     ziel = (
@@ -268,9 +312,16 @@ def _neue_rechnung(
         if zahlungsziel_tage is None
         else zahlungsziel_tage
     )
-    zeilen = [(p, *netto_ust(p.brutto, p.ust_satz)) for p in posten]
+    zeilen = [
+        (p, p.netto_vorgegeben, p.ust_vorgegeben)
+        if p.netto_vorgegeben is not None and p.ust_vorgegeben is not None
+        else (p, *netto_ust(p.brutto, p.ust_satz))
+        for p in posten
+    ]
     r = Rechnung(
-        nummer=naechste_nummer(db, heute.year),
+        nummer=naechste_nummer(db, heute.year, kreis),
+        gutschein_rolle=gutschein_rolle,
+        korrigiert_rechnung_id=korrigiert_rechnung_id,
         kunde_id=kunde.id,
         dauerbuchung_id=dauerbuchung_id,
         art=art,
@@ -306,13 +357,19 @@ def _neue_rechnung(
             p.buchung.rechnung_position_id = pos.id
     db.flush()
     db.refresh(r)
+    nachher = audit.als_dict(r)
+    if gutschein_ids:
+        nachher["gutschein_ids"] = [str(i) for i in gutschein_ids]
+    if einloesung_ids:
+        nachher["einloesung_ids"] = [str(i) for i in einloesung_ids]
     audit.protokolliere(
         db,
         quelle=quelle,
         objekt_typ="rechnung",
         objekt_id=r.id,
         vorher=None,
-        nachher=audit.als_dict(r),
+        nachher=nachher,
+        admin_user_id=admin_user_id,
     )
     from beachhub_core.services import lesestand
 

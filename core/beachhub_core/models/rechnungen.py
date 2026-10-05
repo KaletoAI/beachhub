@@ -3,7 +3,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import DECIMAL, Date, DateTime, ForeignKey, Index, Integer, String
+from sqlalchemy import DECIMAL, CheckConstraint, Date, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -14,13 +14,19 @@ from beachhub_core.models.kunden import Kunde
 
 class Nummernkreis(Base):
     __tablename__ = "nummernkreis"
+    kreis: Mapped[str] = mapped_column(String(20), primary_key=True, default="rechnung")
     jahr: Mapped[int] = mapped_column(Integer, primary_key=True)
     letzte_nummer: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    __table_args__ = (
+        CheckConstraint("kreis IN ('rechnung', 'gutschein')", name="ck_nummernkreis_kreis"),
+        CheckConstraint("letzte_nummer >= 0", name="ck_nummernkreis_nummer"),
+    )
 
 
 class Rechnung(UUIDMixin, ZeitstempelMixin, Base):
     __tablename__ = "rechnung"
-    nummer: Mapped[str] = mapped_column(String(12), nullable=False, unique=True)
+    nummer: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
+    gutschein_rolle: Mapped[str | None] = mapped_column(String(12))
     kunde_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("kunde.id"), nullable=False
     )
@@ -57,6 +63,12 @@ class Rechnung(UUIDMixin, ZeitstempelMixin, Base):
         back_populates="rechnung",
         cascade="all, delete-orphan",
         order_by="RechnungPosition.reihenfolge",
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "gutschein_rolle IN ('kauf', 'einloesung', 'geldanteil')",
+            name="ck_rechnung_gutschein_rolle",
+        ),
     )
 
 

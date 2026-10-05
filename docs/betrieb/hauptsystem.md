@@ -419,6 +419,13 @@ docker compose up -d
 Vor größeren Updates (insbesondere bei neuen Alembic-Migrationen) empfiehlt sich ein Backup gemäß
 Abschnitt 6.
 
+Die vorbereitende Gutscheinmigration `0015` erhält die bisherigen Rechnungsnummern und
+Jahreszähler. Sie führt einen zusätzlichen Nummernkreis für Kaufbelege ohne Steuer ein
+(`GB-JJJJ-NNNNN`). Solange nur die Datenbasis umgesetzt ist, sind Kauf und Einlösung noch
+keine verfügbaren Betriebsabläufe. Ein Downgrade auf `0014` wird bei vorhandenem
+Gutscheinbestand, Gutscheinbelegen oder bereits verbrauchten Gutschein-Nummernkreisen
+mit einer klaren Fehlermeldung abgewiesen; diese Daten werden dabei nicht gelöscht.
+
 ## 8. Störungen
 
 Die Compose-Services `db`, `app` und `caddy` sind mit `restart: unless-stopped` konfiguriert und
