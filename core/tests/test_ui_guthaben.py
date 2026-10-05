@@ -1,8 +1,10 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import pyotp
 import pytest
+from apscheduler.triggers import cron
 from beachhub_core import auth, clock, jobs, mail
 from beachhub_core.models import AppSetting, Audit, GuthabenBuchung, Kunde, utcnow
 from beachhub_core.services import guthaben, konfiguration, kunden
@@ -46,6 +48,25 @@ def test_saisonende_job_mailt_nach_commit(db: Session, mail_ausgang: list) -> No
     assert "1 Kunden" in mail_ausgang[0]["text"] and "30,00 €" in mail_ausgang[0]["text"]
     jobs.saisonende_ausfuehren(db)
     assert len(mail_ausgang) == 1
+
+
+@pytest.mark.parametrize(("monat", "utc_stunde"), [(1, 6), (7, 5)])
+def test_saisonende_trigger_um_0705_berlin_bei_utc_server(
+    monkeypatch: pytest.MonkeyPatch, monat: int, utc_stunde: int
+) -> None:
+    monkeypatch.setattr(cron, "get_localzone", lambda: ZoneInfo("UTC"))
+    monkeypatch.setattr(jobs.BackgroundScheduler, "start", lambda self: None)
+    monkeypatch.setattr(jobs, "_scheduler", None)
+
+    scheduler = jobs.starte_scheduler()
+    job = scheduler.get_job("saisonende")
+    assert job is not None
+    naechster_lauf = job.trigger.get_next_fire_time(None, datetime(2028, monat, 1, tzinfo=UTC))
+    assert naechster_lauf is not None
+    assert naechster_lauf.astimezone(ZoneInfo("Europe/Berlin")) == datetime(
+        2028, monat, 1, 7, 5, tzinfo=ZoneInfo("Europe/Berlin")
+    )
+    assert naechster_lauf.astimezone(UTC) == datetime(2028, monat, 1, utc_stunde, 5, tzinfo=UTC)
 
 
 def test_auszahlung_in_der_liste_abhaken(eingeloggt: TestClient, db: Session) -> None:

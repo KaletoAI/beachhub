@@ -119,7 +119,10 @@ def starte_scheduler() -> BackgroundScheduler:
         replace_existing=True,
     )
     s.add_job(
-        _job_saisonende, CronTrigger(hour=7, minute=5), id="saisonende", replace_existing=True
+        _job_saisonende,
+        CronTrigger(hour=7, minute=5, timezone="Europe/Berlin"),
+        id="saisonende",
+        replace_existing=True,
     )
     s.add_job(
         _job_halle_kontakt, IntervalTrigger(minutes=5), id="halle_kontakt", replace_existing=True
