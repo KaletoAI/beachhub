@@ -19,6 +19,7 @@ SEITEN = [
     "/admin/kunden",
     "/admin/kunden/antraege",
     "/admin/kunden/abgleich",
+    "/admin/kunden/guthabenliste",
     "/admin/rechnungen",
     "/admin/felder",
     "/admin/betriebszeiten",

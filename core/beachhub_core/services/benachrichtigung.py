@@ -11,7 +11,7 @@ from beachhub_core import mail
 from beachhub_core.config import settings
 from beachhub_core.models import Buchung, Dauerbuchung, GuthabenBuchung, Kunde, Rechnung, Storno
 from beachhub_core.services import konfiguration, pin
-from beachhub_core.templating import templates
+from beachhub_core.templating import euro, templates
 
 logger = logging.getLogger(__name__)
 
@@ -163,4 +163,16 @@ def mitgliedsantrag(db: Session, k: Kunde) -> None:
         f"Angaben: {k.mitglied_antrag_hinweis}\n\n"
         "Bitte gegen die Mitgliederliste prüfen und in der Verwaltung unter "
         "Kunden → Mitgliedsanträge freischalten oder verwerfen.",
+    )
+
+
+def guthabenliste(anzahl: int, summe: Decimal) -> None:
+    betreiber_alarm(
+        "Guthabenliste zum Saisonende",
+        f"Die Saison ist zu Ende. {anzahl} Kunden haben zusammen {euro(summe)} Guthaben.\n\n"
+        "Die Liste steht in der Verwaltung unter Kunden → Guthabenliste:\n"
+        f"{settings.base_url.rstrip('/')}/admin/kunden/guthabenliste\n\n"
+        "Wer es wünscht, bekommt "
+        "sein Guthaben ausgezahlt; überweisen Sie selbst und haken Sie die Auszahlung dort ab. "
+        "Alles andere wird mit der nächsten Saisonrechnung oder Buchung verrechnet.",
     )

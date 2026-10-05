@@ -51,6 +51,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "zahlungsfrist_minuten": (int, 15),
     "saison_zahlungsziel_tage": (int, 14),
     "guthaben_auf_saisonrechnung": (bool, True),
+    "saisonende_guthabenliste": (TagMonat, TagMonat("30.04.")),
     "rechnung_zahlungsziel_tage": (int, 14),
     "event_ust_satz": (Decimal, Decimal("19.00")),
     "mitgliedschaft_ablauf": (TagMonat, TagMonat("30.04.")),
@@ -133,6 +134,13 @@ BESCHREIBUNGEN: dict[str, Beschreibung] = {
         "Zahlungsfrist",
         "Minuten",
         "So lange bleibt eine Reservierung nach der Buchung für die Online-Zahlung bestehen.",
+    ),
+    "saisonende_guthabenliste": Beschreibung(
+        "Zahlung und Rechnung",
+        "Guthabenliste zum Saisonende",
+        "Tag und Monat",
+        "Ab diesem Tag bekommen Sie einmal im Jahr eine E-Mail mit Anzahl und Summe der "
+        "Guthaben sowie einem Link zur Guthabenliste. Wer es wünscht, bekommt es ausgezahlt.",
     ),
     "rechnung_zahlungsziel_tage": Beschreibung(
         "Zahlung und Rechnung",

@@ -1,6 +1,6 @@
 import uuid
 from datetime import timedelta
-from decimal import InvalidOperation
+from decimal import Decimal, InvalidOperation
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -224,6 +224,50 @@ def _detail_ctx(db: Session, k: Kunde) -> dict:  # type: ignore[type-arg]
             .limit(50)
         ).all(),
     }
+
+
+@router.get("/kunden/guthabenliste", response_class=HTMLResponse)
+def guthabenliste(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    liste = guthaben.guthabenliste(db)
+    return render(
+        request,
+        "kunden/guthabenliste.html",
+        admin=admin,
+        kunden=liste,
+        summe=sum((k.guthaben for k in liste), Decimal("0.00")),
+        stichtag=konfiguration.hole(db, "saisonende_guthabenliste"),
+    )
+
+
+@router.post("/kunden/guthabenliste/{kunde_id}/auszahlung", response_model=None)
+def guthaben_auszahlen(
+    kunde_id: uuid.UUID,
+    betrag: str = Form(""),
+    notiz: str = Form(""),
+    admin: AdminUser = Depends(auth.nur_admin_rolle),
+    db: Session = Depends(get_db),
+) -> RedirectResponse:
+    """Hakt eine Auszahlung ab, die der Betreiber selbst überwiesen hat (A-ZAHL-6)."""
+    zurueck = RedirectResponse("/admin/kunden/guthabenliste", status_code=303)
+    k = db.get(Kunde, kunde_id)
+    if k is None or k.anonymisiert_am is not None:
+        return mit_flash(zurueck, "Kunde nicht gefunden", "fehler")
+    try:
+        wert = pflicht(t_betrag(betrag), "Betrag")
+        if not wert.is_finite() or wert <= 0:
+            raise ValueError("Betrag muss größer als 0 sein")
+        guthaben.buche(
+            db, kunde=k, betrag=-wert, art="auszahlung", notiz=notiz, admin_user_id=admin.id
+        )
+        db.commit()
+    except FORM_FEHLER as e:
+        db.rollback()
+        return mit_flash(zurueck, fehlertext(e, FEHLERTEXT), "fehler")
+    return mit_flash(zurueck, f"Auszahlung an {k.name} abgehakt")
 
 
 @router.get("/kunden/{kunde_id}", response_class=HTMLResponse)

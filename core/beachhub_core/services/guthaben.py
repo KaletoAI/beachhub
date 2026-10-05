@@ -2,10 +2,12 @@ import uuid
 from decimal import Decimal
 
 from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import GuthabenBuchung, Kunde
-from beachhub_core.services import audit
+from beachhub_core import clock
+from beachhub_core.models import AppSetting, GuthabenBuchung, Kunde
+from beachhub_core.services import audit, konfiguration
 
 # storno_gutschrift entsteht nur über storno.gutschreiben_positionen mit Korrekturbeleg.
 ARTEN = {
@@ -85,3 +87,43 @@ def saldo(db: Session, kunde_id: uuid.UUID) -> Decimal:
         )
     )
     return Decimal(str(s)).quantize(Decimal("0.01"))
+
+
+SAISONENDE_MARKER = "guthabenliste_letzter"
+
+
+def guthabenliste(db: Session) -> list[Kunde]:
+    """Alle Kunden mit Guthaben – zum Saisonende zahlt der Betreiber auf Wunsch aus (A-ZAHL-4)."""
+    return list(
+        db.scalars(
+            select(Kunde)
+            .where(Kunde.guthaben > 0, Kunde.anonymisiert_am.is_(None))
+            .order_by(Kunde.name)
+        ).all()
+    )
+
+
+def saisonende_faellig(db: Session) -> tuple[int, Decimal] | None:
+    """Einmal im Jahr ab dem Stichtag `saisonende_guthabenliste` (auch nachträglich, falls der Lauf
+    am Stichtag ausfiel): Anzahl und Summe der Guthaben. Setzt den Marker, committet nicht."""
+    heute = clock.today(db)
+    stichtag = konfiguration.hole(db, "saisonende_guthabenliste").im_jahr(heute.year)
+    if heute < stichtag:
+        return None
+    # Atomar beanspruchen: Auch parallele Läufe und alte Session-Caches dürfen
+    # dieselbe Jahreserinnerung nicht zweimal freigeben. Keine Kundensperren nötig.
+    jahr = str(heute.year)
+    marker = db.scalar(
+        insert(AppSetting)
+        .values(key=SAISONENDE_MARKER, value=jahr)
+        .on_conflict_do_update(
+            index_elements=[AppSetting.key],
+            set_={"value": jahr},
+            where=AppSetting.value.is_distinct_from(jahr),
+        )
+        .returning(AppSetting.key)
+    )
+    if marker is None:
+        return None
+    liste = guthabenliste(db)
+    return len(liste), sum((k.guthaben for k in liste), Decimal("0.00"))

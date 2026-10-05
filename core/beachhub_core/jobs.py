@@ -10,6 +10,7 @@ from beachhub_core.database import SessionLocal
 from beachhub_core.models import Kunde
 from beachhub_core.services import (
     benachrichtigung,
+    guthaben,
     halle,
     lesestand,
     mitgliedschaft,
@@ -48,6 +49,22 @@ def mitgliedschaft_ausfuehren(db: Session) -> None:
         k = db.get(Kunde, kunde_id)
         if k is not None:
             benachrichtigung.mitgliedschaft_erinnerung(db, k)
+
+
+def saisonende_ausfuehren(db: Session) -> None:
+    """Guthabenliste zum Saisonende melden (A-ZAHL-4) – erst committen, dann mailen."""
+    lauf = guthaben.saisonende_faellig(db)
+    db.commit()
+    if lauf is not None:
+        benachrichtigung.guthabenliste(*lauf)
+
+
+def _job_saisonende() -> None:
+    with SessionLocal() as db:
+        try:
+            saisonende_ausfuehren(db)
+        except Exception:
+            logger.exception("Guthabenliste zum Saisonende fehlgeschlagen")
 
 
 def _job_mitgliedschaft() -> None:
@@ -100,6 +117,9 @@ def starte_scheduler() -> BackgroundScheduler:
         CronTrigger(hour=7, minute=0),
         id="mitgliedschaft",
         replace_existing=True,
+    )
+    s.add_job(
+        _job_saisonende, CronTrigger(hour=7, minute=5), id="saisonende", replace_existing=True
     )
     s.add_job(
         _job_halle_kontakt, IntervalTrigger(minutes=5), id="halle_kontakt", replace_existing=True

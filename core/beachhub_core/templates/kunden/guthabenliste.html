@@ -1,0 +1,27 @@
+{% extends "base.html" %}{% block title %}Guthabenliste{% endblock %}
+{% block content %}
+<h1>Guthabenliste</h1>
+<p class="hinweis">Alle Kunden mit Guthaben, zusammen {{ summe|euro }}. Zum Saisonende (Stichtag {{ stichtag }}, siehe Einstellungen) bekommen Sie eine Erinnerung. Wer es wünscht, bekommt sein Guthaben ausgezahlt: Überweisen Sie selbst und haken Sie die Auszahlung hier ab. Alles andere wird mit der nächsten Saisonrechnung oder Buchung verrechnet.</p>
+<div class="karte">
+<table>
+  <thead><tr><th>Name</th><th>E-Mail</th><th class="rechts">Guthaben</th><th>Auszahlung abhaken</th></tr></thead>
+  <tbody>
+  {% for k in kunden %}<tr>
+    <td><a href="/admin/kunden/{{ k.id }}">{{ k.name }}</a></td>
+    <td>{{ k.email }}</td>
+    <td class="rechts">{{ k.guthaben|euro }}</td>
+    <td>
+      <form method="post" action="/admin/kunden/guthabenliste/{{ k.id }}/auszahlung" class="zeile">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>Betrag <input name="betrag" value="{{ k.guthaben|wert }}" required></label>
+        <label>Notiz <input name="notiz" placeholder="überwiesen am …"></label>
+        <button>Ausgezahlt</button>
+      </form>
+    </td>
+  </tr>{% else %}
+    <tr><td colspan="4" class="leer">Niemand hat Guthaben.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}
