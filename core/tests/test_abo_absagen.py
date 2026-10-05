@@ -66,19 +66,11 @@ def _absagen(db: Session, k: Kunde, b) -> online_buchung.Ergebnis:
     return erg
 
 
-@pytest.mark.parametrize("berechnet", [False, True])
-def test_review_7_ohne_offene_position_keinen_kontingentverbrauch(
-    db: Session, welt, berechnet: bool
-) -> None:
-    from test_saisonrechnung import _altabo
-
+def test_review_7_bereits_korrigierter_termin_verbraucht_kein_kontingent(db: Session, welt) -> None:
     f, k = welt
-    if berechnet:
-        d, r = _abo(db, f, k)
-        rechnungen.setze_bezahlt(db, r, admin_user_id=None)
-        storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
-    else:
-        d = _altabo(db, f, k)
+    d, r = _abo(db, f, k)
+    rechnungen.setze_bezahlt(db, r, admin_user_id=None)
+    storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
     db.commit()
     vorher = k.guthaben
     belege = db.query(Rechnung).count()
@@ -86,10 +78,35 @@ def test_review_7_ohne_offene_position_keinen_kontingentverbrauch(
     assert a.kostenfrei is True and a.freie_absage is False
     assert a.verbleibende_freie_absagen == 3
     assert k.guthaben == vorher and db.query(Rechnung).count() == belege
-    if not berechnet:
-        neu = rechnungen.erzeuge_saisonrechnung(db, d)
-        db.commit()
-        assert neu.brutto == Decimal("90")
+
+
+def test_review_7a_unberechneter_termin_verbraucht_kontingent(db: Session, welt) -> None:
+    """Ein unberechneter Termin wird nach der Absage nie berechnet – das kostet Kontingent."""
+    from test_saisonrechnung import _altabo
+
+    f, k = welt
+    d = _altabo(db, f, k)
+    antworten = [_absagen(db, k, b).antwort for b in d.buchungen]
+    assert [a.kostenfrei for a in antworten] == [True, True, True, False]
+    assert [a.freie_absage for a in antworten] == [True, True, True, False]
+    assert storno.freie_absagen_rest(db, d) == 0
+    neu = rechnungen.erzeuge_saisonrechnung(db, d)
+    db.commit()
+    assert neu.brutto == Decimal("30")
+    assert len(neu.positionen) == 1
+
+
+def test_review_7a_absagen_zwischen_vollstorno_und_neuausstellung(db: Session, welt) -> None:
+    f, k = welt
+    d, r = _abo(db, f, k)
+    rechnungen.storniere(db, r, admin_user_id=None, grund="Adresse")
+    db.commit()
+    antworten = [_absagen(db, k, b).antwort for b in d.buchungen]
+    assert [a.freie_absage for a in antworten] == [True, True, True, False, False]
+    assert storno.freie_absagen_rest(db, d) == 0
+    neu = rechnungen.erzeuge_saisonrechnung(db, d)
+    db.commit()
+    assert neu.brutto == Decimal("60")
 
 
 @pytest.mark.parametrize("abo", [False, True])

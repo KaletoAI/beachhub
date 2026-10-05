@@ -172,10 +172,14 @@ def storniere(
                 .execution_options(populate_existing=True)
             )
             kostenfrei = bool(kostenfrei and dauer and freie_absagen_rest(db, dauer) > 0)
-            # Ohne noch unberichtigte Position bleibt die Absage kostenfrei, verbraucht
-            # aber kein Kontingent. Das verhindert auch eine spätere Bestandsberechnung.
+            # Ein bereits gutgeschriebener Termin verbraucht kein Kontingent. Ein unberechneter
+            # schon: Er wird nach der Absage nie mehr berechnet (`saison_abrechenbar`).
             freie_absage = bool(
-                kostenfrei and korrigieren and _offene_position(db, buchung) is not None
+                kostenfrei
+                and (
+                    buchung.rechnung_position_id is None
+                    or _offene_position(db, buchung) is not None
+                )
             )
     s = Storno(
         buchung_id=buchung.id,

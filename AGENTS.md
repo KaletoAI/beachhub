@@ -92,8 +92,8 @@ Bestandsabos werden nicht automatisch abgerechnet; die ausdrückliche Aktion „
 erstellen“ berechnet aktive oder kostenpflichtig abgesagte unberechnete Termine und erlaubt
 Neuausstellung nach Vollstorno. Kostenfreie Absagen und bereits korrigierte Termine bleiben
 ausgeschlossen. Vollstorno gibt nur den verbleibenden bezahlten Anteil als Guthaben zurück;
-vorherige Teilgutschriften bleiben erhalten. Freie Kundenabsagen verbrauchen Kontingent nur
-bei tatsächlicher Positionskorrektur; unberechnete kostenfreie Absagen bleiben kostenfrei.
+vorherige Teilgutschriften bleiben erhalten. Freie Kundenabsagen verbrauchen Kontingent, außer
+der Termin ist bereits gutgeschrieben; auch unberechnete Termine verbrauchen Kontingent.
 Die Portalbestätigung zeigt das freie Absagekontingent und bedingte finanzielle Hinweise;
 eine ausführlichere Abo-Übersicht bleibt für Stufe 2 offen. Die jährliche Guthabenerinnerung
 läuft um 07:05 Europe/Berlin; SMTP-Fehler nach Marker-Commit werden nicht automatisch wiederholt.
