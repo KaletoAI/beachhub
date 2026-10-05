@@ -176,11 +176,11 @@ PDF und Mail werden erst nach erfolgreichem Commit versandt.
 **Abo-Absagen.** Kunden sagen Abo-Termine im Portal bis zum Beginn ab. Bis zu `abo_freie_absagen`
 (Vorgabe 3) Absagen je Abo innerhalb der Stornofrist sind kostenfrei; weitere Absagen und Absagen
 nach der Frist geben den Platz frei, der Termin bleibt aber berechnet. `0` schaltet freie
-Kundenabsagen aus. Eine kostenfreie Kundenabsage verbraucht nur dann Kontingent, wenn eine
-noch nicht korrigierte Rechnungsposition tatsächlich korrigiert wird. Ein fristgerecht bei
-verfügbarem Kontingent abgesagter unberechneter oder bereits korrigierter Termin bleibt
-kostenfrei, verbraucht kein Kontingent und wird später nicht erneut berechnet. Kulanz, Sperren
-und Beenden durch den Betreiber verbrauchen ebenfalls kein Kontingent. Eine kostenpflichtige
+Kundenabsagen aus. Jede kostenfreie Kundenabsage verbraucht Kontingent, auch für einen noch
+unberechneten Termin (etwa zwischen Vollstorno und Neuausstellung): Er wird danach nicht mehr
+berechnet. Nur ein bereits gutgeschriebener Termin (Teil-Stornorechnung) bleibt kostenfrei, ohne
+Kontingent zu verbrauchen. Kulanz, Sperren und Beenden durch den Betreiber verbrauchen ebenfalls
+kein Kontingent. Eine kostenpflichtige
 Betreiberentscheidung wird in der Stornomail als solche benannt.
 Die Portalbestätigung zeigt das verbleibende Kontingent aus dem signierten Kontostand und erklärt
 die Bedingungen und finanziellen Folgen. Über die Absage entscheidet das Hauptsystem bei der

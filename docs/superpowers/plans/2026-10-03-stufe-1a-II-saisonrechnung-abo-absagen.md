@@ -3,7 +3,8 @@
 > Historischer Plan. Korrektur vom 05.10.2026 nach externem Review: B-8 „Vollstorno ohne Guthaben“
 > ist ersetzt. Vollstorno erstattet den verbleibenden bezahlten Anteil mit Korrekturbeleg,
 > bewahrt vorherige Teilkorrekturen und erlaubt die Neuberechnung kostenpflichtiger Absagen.
-> Kontingent wird nur bei tatsächlicher Positionskorrektur verbraucht. Die aktuelle Fachregel
+> Kontingent verbraucht jede kostenfreie Kundenabsage außer für bereits gutgeschriebene
+> Termine. Die aktuelle Fachregel
 > steht in der Spezifikation A-DAUER-3/A-RECH-3/A-RECH-4/A-RECH-7; die ursprünglichen
 > Planentscheidungen und Codeblöcke bleiben hier zur Nachvollziehbarkeit erhalten.
 
