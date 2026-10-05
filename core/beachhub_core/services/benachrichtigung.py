@@ -9,7 +9,15 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import mail
 from beachhub_core.config import settings
-from beachhub_core.models import Buchung, Dauerbuchung, GuthabenBuchung, Kunde, Rechnung, Storno
+from beachhub_core.models import (
+    Buchung,
+    Dauerbuchung,
+    GuthabenBuchung,
+    GutscheinEinloesung,
+    Kunde,
+    Rechnung,
+    Storno,
+)
 from beachhub_core.services import konfiguration, pin
 from beachhub_core.templating import euro, templates
 
@@ -30,6 +38,16 @@ def buchung_bestaetigt(db: Session, b: Buchung) -> None:
         _text(
             "buchung_bestaetigt",
             b=b,
+            gutschein_verrechnet=Decimal(
+                str(
+                    db.scalar(
+                        select(func.coalesce(func.sum(GutscheinEinloesung.betrag), 0)).where(
+                            GutscheinEinloesung.buchung_id == b.id,
+                            GutscheinEinloesung.status != GutscheinEinloesung.RUECKGAENGIG,
+                        )
+                    )
+                )
+            ),
             pin=pin.entschluessele(b.pin_verschluesselt or ""),
             vorlauf=vorlauf,
         ),

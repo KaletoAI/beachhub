@@ -99,7 +99,8 @@ eigenen Kreis `gutschein` mit Nummern `GB-JJJJ-NNNNN`. Freischaltcodes haben Ste
 Freischaltcodes lassen sich unter **Gutscheine → Freischaltcodes** ausstellen und als Serie
 exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsänderungen mit Audit.
 Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
-dauerhaft gesperrt. Kauf- und Einlösungsdienste folgen in den weiteren Umsetzungsschritten.
+dauerhaft gesperrt. Die Einlösung und getrennte Buchungsbelege sind im Hauptsystem-Kanal implementiert;
+Kauf, Rückabwicklung und Portaloberfläche folgen in den weiteren Umsetzungsschritten.
 Der Gutschein-Nachtjob läuft täglich um 00:20 Europe/Berlin; das Ablaufdatum gilt einschließlich.
 Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
 `gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes
@@ -111,6 +112,13 @@ Ein zwischenzeitlicher Besitzer- oder Zahlungswechsel kann einen internen Retry 
 Transaktion erfordern; zusätzliche Kunden dürfen nicht nachträglich gesperrt werden.
 Die Online-Kundensperre liegt bereits außerhalb des Buchungs-Savepoints. Das Limit zählt zehn
 Fehlversuche je Konto in 60 Minuten mit der Fachuhr; eine `anfrage_id` dedupliziert Wiederholungen.
-Die Integration codehaltiger Buchungen samt Transaktionsretry folgt mit dem Einlösungsdienst.
+Codehaltige Buchungen prüfen das Limit außerhalb ihres Savepoints. Abgelehnte Anfragen
+rollen Buchung und Einlösungen zurück; ihre Anfrage-ID zählt genau einmal. Besitzer-/Zahlungswechsel
+werden im Kanal mit höchstens drei vollständigen Transaktionsversuchen neu vorbereitet.
+`gutschein_einloesung.loese_ein` konsumiert den vorher erzeugten `GutscheinSperrkontext`;
+`gutschein_belege.rechnung_fuer_buchung` gibt Geldrechnung und sämtliche Einlösungsbelege zurück.
+Einlösungspositionen haben keinen Buchungs-FK; der Buchungsmarker verweist nur auf den Geldrest.
+Historische Minuten und Mitgliedsvoraussetzung bleiben Kauf-Snapshots. Nicht volle Slots werden
+zeitproportional gedeckt und kumulativ auf Cent gerundet.
 Ein Downgrade verweigert vorhandenen Gutscheinbestand, Gutscheinbelege und verbrauchte
 Gutschein-Nummernkreise ausdrücklich. Es löscht diese Daten nicht.

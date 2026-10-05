@@ -329,7 +329,14 @@ vollständig zurückgerollt und fordert zum erneuten Ausführen auf.
 Das Ablaufdatum gilt einschließlich. Täglich um **00:20 Europe/Berlin** setzt der Nachtjob
 noch aktive oder teilweise eingelöste, abgelaufene Codes auf verfallen und aktualisiert die
 betroffenen Kontodokumente. Er erzeugt keine Rechnung und kein Guthaben.
-Kauf, Einlösung und finanzielle Rückgabe folgen in späteren Umsetzungsschritten.
+Die Einlösung ist im Hauptsystem-Kanal implementiert. Einheiten decken chronologisch die
+im Code gespeicherten Minuten; ein angeschnittener Slot wird zeitproportional bewertet.
+Erst danach werden Wertgutscheine und das Guthaben des Einlösers gegen den Rest verrechnet.
+Die Buchungsbestätigung zeigt Tarifwert, Gutscheindeckung und Geld-/Guthabenanteil getrennt.
+Ein Mehrzweck-Einheitsgutschein über 26 € erzeugt bei Einlösung einen Beleg über 26 €,
+auch wenn er 30 € Tarifwert deckt. Ein Geldrest erhält eine eigene Rechnung.
+Kauf, finanzielle Rückabwicklung und die Portalbedienung folgen in späteren Umsetzungsschritten;
+der vollständige Gutschein-Betriebsablauf bleibt bis dahin in Arbeit.
 
 ## 6. Backup und Wiederherstellung
 
@@ -444,8 +451,8 @@ Die vorbereitende Gutscheinmigration `0015` erhält die bisherigen Rechnungsnumm
 Jahreszähler. Sie führt einen zusätzlichen Nummernkreis für Kaufbelege ohne Steuer ein
 (`GB-JJJJ-NNNNN`). Datenbasis, Codevergabe und interne Vorgangssperren sind vorbereitet;
 die Buchungs- und Batch-Einstiege berücksichtigen diese Sperrreihenfolge bereits.
-Kauf und Einlösung sind noch
-keine verfügbaren Betriebsabläufe. Ein Downgrade auf `0014` wird bei vorhandenem
+Die atomare Kanaleinlösung und getrennte Belege sind implementiert; Kauf, Rückabwicklung
+und die Portalbedienung sind noch keine vollständigen Betriebsabläufe. Ein Downgrade auf `0014` wird bei vorhandenem
 Gutscheinbestand, Gutscheinbelegen oder bereits verbrauchten Gutschein-Nummernkreisen
 mit einer klaren Fehlermeldung abgewiesen; diese Daten werden dabei nicht gelöscht.
 

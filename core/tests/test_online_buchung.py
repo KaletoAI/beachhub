@@ -24,6 +24,7 @@ from beachhub_core.services import (
     kunden,
     lesestand,
     online_buchung,
+    rechnung_pdf,
 )
 from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_shared import kanal
@@ -116,7 +117,7 @@ def test_pdf_fehler_im_nachlauf_alarmiert_betreiber(
     def kaputt(*_a, **_k):
         raise RechnungsFehler("weasyprint")
 
-    monkeypatch.setattr(online_buchung.rechnung_pdf, "erzeuge", kaputt)
+    monkeypatch.setattr(rechnung_pdf, "erzeuge", kaputt)
     erg = _anfragen(db, f, k)
     _nachlauf(db, erg)
     assert erg.antwort.status == "bestaetigt"

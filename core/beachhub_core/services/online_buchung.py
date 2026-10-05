@@ -5,6 +5,7 @@ A-ZAHL-1 bis -4. Jede Funktion arbeitet in der Transaktion des Aufrufers und com
 
 import logging
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -19,7 +20,6 @@ from beachhub_core.models import (
     Dauerbuchung,
     GuthabenBuchung,
     Kunde,
-    Rechnung,
     Storno,
     Zahlung,
     utcnow,
@@ -28,11 +28,11 @@ from beachhub_core.services import (
     benachrichtigung,
     buchungen,
     guthaben,
+    gutschein_belege,
+    gutschein_einloesung,
     gutschein_sperren,
     konfiguration,
     kunden,
-    rechnung_pdf,
-    rechnungen,
     storno,
 )
 from beachhub_core.services.ergebnis import Ergebnis, Nachlauf, abgelehnt, ignoriert, ok
@@ -53,29 +53,17 @@ __all__ = [
 ]
 
 
-def _bestaetigung_versenden(buchung_id: uuid.UUID, rechnung_id: uuid.UUID) -> Nachlauf:
+def _bestaetigung_versenden(buchung_id: uuid.UUID, rechnung_ids: Sequence[uuid.UUID]) -> Nachlauf:
     def lauf(db: Session) -> None:
-        b, r = db.get(Buchung, buchung_id), db.get(Rechnung, rechnung_id)
-        if b is None or r is None:
+        b = db.get(Buchung, buchung_id)
+        if b is None:
             return
-        benachrichtigung.buchung_bestaetigt(db, b)
-        nummer = r.nummer
         try:
-            rechnung_pdf.erzeuge(db, r)
-            db.commit()
+            benachrichtigung.buchung_bestaetigt(db, b)
         except Exception:
-            # Jeder Fehler beim PDF (auch aus WeasyPrint oder dem Dateisystem): Die Buchung ist
-            # bestätigt, der Kunde bekommt aber keine Rechnung – der Betreiber muss nachfassen.
-            logger.exception("PDF-Erzeugung für Rechnung %s fehlgeschlagen", nummer)
+            logger.exception("Buchungsbestätigung %s nicht versandt", buchung_id)
             db.rollback()
-            benachrichtigung.betreiber_alarm(
-                "Rechnungs-PDF nicht erzeugt",
-                f"Das PDF der Rechnung {nummer} zur Portal-Buchung {buchung_id} konnte nicht "
-                "erzeugt werden; der Kunde hat keine Rechnung per Mail bekommen. Details im Log "
-                "des Hauptsystems.",
-            )
-            return
-        benachrichtigung.rechnung(db, r)
+        benachrichtigung.belege_versenden(db, rechnung_ids)
 
     return lauf
 
@@ -102,8 +90,12 @@ def alarm(betreff: str, text: str) -> Nachlauf:
 def _bestaetige(db: Session, b: Buchung, antwort: kanal.Antwort) -> Ergebnis:
     buchungen.setze_status(db, b, Buchung.BESTAETIGT, quelle="portal")
     b.reserviert_bis = None
-    r = rechnungen.erzeuge_einzelrechnung(db, b, quelle="portal")
-    return Ergebnis(antwort, [_bestaetigung_versenden(b.id, r.id)])
+    belege = gutschein_belege.rechnung_fuer_buchung(db, b, quelle="portal")
+    gutschein_einloesung.bestaetige_einloesungen(db, b)
+    ids = ([belege.geldrechnung.id] if belege.geldrechnung else []) + [
+        r.id for r in belege.gutscheinbelege
+    ]
+    return Ergebnis(antwort, [_bestaetigung_versenden(b.id, ids)])
 
 
 def _buche_verrechnung_zurueck(db: Session, b: Buchung, quelle: str) -> None:
@@ -137,14 +129,26 @@ def anfragen(
     beginn: datetime,
     ende: datetime,
     rueckkehr_url: str,
+    gutschein_codes: Sequence[str] = (),
 ) -> Ergebnis:
     # Bleibt bei einer abgelehnten Buchung außerhalb ihres Savepoints erhalten.
-    gutschein_sperren.bereite_vorgang_vor(db, kunde_ids=[kunde.id], gutschein_ids=[])
+    kontext = gutschein_einloesung.bereite_codes_vor(db, kunde, gutschein_codes)
+    if gutschein_codes:
+        try:
+            gutschein_sperren.pruefe_rate_limit(db, kunde.id)
+        except gutschein_sperren.GutscheinRateLimitFehler:
+            return abgelehnt("zu_viele_versuche")
+
+    def ablehnen(grund: str) -> Ergebnis:
+        if gutschein_codes:
+            gutschein_sperren.merke_fehlversuch(db, kunde.id, anfrage_id=anfrage_id)
+        return abgelehnt(grund)
+
     if kunde.anonymisiert_am is not None:
-        return abgelehnt("konto_gesperrt")
+        return ablehnen("konto_gesperrt")
     if not kunden.darf_online_buchen(db, kunde):
         # Rechnungskunden buchen nicht online; ihre Buchungen legt der Betreiber an (A-KUND-7).
-        return abgelehnt("rechnungskunde")
+        return ablehnen("rechnungskunde")
     try:
         with db.begin_nested():
             b = buchungen.lege_an(
@@ -159,14 +163,17 @@ def anfragen(
                 anfrage_id=anfrage_id,
                 zahlungsart="online",
             )
-    except buchungen.BuchungsFehler as e:
-        return abgelehnt(_GRUND.get(e.grund, e.grund))
+            deckung = gutschein_einloesung.loese_ein(
+                db, b, kunde, gutschein_codes, sperrkontext=kontext
+            )
+    except (buchungen.BuchungsFehler, gutschein_einloesung.GutscheinFehler) as e:
+        return ablehnen(_GRUND.get(e.grund, e.grund))
     except IntegrityError:
         # Exklusionsconstraint: Ein gleichzeitiger Kunde war schneller.
-        return abgelehnt("belegt")
+        return ablehnen("belegt")
 
     db.refresh(kunde)
-    verrechnet = max(NULL, min(kunde.guthaben, b.preis))
+    verrechnet = max(NULL, min(kunde.guthaben, b.preis - deckung.betrag))
     if verrechnet > NULL:
         guthaben.buche(
             db,
@@ -177,10 +184,16 @@ def anfragen(
             notiz="Verrechnung mit Portal-Buchung",
             quelle="portal",
         )
-    rest = b.preis - verrechnet
+    rest = b.preis - deckung.betrag - verrechnet
     if rest == NULL:
+        if deckung.einloesungen and deckung.betrag == b.preis:
+            b.zahlungsart = "gutschein"
         antwort = kanal.Antwort(
-            status="bestaetigt", buchung_id=b.id, preis=b.preis, guthaben_verrechnet=verrechnet
+            status="bestaetigt",
+            buchung_id=b.id,
+            preis=b.preis,
+            guthaben_verrechnet=verrechnet,
+            gutschein_verrechnet=deckung.betrag if gutschein_codes else None,
         )
         return _bestaetige(db, b, antwort)
 
@@ -207,6 +220,7 @@ def anfragen(
             buchung_id=b.id,
             preis=b.preis,
             guthaben_verrechnet=verrechnet,
+            gutschein_verrechnet=deckung.betrag if gutschein_codes else None,
             zu_zahlen=rest,
             checkout_url=sitzung.checkout_url,
             reserviert_bis=ablauf,
@@ -227,16 +241,24 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
             len(n.rohdaten),
         )
         return ignoriert("nicht_verifiziert")
-    # Erst den Kunden ermitteln, dann Kunde → Zahlung → Buchung sperren.
-    kunde_id = db.scalar(select(Zahlung.kunde_id).where(Zahlung.provider_ref == ref))
-    if kunde_id is not None:
-        kunden.sperre_mehrere(db, [kunde_id])
-    z = db.scalar(
-        select(Zahlung)
-        .where(Zahlung.provider_ref == ref)
-        .with_for_update()
-        .execution_options(populate_existing=True)
-    )
+    # Vollständige Menge vor Zahlung und Buchung; IDs zuerst ohne Schreibsperre.
+    ids = db.execute(
+        select(Zahlung.id, Zahlung.kunde_id, Zahlung.buchung_id).where(Zahlung.provider_ref == ref)
+    ).first()
+    if ids is not None:
+        if ids.buchung_id is not None:
+            kontext = gutschein_sperren.bereite_buchungen_vor(
+                db, [ids.buchung_id], kunde_ids=[ids.kunde_id]
+            )
+        else:
+            kontext = gutschein_sperren.bereite_vorgang_vor(
+                db, kunde_ids=[ids.kunde_id], gutschein_ids=[], zahlung_ids=[ids.id]
+            )
+        z = kontext.zahlungen.get(ids.id)
+        if z is None or z.kunde_id != ids.kunde_id or z.buchung_id != ids.buchung_id:
+            raise gutschein_sperren.GutscheinVorbereitungWiederholen("Zahlungszuordnung geändert")
+    else:
+        z = None
     if z is None:
         logger.warning("Zahlungsrückmeldung zu unbekannter Referenz %s", ref)
         text = (

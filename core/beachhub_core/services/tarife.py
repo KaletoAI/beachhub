@@ -54,6 +54,29 @@ def regel_fuer_slot(
     return max(kandidaten, key=lambda t: (_spezifitaet(t), t.created_at))
 
 
+def preise_je_slot(
+    db: Session,
+    *,
+    feld_id: uuid.UUID,
+    beginn: datetime,
+    ende: datetime,
+    kundengruppe_id: uuid.UUID | None,
+) -> list[tuple[Slot, Decimal]] | None:
+    feld = db.get(Feld, feld_id)
+    if feld is None:
+        return None
+    tages = slots_db.tages_slots(db, feld, lokales_datum(beginn))
+    if not zeitraum_ist_slotfolge(beginn, ende, tages):
+        return None
+    preise = []
+    for slot in slots_im_zeitraum(beginn, ende, tages):
+        regel = regel_fuer_slot(db, feld_id=feld_id, slot=slot, kundengruppe_id=kundengruppe_id)
+        if regel is None:
+            return None
+        preise.append((slot, regel.preis))
+    return preise
+
+
 def ermittle_preis(
     db: Session,
     *,
@@ -62,16 +85,7 @@ def ermittle_preis(
     ende: datetime,
     kundengruppe_id: uuid.UUID | None,
 ) -> Decimal | None:
-    feld = db.get(Feld, feld_id)
-    if feld is None:
-        return None
-    tages = slots_db.tages_slots(db, feld, lokales_datum(beginn))
-    if not zeitraum_ist_slotfolge(beginn, ende, tages):
-        return None
-    summe = Decimal("0.00")
-    for slot in slots_im_zeitraum(beginn, ende, tages):
-        regel = regel_fuer_slot(db, feld_id=feld_id, slot=slot, kundengruppe_id=kundengruppe_id)
-        if regel is None:
-            return None
-        summe += regel.preis
-    return summe
+    preise = preise_je_slot(
+        db, feld_id=feld_id, beginn=beginn, ende=ende, kundengruppe_id=kundengruppe_id
+    )
+    return None if preise is None else sum((preis for _, preis in preise), Decimal("0.00"))
