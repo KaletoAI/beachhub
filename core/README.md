@@ -97,5 +97,16 @@ Offene Käufe haben noch kein Ablaufdatum; Gültigkeitsdauer und Zahlungsfrist b
 Der Rechnungskreis behält seine bisherigen Jahreszähler; steuerfreie Kaufbelege erhalten einen
 eigenen Kreis `gutschein` mit Nummern `GB-JJJJ-NNNNN`. Freischaltcodes haben Steuer `keine`.
 Kauf-, Einlösungs- und Verwaltungsdienste folgen in den weiteren Umsetzungsschritten.
+Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
+`gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes
+mit einem separaten Insert-Savepoint kollisionsfest ein. Die 32 Symbole schließen `0/O/1/I` aus.
+`gutschein_sperren.bereite_vorgang_vor` sperrt die vollständige Kundenmenge, vorhandene
+Zahlungen und Gutscheine jeweils UUID-sortiert und lädt deren Beziehungen frisch.
+`bereite_buchungen_vor` ermittelt dieselbe Menge für Batch-Stornos vor weiteren Sperren.
+Ein zwischenzeitlicher Besitzer- oder Zahlungswechsel kann einen internen Retry der gesamten
+Transaktion erfordern; zusätzliche Kunden dürfen nicht nachträglich gesperrt werden.
+Die Online-Kundensperre liegt bereits außerhalb des Buchungs-Savepoints. Das Limit zählt zehn
+Fehlversuche je Konto in 60 Minuten mit der Fachuhr; eine `anfrage_id` dedupliziert Wiederholungen.
+Die Integration codehaltiger Buchungen samt Transaktionsretry folgt mit dem Einlösungsdienst.
 Ein Downgrade verweigert vorhandenen Gutscheinbestand, Gutscheinbelege und verbrauchte
 Gutschein-Nummernkreise ausdrücklich. Es löscht diese Daten nicht.

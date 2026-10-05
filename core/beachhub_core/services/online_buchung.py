@@ -28,6 +28,7 @@ from beachhub_core.services import (
     benachrichtigung,
     buchungen,
     guthaben,
+    gutschein_sperren,
     konfiguration,
     kunden,
     rechnung_pdf,
@@ -137,6 +138,8 @@ def anfragen(
     ende: datetime,
     rueckkehr_url: str,
 ) -> Ergebnis:
+    # Bleibt bei einer abgelehnten Buchung außerhalb ihres Savepoints erhalten.
+    gutschein_sperren.bereite_vorgang_vor(db, kunde_ids=[kunde.id], gutschein_ids=[])
     if kunde.anonymisiert_am is not None:
         return abgelehnt("konto_gesperrt")
     if not kunden.darf_online_buchen(db, kunde):
@@ -372,7 +375,7 @@ def verfalle_abgelaufene(db: Session) -> list[Buchung]:
         Buchung.reserviert_bis < jetzt,
     )
     kandidaten = db.execute(select(Buchung.id, Buchung.kunde_id).where(*abgelaufen_filter)).all()
-    kunden.sperre_mehrere(db, (kunde_id for _, kunde_id in kandidaten))
+    gutschein_sperren.bereite_buchungen_vor(db, (bid for bid, _ in kandidaten))
     # Nach Warten auf Kunden erneut unter Buchungssperre prüfen; inzwischen
     # bestätigte/stornierte Reservierungen dürfen weder verfallen noch Guthaben erhalten.
     abgelaufen = list(

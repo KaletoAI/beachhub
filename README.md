@@ -14,6 +14,8 @@ der Hallenhersteller die Schnittstellen festlegt.
 Für Stufe 1a-III ist die Gutschein-Datenbasis mit Revision `0015` vorbereitet:
 Kauf-Snapshots, Einlösungsbelegbasis und ein eigener Kaufbelegnummernkreis.
 Kauf, Einlösung und Verwaltung folgen in weiteren Schritten und sind noch nicht verfügbar.
+Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit sind vorbereitet;
+die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
