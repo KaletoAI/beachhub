@@ -4,8 +4,9 @@ Buchung, Abrechnung und Steuerung einer Beachvolleyballhalle im Winterbetrieb.
 Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`core/`), Hallendienst (`hall/`).
 
 Status: Stufe 1 (Hauptsystem) fertig; Stufe 1a-I (feste Kundengruppen mit Steuersatz,
-Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) umgesetzt, 1a-II
-(Saisonrechnung) und 1a-III (Gutscheine) folgen; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
+Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) und 1a-II
+(Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) umgesetzt;
+1a-III (Gutscheine) folgt; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
 Gutscheine und echten Zahlungsanbieter) implementiert; Stufe 3 (Hallendienst) implementiert und
 gegen simuliertes Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald
 der Hallenhersteller die Schnittstellen festlegt.

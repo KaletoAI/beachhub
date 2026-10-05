@@ -1,6 +1,6 @@
 # Portal-Kern (Stufe 2 ohne 1a) – Design
 
-Stand: 2026-09-23 · Status: abgestimmt, zur Planung · Bezug: Hauptspec `2026-09-05-beachhub-design.md` (§ 3, § 6, § 8.1, § 9, § 10)
+Stand: 2026-10-05 · Status: Portal-Kern implementiert, Abo-Absagen aus Stufe 1a-II ergänzt · Bezug: Hauptspec `2026-09-05-beachhub-design.md` (§ 3, § 6, § 8.1, § 9, § 10)
 
 ## 1. Ziel und Abgrenzung
 
@@ -112,7 +112,7 @@ mit dem pydantic-Schema aus `shared` validiert. Ist sie ungültig, lautet die An
 | `konto_geaendert` | `anzeigename`, `bisher` | Den Namen nur übernehmen, wenn `kunde.name == bisher`. Hat der Betreiber den Namen inzwischen gepflegt (etwa den vollen Namen für die Rechnung), bleibt er stehen. Adressdaten ändert das Portal nie. | `ok` |
 | `konto_loeschen` | – | `kunden.anonymisiere`. `portal_konto_id` wird geleert; die Ersatz-E-Mail `geloescht-<kunde.id>` hängt an der Kunden-ID, nicht an der alten Adresse, damit wiederholtes Anlegen und Löschen mit derselben Adresse nicht am Unique-Constraint scheitert. | `ok` |
 | `buchung_anfragen` | `feld_id`, `beginn`, `ende` | Siehe unten. | `reserviert` / `bestaetigt` / `abgelehnt` |
-| `buchung_stornieren` | `buchung_id` | Die Buchung muss zum Kunden gehören und den Status `reserviert` oder `bestaetigt` haben, und `jetzt < beginn` muss gelten (A-STORNO-5). Im Portal stornierbar sind nur Portal-Buchungen (`quelle = "portal"`, keine Dauerbuchungstermine): Nur bei ihnen ist sicher, dass sie vor der Bestätigung vollständig bezahlt wurden (Zahlung und/oder verrechnetes Guthaben); alle anderen storniert der Betreiber, sonst entstünde Guthaben für nie online Bezahltes. Das Konto-Dokument führt dazu je Buchung `stornierbar`. Eine `reserviert`e Buchung wird zu `storniert` und immer kostenfrei; verrechnetes Guthaben wird zurückgebucht (`rueckbuchung`), eine offene Bezahlsitzung verfällt beim Anbieter von selbst. Eine `bestaetigt`e Buchung läuft über `storno.storniere(..., durch="kunde")`. | `ok`, `kostenfrei` / `abgelehnt` (`nicht_gefunden`, `zu_spaet`, `nicht_stornierbar`) |
+| `buchung_stornieren` | `buchung_id` | Die Buchung muss zum Kunden gehören und den Status `reserviert` oder `bestaetigt` haben, und `jetzt < beginn` muss gelten (A-STORNO-5). Im Portal stornierbar sind Portal-Einzelbuchungen (`quelle = "portal"`) und Abo-Termine. Andere Betreiberbuchungen storniert der Betreiber. Bei Abo-Terminen entscheidet das Hauptsystem anhand von Stornofrist und freiem Kontingent je Dauerbuchung (Vorgabe 3). Eine kostenfreie Absage korrigiert die Rechnungsposition: unbezahlte Beträge senken die Forderung, bei Teilzahlung zuerst die offene Forderung; nur der darüber hinausgehende bezahlte Anteil wird Guthaben. Weitere Absagen und Absagen nach Frist geben den Slot frei, lassen den Preis aber bestehen. Das Konto-Dokument führt dazu je Buchung `stornierbar`. Eine `reserviert`e Buchung wird zu `storniert` und immer kostenfrei; verrechnetes Guthaben wird zurückgebucht (`rueckbuchung`), eine offene Bezahlsitzung verfällt beim Anbieter von selbst. Eine `bestaetigt`e Buchung läuft über `storno.storniere(..., durch="kunde")`. | `ok`, `kostenfrei`, optional `freie_absage`, `freie_absagen_rest` / `abgelehnt` (`nicht_gefunden`, `zu_spaet`, `nicht_stornierbar`) |
 | `zahlung_eingegangen` | `provider`, `rohdaten`, `signatur_header` | Siehe unten. | `ok` / `ignoriert` |
 | `rechnung_anfordern` | `rechnung_nr` | Die Rechnung muss zum Kunden gehören und ein archiviertes PDF haben. Das PDF wird gelesen und gegen `pdf_sha256` geprüft. Fehlt es oder stimmt die Prüfsumme nicht, bekommt der Betreiber einen Alarm. | `ok`, `pdf_base64`, `dateiname` / `abgelehnt` (`nicht_gefunden`) |
 
@@ -300,8 +300,13 @@ schicken per POST `{"ref", "ergebnis": "bezahlt" | "abgebrochen"}` an den eigene
 
 **Meine Buchungen** (`/buchungen`) aus `konto:<kunde_id>`: kommende Buchungen (PIN groß, Feld,
 Zeit, Preis, Status) und darunter vergangene und stornierte. „Stornieren“ öffnet eine
-Bestätigungsseite. Sie zeigt, ob das Storno kostenfrei ist (`jetzt < beginn - storno_frist`) oder
-der Betrag fällig bleibt (A-STORNO-2). Ein POST legt `buchung_stornieren` an und leitet auf die
+Bestätigungsseite. Bei Einzelbuchungen zeigt sie, ob das Storno kostenfrei ist (Reservierung oder
+`jetzt <= beginn - storno_frist`) oder der Betrag fällig bleibt (A-STORNO-2). Bei Abo-Terminen
+zeigt sie `freie_absagen_rest` aus dem signierten Kontodokument sowie bedingte Hinweise zu Frist,
+Kontingent und Forderung/Guthaben. Das Portal berechnet dafür keine Kostenfrei-Prognose; die
+verbindliche Entscheidung trifft das Hauptsystem. Die Antwort zeigt das aktualisierte Restkontingent.
+Diese minimale Bestätigung ist umgesetzt; eine ausführlichere Abo-Übersicht bleibt für Stufe 2 offen.
+Ein POST legt `buchung_stornieren` an und leitet auf die
 Warteseite. Der Link erscheint nur bei `stornierbar`; eine nicht stornierbare Buchung lehnt das
 Portal auch per POST ab. Eine Reservierung ohne offene Zahlung (Unterzahlung, A-9) zeigt statt
 eines Zahlungslinks „Zahlung unvollständig – der Betreiber meldet sich bei dir.“; ebenso die
@@ -338,6 +343,7 @@ Rechnungslinks und den Lesestand `konto:<kunde_id>` sofort und meldet ab. Die An
 | Signatur ungültig | Das Portal antwortet mit 422, das Hauptsystem loggt und alarmiert. Das Dokument wird nicht übernommen. |
 | Doppelte Auslieferung | `anfrage_verarbeitet` liefert die gespeicherte Antwort. |
 | Doppelte Zahlungsrückmeldung | Idempotent über `zahlung.provider_ref` und deren Status. |
+| Gleichzeitige Abo-Absagen | Das Hauptsystem sperrt die Dauerbuchung und verbraucht die letzte freie Absage höchstens einmal; der signierte Kontostand in der Bestätigung ist keine verbindliche Prognose. |
 | Gleichzeitige Buchung desselben Slots | Der Exklusionsconstraint greift, die Antwort ist `abgelehnt/belegt`. |
 | Zahlung nach Verfall | Guthaben und Mail an den Betreiber. |
 | Zahlung für fremde Buchung | Nicht möglich: Die Referenz bestimmt das Hauptsystem, der Anbieter bestätigt den Betrag. |

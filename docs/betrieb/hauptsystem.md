@@ -124,27 +124,67 @@ Betrieb beginnt:
    `event_ust_satz` (19 % – Vorbelegung für Buchungen, die der Betreiber anlegt),
    `mitgliedschaft_ablauf` (30.04.), `mitglieder_abgleich` (31.08., muss vor dem ersten
    Buchungsfenster der Saison liegen – die Seite warnt sonst), `mitglied_erinnerung_tage` (14)
-   und `rechnungskunden_online_buchen` (nein).
+   und `rechnungskunden_online_buchen` (nein). Für Abos außerdem `saison_zahlungsziel_tage` (14),
+   `guthaben_auf_saisonrechnung` (ja), `abo_freie_absagen` (3), `abo_nur_mitglieder` (ja)
+   und `saisonende_guthabenliste` (30.04.) prüfen.
 6. Einen **Testkunden** anlegen.
 7. Eine **Testbuchung** für den Testkunden durchführen und die Bestätigungsmail (PIN) prüfen.
-8. Als Betreiber eine **Testbuchung** anlegen (Belegung → Buchung): Dafür entsteht sofort eine Rechnung; das PDF prüfen.
+8. Eine **Testrechnung** prüfen: Eine selbst angelegte Buchung bekommt sofort eine offene
+   Rechnung; ein Testabo bekommt seine Saisonrechnung. PDF und Mail kontrollieren.
 9. Testkunde, Testbuchung und Testrechnung wieder entfernen bzw. stornieren, damit sie nicht in
    den echten Betrieb einfließen; falls die interne Uhr für Tests verstellt wurde, **Uhr
    zurücksetzen** (nur im Entwicklungsmodus verfügbar – im Produktivbetrieb nicht vorhanden).
 
 ## 5. Laufender Betrieb
 
-Der Monatslauf erzeugt bis zur Einführung der Saisonrechnung (Stufe 1a-II) Sammelrechnungen für
-die **Termine von Dauerbuchungen** des Vormonats: Der APScheduler-Job prüft **täglich um 06:00
-Uhr**, ob der aktuelle Tag den Wert `rechnung_tag_im_folgemonat` erreicht hat. Buchungen, die der
-Betreiber selbst anlegt, bekommen sofort eine eigene, offene Rechnung mit dem Zahlungsziel
-`rechnung_zahlungsziel_tage`.
+**Rechnungen.** Es gibt keinen Monatslauf mehr. Jede neue Dauerbuchung bekommt bei ihrer Anlage
+in derselben Transaktion genau eine **Saisonrechnung** über alle erzeugten Termine
+(Zahlungsziel `saison_zahlungsziel_tage`, Vorgabe 14 Tage). Vorhandenes Guthaben wird dabei
+verrechnet, solange `guthaben_auf_saisonrechnung` an ist (Vorgabe ja). Die Rechnung behält den
+vollen Betrag; die Verrechnung zählt als Zahlung. Bei vollständiger Deckung ist sie bezahlt,
+sonst offen. Später hinzukommendes Guthaben wird nicht automatisch nachverrechnet. Den
+Zahlungseingang per Überweisung haken Sie auf der Rechnungsseite ab. Selbst angelegte Buchungen
+bekommen sofort eine offene Rechnung, bestätigte Onlinebuchungen eine bezahlte.
 
-Der Monatslauf kann bei Bedarf auch manuell angestoßen werden (z. B. Nachlauf nach einem Ausfall):
+**Bestandsabos und Neuausstellung.** Beim Upgrade müssen Sie vorhandene Abos auf aktive,
+unberechnete Termine prüfen. Die Migration erstellt keine Rechnungen automatisch. Auf der
+Abo-Detailseite erzeugt **Saisonrechnung erstellen** auf Ihren ausdrücklichen Aufruf eine Rechnung
+nur über diese Termine. Bereits berechnete oder stornierte Termine bleiben ausgeschlossen und
+historische Belege unverändert. Es kann nur eine nicht stornierte Saisonrechnung je Abo geben.
+Nach vollständigem Storno ist über dieselbe Aktion eine Neuausstellung für freigegebene aktive,
+unberechnete Termine möglich; auch das geschieht nicht automatisch.
 
-```bash
-docker compose run --rm app beachhub-core monatslauf 2026-08
-```
+**Korrekturen.** Wird eine berechnete Buchung kostenfrei storniert (innerhalb der Frist, als freie
+Abo-Absage, per Kulanz, durch eine Sperre oder weil ein Abo endet), entsteht automatisch ein
+Korrekturbeleg über ihre Position. War die Rechnung bezahlt, wird der Betrag Guthaben; war sie
+unbezahlt, sinkt die Forderung. Bei teilweiser Zahlung sinkt zuerst die offene Forderung; nur der
+darüber hinausgehende Betrag wird Guthaben. Sind alle Positionen korrigiert, ist die Rechnung
+storniert. Das Original-PDF bleibt unverändert. Auf der Rechnungsseite können Sie einzelne noch
+nicht korrigierte Positionen mit einem Grund als Teil-Stornorechnung korrigieren. Diese manuelle
+Belegkorrektur ändert den Buchungsstatus nicht und gibt keinen Platz frei. Die Spalte **Offen**
+in der Rechnungsliste berücksichtigt Zahlungen und Korrekturen. Stornoguthaben entsteht immer
+zusammen mit einem Korrekturbeleg; PDF und Mail werden erst nach erfolgreichem Commit versandt.
+
+**Abo-Absagen.** Kunden sagen Abo-Termine im Portal bis zum Beginn ab. Bis zu `abo_freie_absagen`
+(Vorgabe 3) Absagen je Abo innerhalb der Stornofrist sind kostenfrei; weitere Absagen und Absagen
+nach der Frist geben den Platz frei, der Termin bleibt aber berechnet. `0` schaltet freie
+Kundenabsagen aus. Kulanz, Sperren und Beenden durch den Betreiber verbrauchen kein Kontingent.
+Die Portalbestätigung zeigt das verbleibende Kontingent aus dem signierten Kontostand und erklärt
+die Bedingungen und finanziellen Folgen. Über die Absage entscheidet das Hauptsystem bei der
+Verarbeitung; eine ausführlichere Abo-Übersicht im Portal bleibt für den weiteren Ausbau vorgesehen.
+
+**Guthabenliste.** Unter Kunden → Guthabenliste sehen Sie jederzeit positive Guthaben nicht
+anonymisierter Kunden und deren Gesamtsumme. Ab dem Stichtag `saisonende_guthabenliste` (Vorgabe
+30.04.) prüft der tägliche Lauf um **07:05 Uhr Europe/Berlin** die Jahreserinnerung. Ein vor dem
+Marker-Commit ausgefallener Lauf wird am nächsten täglichen Lauf nachgeholt. Die Mail enthält
+Anzahl, Summe und einen Link zur Liste, keine vollständige Kundenliste. `BASE_URL` muss auf die
+richtige Verwaltungsadresse zeigen. Der Jahresmarker wird vor dem Mailversand gespeichert:
+Scheitert danach SMTP, wird der Fehler protokolliert und die Mail im selben Jahr nicht automatisch
+wiederholt; die Liste bleibt erreichbar.
+
+Auszahlungen führen Sie auf Wunsch des Kunden selbst per Überweisung aus und haken danach den
+positiven Betrag in der Liste ab. Teilbeträge sind möglich, höchstens bis zum verfügbaren Guthaben.
+Das Abhaken vermindert das Guthaben und wird auditiert; das System überweist selbst kein Geld.
 
 Rechnungen sind im Admin-UI unter „Rechnungen“ einsehbar; von dort steht auch ein
 **CSV-Export** (`/rechnungen/export.csv`) für den Steuerberater zur Verfügung, gefiltert nach

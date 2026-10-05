@@ -72,5 +72,13 @@ ruff check . && ruff format --check .
 
 - `beachhub-core keygen` – erzeugt das Ed25519-Schlüsselpaar für die Signatur des Lesestands.
 - `beachhub-core create-admin --name <name> [--rolle admin|lesend]` – legt einen Admin-Benutzer an.
-- `beachhub-core monatslauf JJJJ-MM` – stößt den Monatslauf (Sammelrechnungen) manuell für einen
-  Monat an; im laufenden Betrieb übernimmt das der Scheduler täglich um 06:00 Uhr automatisch.
+
+## Saisonrechnung und Guthaben
+
+Neue Dauerbuchungen erhalten ihre Saisonrechnung atomar bei der Anlage; einen Monatslauf gibt es
+nicht mehr. Für unberechnete Bestandsabos und die Neuausstellung nach vollständigem Rechnungsstorno
+steht auf der Abo-Detailseite die ausdrückliche Aktion **Saisonrechnung erstellen** bereit. Sie
+berechnet nur aktive unberechnete Termine und lässt historische Belege unverändert. Beim Upgrade
+muss der Betreiber solche Bestandsabos prüfen; Migrationen rechnen sie nicht automatisch ab.
+Details zu Korrekturbelegen, freien Abo-Absagen und manuellen Auszahlungen stehen im
+[Betriebshandbuch](../docs/betrieb/hauptsystem.md#5-laufender-betrieb).
