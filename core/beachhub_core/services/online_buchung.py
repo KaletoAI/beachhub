@@ -72,8 +72,7 @@ def _storno_mail(storno_id: uuid.UUID) -> Nachlauf:
     def lauf(db: Session) -> None:
         s = db.get(Storno, storno_id)
         if s is not None:
-            benachrichtigung.storno(db, s)
-            benachrichtigung.belege_versenden(db, [s.korrektur_rechnung_id])
+            benachrichtigung.storno_nachlauf(db, s)
 
     return lauf
 
@@ -306,6 +305,19 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         if z.buchung_id
         else None
     )
+    verfallen = False
+    if (
+        b is not None
+        and b.status == Buchung.RESERVIERT
+        and b.reserviert_bis is not None
+        and b.reserviert_bis < clock.now(db)
+    ):
+        verfallen = True
+        buchungen.setze_status(db, b, Buchung.VERFALLEN, quelle="portal")
+        gutschein_einloesung.storno_rueckgaengig(
+            db, b, grund="Zahlungsfrist abgelaufen", quelle="portal", sperrkontext=kontext
+        )
+        _buche_verrechnung_zurueck(db, b, quelle="portal")
     if b is not None and b.status == Buchung.RESERVIERT and betrag >= z.betrag:
         erg = _bestaetige(db, b, kanal.Antwort(status="ok"))
         ueberzahlt = betrag - z.betrag
@@ -348,12 +360,16 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
         f"konnte aber nichts bestätigen ({grund}). Der Betrag wurde dem Kunden "
         f"{z.kunde.name} <{z.kunde.email}> als Guthaben gutgeschrieben."
     )
-    return Ergebnis(kanal.Antwort(status="ok"), [alarm(grund, text)])
+    nachlauf = [alarm(grund, text)]
+    if verfallen and b is not None:
+        bid = b.id
+        nachlauf.append(lambda session: benachrichtigung.rueckabwicklung_hinweise(session, [bid]))
+    return Ergebnis(kanal.Antwort(status="ok"), nachlauf)
 
 
 def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) -> Ergebnis:
     # Finanzielle Stornos sperren den Kunden vor Buchung/Dauerbuchung/Rechnung.
-    kunden.sperre_mehrere(db, [kunde.id])
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, [buchung_id], kunde_ids=[kunde.id])
     b = db.scalar(
         select(Buchung)
         .where(Buchung.id == buchung_id)
@@ -377,6 +393,7 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
         b,
         durch="kunde",
         grund="Storno im Portal",
+        sperrkontext=kontext,
         # Eine Reservierung ist nie bezahlt worden; ihr Storno kostet nichts.
         kostenfrei=True if war_reserviert else None,
     )
@@ -403,7 +420,7 @@ def verfalle_abgelaufene(db: Session) -> list[Buchung]:
         Buchung.reserviert_bis < jetzt,
     )
     kandidaten = db.execute(select(Buchung.id, Buchung.kunde_id).where(*abgelaufen_filter)).all()
-    gutschein_sperren.bereite_buchungen_vor(db, (bid for bid, _ in kandidaten))
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, (bid for bid, _ in kandidaten))
     # Nach Warten auf Kunden erneut unter Buchungssperre prüfen; inzwischen
     # bestätigte/stornierte Reservierungen dürfen weder verfallen noch Guthaben erhalten.
     abgelaufen = list(
@@ -417,5 +434,8 @@ def verfalle_abgelaufene(db: Session) -> list[Buchung]:
     )
     for b in abgelaufen:
         buchungen.setze_status(db, b, Buchung.VERFALLEN, quelle="system")
+        gutschein_einloesung.storno_rueckgaengig(
+            db, b, grund="Zahlungsfrist abgelaufen", quelle="system", sperrkontext=kontext
+        )
         _buche_verrechnung_zurueck(db, b, quelle="system")
     return abgelaufen

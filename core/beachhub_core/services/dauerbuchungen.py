@@ -120,7 +120,7 @@ def lege_an(
         raise DauerbuchungsFehler("keine_termine")
     # Neue Saisonrechnung und verdrängte Buchungen teilen den Nummernkreis:
     # alle beteiligten Kunden gemeinsam vor der ersten Korrektur sperren.
-    gutschein_sperren.bereite_buchungen_vor(
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(
         db,
         {k.id for t in termine for k in t.kollisionen if isinstance(k, Buchung)},
         kunde_ids=[kunde_id],
@@ -166,6 +166,7 @@ def lege_an(
                 durch="betreiber",
                 kostenfrei=True,
                 grund="Dauerbuchung",
+                sperrkontext=sperrkontext,
                 admin_user_id=admin_user_id,
             )
         buchungen.lege_an(
@@ -210,7 +211,9 @@ def beende(
         Buchung.status.in_(Buchung.AKTIVE_STATUS),
     )
     kandidaten = set(db.scalars(kandidaten_abfrage))
-    gutschein_sperren.bereite_buchungen_vor(db, kandidaten, kunde_ids=[dauer.kunde_id])
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(
+        db, kandidaten, kunde_ids=[dauer.kunde_id]
+    )
     # Nach Warten auf Kunden dürfen frisch hinzugekommene Termine mit anderen
     # Gutscheinen nicht nach der ersten Dauer-/Belegsperre vorbereitet werden.
     if not set(db.scalars(kandidaten_abfrage)) <= kandidaten:
@@ -238,9 +241,15 @@ def beende(
             grund="Dauerbuchung beendet",
             admin_user_id=admin_user_id,
             korrigieren=False,
+            sperrkontext=sperrkontext,
         )
     belege = storno.gutschreiben_alle(
-        db, betroffen, grund="Dauerbuchung beendet", quelle="admin", admin_user_id=admin_user_id
+        db,
+        betroffen,
+        grund="Dauerbuchung beendet",
+        quelle="admin",
+        admin_user_id=admin_user_id,
+        sperrkontext=sperrkontext,
     )
     dauer.beendet_am = utcnow()
     dauer.beendet_ab = ab

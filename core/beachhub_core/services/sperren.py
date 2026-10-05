@@ -58,7 +58,7 @@ def lege_an(
     for b in betroffen:
         if entscheidungen.get(b.id) not in ("behalten", "stornieren"):
             raise SperrenFehler("entscheidung_fehlt")
-    gutschein_sperren.bereite_buchungen_vor(
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(
         db, (b.id for b in betroffen if entscheidungen[b.id] == "stornieren")
     )
     ergebnis: list[Sperre] = []
@@ -85,6 +85,7 @@ def lege_an(
                 durch="betreiber",
                 kostenfrei=True,
                 grund=f"Sperre: {grund}",
+                sperrkontext=sperrkontext,
                 admin_user_id=admin_user_id,
             )
     from beachhub_core.services import lesestand

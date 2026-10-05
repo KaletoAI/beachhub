@@ -9,7 +9,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Buchung, Gutschein, GutscheinEinloesung, Kunde, Rechnung
+from beachhub_core.models import (
+    Buchung,
+    GuthabenBuchung,
+    Gutschein,
+    GutscheinEinloesung,
+    Kunde,
+    Rechnung,
+    Storno,
+)
 from beachhub_core.services import (
     audit,
     gutschein_codes,
@@ -20,7 +28,11 @@ from beachhub_core.services import (
     rechnungen,
     tarife,
 )
-from beachhub_core.services.gutschein_typen import GutscheinDeckung, GutscheinSperrkontext
+from beachhub_core.services.gutschein_typen import (
+    GutscheinDeckung,
+    GutscheinRueckabwicklung,
+    GutscheinSperrkontext,
+)
 
 NULL = Decimal("0.00")
 CENT = Decimal("0.01")
@@ -282,3 +294,155 @@ def bestaetige_einloesungen(db: Session, buchung: Buchung) -> None:
             vorher=vorher,
             nachher={**audit.als_dict(e), "akteur_kunde_id": str(buchung.kunde_id)},
         )
+
+
+def storno_rueckgaengig(
+    db: Session,
+    buchung: Buchung,
+    *,
+    grund: str,
+    quelle: str,
+    admin_user_id: uuid.UUID | None = None,
+    sperrkontext: GutscheinSperrkontext,
+) -> GutscheinRueckabwicklung:
+    """Bestand, Gegenbeleg und Einlöserwallet gemeinsam im Vorgang zurücknehmen."""
+    from beachhub_core.services import guthaben, gutschein_belege, storno
+
+    es = list(
+        db.scalars(
+            select(GutscheinEinloesung)
+            .where(GutscheinEinloesung.buchung_id == buchung.id)
+            .order_by(GutscheinEinloesung.id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+    )
+    if buchung.kunde_id not in sperrkontext.kunde_ids or any(
+        e.gutschein_id not in sperrkontext.gutscheine or e.kunde_id not in sperrkontext.kunde_ids
+        for e in es
+    ):
+        raise gutschein_sperren.GutscheinVorbereitungWiederholen("Rückabwicklungsmenge geändert")
+    belege: list[Rechnung] = []
+    frei: list[Gutschein] = []
+    betrag = NULL
+    for e in es:
+        if e.status == GutscheinEinloesung.RUECKGAENGIG:
+            continue
+        g = sperrkontext.gutscheine[e.gutschein_id]
+        vorher_g, vorher_e = audit.als_dict(g), audit.als_dict(e)
+        reserviert = e.status == GutscheinEinloesung.RESERVIERT
+        geldwert = not reserviert and g.modell == "wert"
+        if not reserviert and (geldwert or g.steuer == "bei_einloesung"):
+            beleg = gutschein_belege.korrigiere_wertanteil(
+                db, e, grund=grund, quelle=quelle, admin_user_id=admin_user_id
+            )
+            belege.append(beleg)
+            if geldwert:
+                kunde = db.get(Kunde, e.kunde_id)
+                assert kunde is not None
+                guthaben.buche(
+                    db,
+                    kunde=kunde,
+                    betrag=e.betrag,
+                    art="storno_gutschrift",
+                    bezug_id=beleg.id,
+                    notiz=f"Gutschein-Storno {beleg.nummer}",
+                    quelle=quelle,
+                    admin_user_id=admin_user_id,
+                )
+                betrag += e.betrag
+        e.status = GutscheinEinloesung.RUECKGAENGIG
+        e.rueckgaengig_am, e.rueckgaengig_grund = clock.now(db), grund
+        e.rueckabwicklung_art = "guthaben" if geldwert else "gutschein"
+        if not geldwert:
+            if g.modell == "wert":
+                g.restwert = (g.restwert or NULL) + e.betrag
+            else:
+                g.inhaber_kunde_id = e.kunde_id
+            db.flush()
+            if (
+                g.status not in (Gutschein.GESPERRT, Gutschein.VERFALLEN)
+                and g.zurueckgegeben_am is None
+            ):
+                if g.gueltig_bis is None or g.gueltig_bis < clock.today(db):
+                    g.status = Gutschein.VERFALLEN
+                elif g.modell == "wert":
+                    g.status = (
+                        Gutschein.AKTIV
+                        if g.restwert == g.nennwert_brutto
+                        else Gutschein.TEILWEISE_EINGELOEST
+                    )
+                else:
+                    genutzt = (
+                        db.scalar(
+                            select(func.count())
+                            .select_from(GutscheinEinloesung)
+                            .where(
+                                GutscheinEinloesung.gutschein_id == g.id,
+                                GutscheinEinloesung.status != GutscheinEinloesung.RUECKGAENGIG,
+                            )
+                        )
+                        or 0
+                    )
+                    g.status = (
+                        Gutschein.AKTIV if genutzt < g.max_einloesungen else Gutschein.EINGELOEST
+                    )
+                if g.status in (Gutschein.AKTIV, Gutschein.TEILWEISE_EINGELOEST):
+                    frei.append(g)
+        db.flush()
+        for obj, vorher, typ in ((e, vorher_e, "gutschein_einloesung"), (g, vorher_g, "gutschein")):
+            if audit.als_dict(obj) != vorher:
+                audit.protokolliere(
+                    db,
+                    quelle=quelle,
+                    objekt_typ=typ,
+                    objekt_id=obj.id,
+                    vorher=vorher,
+                    nachher={
+                        **audit.als_dict(obj),
+                        "einloesung_id": str(e.id),
+                        "akteur_kunde_id": str(e.kunde_id),
+                        "beleg_id": str(e.korrektur_rechnung_id)
+                        if e.korrektur_rechnung_id
+                        else None,
+                    },
+                    admin_user_id=admin_user_id,
+                )
+        lesestand.markiere_geaendert(
+            db,
+            *(
+                f"konto:{kid}"
+                for kid in {
+                    e.kunde_id,
+                    g.kaeufer_kunde_id,
+                    g.inhaber_kunde_id,
+                    uuid.UUID(str(vorher_g["inhaber_kunde_id"]))
+                    if vorher_g.get("inhaber_kunde_id")
+                    else None,
+                }
+                if kid is not None
+            ),
+        )
+    # Ausschließlich den separaten Geldrest korrigieren; Gutschein-Tarifdeckung
+    # darf niemals zusätzlich als monetäres Buchungsguthaben entstehen.
+    pos = storno._offene_position(db, buchung)
+    if pos is not None:
+        beleg = storno._gutschreiben_positionen(
+            db, [pos], grund=grund, quelle=quelle, admin_user_id=admin_user_id
+        )
+        belege.append(beleg)
+        betrag += Decimal(
+            str(
+                db.scalar(
+                    select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0)).where(
+                        GuthabenBuchung.bezug_id == beleg.id,
+                        GuthabenBuchung.art == "storno_gutschrift",
+                    )
+                )
+            )
+        )
+        s = db.scalar(select(Storno).where(Storno.buchung_id == buchung.id))
+        if s is not None:
+            s.korrektur_rechnung_id = beleg.id
+    db.flush()
+    return GutscheinRueckabwicklung(frei, betrag, belege)

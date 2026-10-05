@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -22,7 +22,6 @@ from beachhub_core.models import (
     Rechnung,
     RechnungPosition,
     Sperre,
-    Storno,
 )
 from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_datum, t_zeit
 from beachhub_core.services import (
@@ -135,13 +134,7 @@ def _belege_der_buchungen(db: Session, buchung_ids: list[uuid.UUID]) -> list[uui
     """Korrekturbelege, die beim Stornieren dieser Buchungen entstanden sind."""
     if not buchung_ids:
         return []
-    return list(
-        db.scalars(
-            select(Storno.korrektur_rechnung_id)
-            .where(Storno.buchung_id.in_(buchung_ids), Storno.korrektur_rechnung_id.is_not(None))
-            .distinct()
-        ).all()
-    )
+    return benachrichtigung.belege_der_buchungen(db, buchung_ids)
 
 
 @router.get("/belegung", response_class=HTMLResponse)
@@ -337,8 +330,7 @@ def buchung_storno(
             fehler=fehlertext(e, GRUND),
             **_buchung_ctx(db, b),
         )
-    benachrichtigung.storno(db, s)
-    benachrichtigung.belege_versenden(db, [s.korrektur_rechnung_id])
+    benachrichtigung.storno_nachlauf(db, s)
     return mit_flash(
         RedirectResponse(f"/admin/belegung/buchung/{b.id}", status_code=303), "Storniert"
     )
@@ -365,6 +357,7 @@ def buchung_kulanz(
             fehler="Kein Storno vorhanden",
             **_buchung_ctx(db, b),
         )
+    war_kostenfrei = b.storno.kostenfrei
     try:
         storno.kulanz(db, b.storno, admin_user_id=admin.id, grund=grund)
         db.commit()
@@ -377,7 +370,9 @@ def buchung_kulanz(
             fehler=fehlertext(e, GRUND),
             **_buchung_ctx(db, b),
         )
-    benachrichtigung.belege_versenden(db, [b.storno.korrektur_rechnung_id])
+    if not war_kostenfrei:
+        benachrichtigung.rueckabwicklung_hinweise(db, [b.id])
+        benachrichtigung.belege_versenden(db, _belege_der_buchungen(db, [b.id]))
     return mit_flash(
         RedirectResponse(f"/admin/belegung/buchung/{b.id}", status_code=303), "Kulanz gebucht"
     )
@@ -449,6 +444,7 @@ async def sperre_anlegen(
             fehler=fehlertext(e, GRUND),
         )
     stornierte = [bid for bid, wahl in entscheidungen.items() if wahl == "stornieren"]
+    benachrichtigung.rueckabwicklung_hinweise(db, stornierte)
     benachrichtigung.belege_versenden(db, _belege_der_buchungen(db, stornierte))
     ziel_feld = (
         feld_ids[0] if feld_ids else db.scalars(select(Feld.id).order_by(Feld.reihenfolge)).first()
@@ -652,6 +648,7 @@ async def dauer_anlegen(
             )
         except Exception:
             logger.exception("Betreiber-Alarm für Dauerbuchung %s fehlgeschlagen", dauer_id)
+    benachrichtigung.rueckabwicklung_hinweise(db, stornierte)
     benachrichtigung.belege_versenden(db, beleg_ids)
     return mit_flash(
         RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung angelegt"
@@ -742,7 +739,11 @@ def dauer_beenden(
             RedirectResponse("/admin/belegung", status_code=303), "Nicht gefunden", "fehler"
         )
     try:
-        belege = dauerbuchungen.beende(db, d, ab=date.fromisoformat(ab), admin_user_id=admin.id)
+        ab_datum = date.fromisoformat(ab)
+        kandidaten = [
+            b.id for b in d.buchungen if b.aktiv and b.beginn >= kombiniere(ab_datum, time(0))
+        ]
+        belege = dauerbuchungen.beende(db, d, ab=ab_datum, admin_user_id=admin.id)
         beleg_ids = [b.id for b in belege]
         db.commit()
     except FORM_FEHLER as e:
@@ -752,6 +753,7 @@ def dauer_beenden(
             fehlertext(e, GRUND),
             "fehler",
         )
+    benachrichtigung.rueckabwicklung_hinweise(db, kandidaten)
     benachrichtigung.belege_versenden(db, beleg_ids)
     return mit_flash(
         RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung beendet"

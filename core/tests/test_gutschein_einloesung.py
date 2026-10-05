@@ -623,3 +623,351 @@ def test_einloesung_weist_fremden_oder_veraenderten_preisstand_zurueck(db, gwelt
         )
     assert db.scalars(select(GutscheinEinloesung)).all() == []
     assert g.status == "aktiv"
+
+
+@pytest.mark.parametrize("steuer", ["beim_kauf", "bei_einloesung"])
+def test_wertstorno_einloeserwallet_kaeuferbeleg_einmal(db, gwelt, steuer):
+    from beachhub_core.services import gutschein_einloesung, storno
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        steuer=steuer,
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("50"),
+        kaufpreis_brutto=Decimal("50"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, [b.id])
+    storno.storniere(db, b, durch="betreiber", kostenfrei=True, sperrkontext=kontext)
+    db.commit()
+    assert (gwelt.nichtmitglied.guthaben, gwelt.mitglied.guthaben, g.restwert) == (
+        Decimal("30"),
+        Decimal("0"),
+        Decimal("20"),
+    )
+    e = db.scalar(select(GutscheinEinloesung))
+    r = db.get(Rechnung, e.korrektur_rechnung_id)
+    assert r.brutto == Decimal("-30")
+    assert r.kunde_id == (gwelt.mitglied.id if steuer == "beim_kauf" else gwelt.nichtmitglied.id)
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, [b.id])
+    wieder = gutschein_einloesung.storno_rueckgaengig(
+        db, b, grund="Wiederholung", quelle="admin", sperrkontext=kontext
+    )
+    assert wieder.korrekturbelege == [] and wieder.guthaben_betrag == Decimal("0")
+
+
+@pytest.mark.parametrize("steuer", ["beim_kauf", "bei_einloesung"])
+def test_einheitsstorno_nur_15_euro_geldrest(db, gwelt, steuer):
+    from beachhub_core.services import gutschein_einloesung
+
+    g = code(db, gwelt, steuer=steuer, nur_mitglieder=False)
+    guthaben.buche(db, kunde=gwelt.nichtmitglied, betrag=Decimal("5"), art="manuell")
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    z = db.scalar(select(Zahlung).where(Zahlung.buchung_id == b.id))
+    online_buchung.zahlung_eingegangen(db, rueckmeldung(z.provider_ref, "10.00"))
+    db.commit()
+    kontext = gutschein_sperren.bereite_buchungen_vor(db, [b.id])
+    rueck = gutschein_einloesung.storno_rueckgaengig(
+        db, b, grund="Storno", quelle="admin", sperrkontext=kontext
+    )
+    db.commit()
+    assert rueck.guthaben_betrag == Decimal("15")
+    assert gwelt.nichtmitglied.guthaben == Decimal("15") and gwelt.mitglied.guthaben == Decimal("0")
+    assert g.inhaber_kunde_id == gwelt.nichtmitglied.id and g.status == "aktiv"
+    assert len(rueck.korrekturbelege) == (2 if steuer == "bei_einloesung" else 1)
+    assert db.get(Rechnung, g.rechnung_id).status == "bezahlt"
+
+
+def test_centkorrektur_in_anderer_stornoreihenfolge(db, gwelt):
+    from beachhub_core.services import storno
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nennwert_brutto=Decimal("0.09"),
+        restwert=Decimal("0.09"),
+        kaufpreis_brutto=Decimal("0.09"),
+        ust_satz=Decimal("19"),
+    )
+    db.scalar(select(Tarif)).preis = Decimal("0.01")
+    db.commit()
+    bids = []
+    for tag in range(1, 10):
+        erg = buchen(db, gwelt, [g.code], stunden=1, tag=date(2027, 12, tag))
+        bids.append(erg.antwort.buchung_id)
+        db.commit()
+    p = db.get(Rechnung, g.rechnung_id).positionen[0]
+    for index in (8, 4, 0, 7, 3, 1, 6, 2, 5):
+        storno.storniere(db, db.get(Buchung, bids[index]), durch="betreiber", kostenfrei=True)
+        db.commit()
+        if index != 5:
+            assert p.korrigiert_durch_id is None
+    rs = db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all()
+    assert -sum(r.netto for r in rs) == p.netto
+    assert -sum(r.ust for r in rs) == p.ust
+    assert all(r.netto <= 0 and r.ust <= 0 for r in rs)
+    assert p.korrigiert_durch_id is not None
+    assert gwelt.mitglied.guthaben == Decimal("0.09") and g.restwert == Decimal("0")
+
+
+def test_zahlung_nach_reservierungsfrist_ohne_job_gibt_bestand_zurueck(db, gwelt):
+    from datetime import timedelta
+
+    from beachhub_core import clock
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        steuer="bei_einloesung",
+        nennwert_brutto=Decimal("30"),
+        restwert=Decimal("30"),
+        kaufpreis_brutto=Decimal("30"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code])
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    z = db.scalar(select(Zahlung).where(Zahlung.buchung_id == b.id))
+    b.reserviert_bis = clock.now(db) - timedelta(seconds=1)
+    db.commit()
+    online_buchung.zahlung_eingegangen(db, rueckmeldung(z.provider_ref, "15.00"))
+    db.commit()
+    assert b.status == "verfallen" and g.restwert == Decimal("30")
+    assert gwelt.mitglied.guthaben == Decimal("15")
+    assert db.scalar(select(GutscheinEinloesung)).status == "rueckgaengig"
+    assert db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all() == []
+
+
+def test_storno_nachlauf_kaeufer_pdf_nur_an_kaeufer(db, gwelt, mail_ausgang, monkeypatch):
+    from beachhub_core.services import benachrichtigung, storno
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("50"),
+        kaufpreis_brutto=Decimal("50"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    s = storno.storniere(db, b, durch="betreiber", kostenfrei=True)
+    db.commit()
+    benachrichtigung.storno_nachlauf(db, s)
+    e = db.scalar(select(GutscheinEinloesung))
+    gegen = db.get(Rechnung, e.korrektur_rechnung_id)
+    kaufmail = [m for m in mail_ausgang if m["betreff"] == f"Stornorechnung {gegen.nummer}"]
+    assert len(kaufmail) == 1 and kaufmail[0]["an"] == gwelt.mitglied.email
+    assert "Guthaben" not in kaufmail[0]["text"] or "30,00" not in kaufmail[0]["text"]
+    hinweis = [m for m in mail_ausgang if m["betreff"] == "Gutschein-Rückabwicklung"]
+    assert len(hinweis) == 1 and hinweis[0]["an"] == gwelt.nichtmitglied.email
+    assert "30,00" in hinweis[0]["text"] and not hinweis[0].get("anhaenge")
+
+
+@pytest.mark.parametrize("status", ["gesperrt", "verfallen"])
+def test_einheitsstorno_aktiviert_keinen_gesperrten_code(db, gwelt, status, mail_ausgang):
+    from beachhub_core.services import benachrichtigung, storno
+
+    g = code(db, gwelt, steuer="bei_einloesung", nur_mitglieder=False)
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    bis = g.gueltig_bis
+    g.status = status
+    g.inhaber_kunde_id = gwelt.mitglied.id
+    db.commit()
+    s = storno.storniere(db, b, durch="betreiber", kostenfrei=True)
+    db.commit()
+    benachrichtigung.storno_nachlauf(db, s)
+    assert g.status == status and g.gueltig_bis == bis
+    assert g.inhaber_kunde_id == gwelt.nichtmitglied.id
+    assert gwelt.nichtmitglied.guthaben == Decimal("0")
+    hinweis = next(m for m in mail_ausgang if m["betreff"] == "Gutschein-Rückabwicklung")
+    assert "nicht einlösbar" in hinweis["text"] and "wieder gültig" not in hinweis["text"]
+
+
+def test_kostenpflichtig_dann_kulanz_genau_einmal(db, gwelt):
+    from beachhub_core.services import storno
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("50"),
+        kaufpreis_brutto=Decimal("50"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    s = storno.storniere(db, b, durch="betreiber", kostenfrei=False)
+    db.commit()
+    assert gwelt.nichtmitglied.guthaben == 0 and g.restwert == 20
+    assert db.scalar(select(GutscheinEinloesung)).status == "bestaetigt"
+    storno.kulanz(db, s, admin_user_id=None, grund="Kulanz")
+    db.commit()
+    storno.kulanz(db, s, admin_user_id=None, grund="nochmal")
+    db.commit()
+    assert gwelt.nichtmitglied.guthaben == 30 and g.restwert == 20
+    assert (
+        db.scalar(select(func.count()).select_from(Rechnung).where(Rechnung.art == "storno")) == 1
+    )
+
+
+@pytest.mark.parametrize("sekunden", [-1, 0, 1])
+def test_callback_prueft_genaue_gespeicherte_frist(db, gwelt, monkeypatch, sekunden):
+    from datetime import timedelta
+
+    from beachhub_core import clock
+
+    g = code(db, gwelt, steuer="bei_einloesung")
+    db.commit()
+    erg = buchen(db, gwelt, [g.code])
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    z = db.scalar(select(Zahlung).where(Zahlung.buchung_id == b.id))
+    jetzt = b.reserviert_bis + timedelta(seconds=sekunden)
+    monkeypatch.setattr(clock, "now", lambda session: jetzt)
+    online_buchung.zahlung_eingegangen(db, rueckmeldung(z.provider_ref, "15.00"))
+    db.commit()
+    assert b.status == ("verfallen" if sekunden > 0 else "bestaetigt")
+    assert gwelt.mitglied.guthaben == (Decimal("15") if sekunden > 0 else Decimal("0"))
+    assert g.status == ("aktiv" if sekunden > 0 else "eingeloest")
+    online_buchung.zahlung_eingegangen(db, rueckmeldung(z.provider_ref, "15.00"))
+    db.commit()
+    assert gwelt.mitglied.guthaben == (Decimal("15") if sekunden > 0 else Decimal("0"))
+
+
+def test_wertstorno_walletfehler_rollt_beleg_und_marker_zurueck(db, gwelt, monkeypatch):
+    from beachhub_core.services import storno
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("50"),
+        kaufpreis_brutto=Decimal("50"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    bid = erg.antwort.buchung_id
+
+    def fehler(*args, **kwargs):
+        raise RuntimeError("Wallet ausgefallen")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(guthaben, "buche", fehler)
+        with pytest.raises(RuntimeError, match="Wallet"):
+            storno.storniere(db, db.get(Buchung, bid), durch="betreiber", kostenfrei=True)
+        db.rollback()
+    assert db.get(Buchung, bid).status == "bestaetigt"
+    e = db.scalar(select(GutscheinEinloesung))
+    assert e.status == "bestaetigt" and e.korrektur_rechnung_id is None
+    assert db.get(Rechnung, g.rechnung_id).positionen[0].korrigiert_durch_id is None
+    assert (
+        db.scalar(select(func.count()).select_from(Rechnung).where(Rechnung.art == "storno")) == 0
+    )
+    assert gwelt.nichtmitglied.guthaben == Decimal("0") and g.restwert == Decimal("20")
+    storno.storniere(db, db.get(Buchung, bid), durch="betreiber", kostenfrei=True)
+    db.commit()
+    assert gwelt.nichtmitglied.guthaben == Decimal("30")
+
+
+@pytest.mark.parametrize("fehlerphase", ["stornomail", "erstes_pdf"])
+def test_storno_nachlauf_fehler_verliert_keinen_folgebeleg(
+    db, gwelt, monkeypatch, mail_ausgang, fehlerphase
+):
+    from beachhub_core.services import benachrichtigung, rechnung_pdf, storno
+
+    g = code(db, gwelt, steuer="bei_einloesung")
+    guthaben.buche(db, kunde=gwelt.mitglied, betrag=Decimal("15"), art="manuell")
+    db.commit()
+    erg = buchen(db, gwelt, [g.code])
+    db.commit()
+    s = storno.storniere(
+        db, db.get(Buchung, erg.antwort.buchung_id), durch="betreiber", kostenfrei=True
+    )
+    db.commit()
+    if fehlerphase == "stornomail":
+
+        def kaputt(*args):
+            raise RuntimeError("SMTP")
+
+        monkeypatch.setattr(benachrichtigung, "storno", kaputt)
+    else:
+        echt = rechnung_pdf.erzeuge
+
+        def erzeuge(session, r):
+            if r.gutschein_rolle is None:
+                raise RuntimeError("PDF")
+            return echt(session, r)
+
+        monkeypatch.setattr(rechnung_pdf, "erzeuge", erzeuge)
+    benachrichtigung.storno_nachlauf(db, s)
+    e = db.scalar(select(GutscheinEinloesung))
+    r = db.get(Rechnung, e.korrektur_rechnung_id)
+    assert r.pdf_pfad is not None
+    assert any(m["betreff"] == f"Stornorechnung {r.nummer}" for m in mail_ausgang)
+
+
+def test_dauerbeenden_wiederholt_keine_alten_rueckgabehinweise(db, gwelt, eingeloggt, mail_ausgang):
+    from beachhub_core.models import Dauerbuchung
+
+    g = gutscheine.stelle_freicodes_aus(db, anzahl=1, gueltig_bis=None, admin_user_id=None)[0]
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], stunden=2)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    dauer = Dauerbuchung(
+        kunde_id=b.kunde_id,
+        feld_id=b.feld_id,
+        wochentag=2,
+        start=time(19),
+        ende=time(21),
+        gueltig_von=TERMIN,
+        gueltig_bis=TERMIN,
+        pin_hash="test",
+        pin_verschluesselt="test",
+    )
+    db.add(dauer)
+    db.flush()
+    b.dauerbuchung_id = dauer.id
+    db.commit()
+    for _ in range(2):
+        mail_ausgang.clear()
+        r = eingeloggt.post(
+            f"/admin/belegung/dauer/{dauer.id}/beenden",
+            data={"csrf_token": eingeloggt.csrf, "ab": TERMIN.isoformat()},
+            follow_redirects=False,
+        )
+        assert r.status_code == 303
+        if _ == 0:
+            assert sum(m["betreff"] == "Gutschein-Rückabwicklung" for m in mail_ausgang) == 1
+        else:
+            assert mail_ausgang == []

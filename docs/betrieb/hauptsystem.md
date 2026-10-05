@@ -337,8 +337,27 @@ Erst danach werden Wertgutscheine und das Guthaben des Einlösers gegen den Rest
 Die Buchungsbestätigung zeigt Tarifwert, Gutscheindeckung und Geld-/Guthabenanteil getrennt.
 Ein Mehrzweck-Einheitsgutschein über 26 € erzeugt bei Einlösung einen Beleg über 26 €,
 auch wenn er 30 € Tarifwert deckt. Ein Geldrest erhält eine eigene Rechnung.
-Kauf, finanzielle Rückabwicklung und die Portalbedienung folgen in späteren Umsetzungsschritten;
+Kauf und Portalbedienung folgen in späteren Umsetzungsschritten;
 der vollständige Gutschein-Betriebsablauf bleibt bis dahin in Arbeit.
+
+Bei kostenfreiem Storno oder nachträglicher Kulanz gibt das Hauptsystem Einheiten und
+Freischaltcodes an den Einlöser zurück. Das ursprüngliche Ablaufdatum bleibt unverändert;
+ein bereits gesperrter oder verfallener Code bleibt nicht einlösbar. Mehrzweck-Einheiten
+bekommen einen steuerlichen Gegenbeleg, aber kein Geldguthaben aus dem Gutschein.
+Bei Wertgutscheinen erhält der Einlöser stattdessen den verbrauchten Wert als Guthaben mit
+Korrekturbeleg; der Gutscheinrest steigt nicht. Ein 50-€-Wertgutschein mit 30 € Verbrauch
+behält beispielsweise 20 € Rest, der Einlöser erhält 30 € Guthaben. Der Käufer erhält kein
+Guthaben aus fremder Einlösung. Sein Kaufgegenbeleg wird nur ihm zugestellt.
+Der separat bezahlte Geld-/Guthabenrest wird zusätzlich nach den normalen Finanzregeln
+korrigiert. Beim 26-€-Einheitsgutschein mit 15 € Geldrest entstehen genau 15 € Guthaben.
+Kostenpflichtige Absagen lassen den Gutscheinverbrauch bestehen. Wiederholung einer bereits
+vollständigen Rückabwicklung erzeugt kein neues Guthaben und keinen neuen Beleg.
+Reservierungen ohne Bestätigung geben bei Abbruch oder Verfall den ursprünglichen Bestand
+zurück, einschließlich Wertgutscheinrest, ohne Wertgutschein-Gutschrift. Ein Zahlungseingang
+nach der gespeicherten Reservierungsfrist bestätigt nichts mehr, auch vor dem Minutenjob;
+der Geldbetrag wird genau einmal als Spätzahlungsguthaben verbucht. Genau auf der Frist gilt
+wie im Verfallsjob noch kein Verfall. Nach dem Commit werden sämtliche Gegenbelege und
+zutreffende Einlöserhinweise versandt; der Fehler eines Belegs verhindert Folgebelege nicht.
 
 ## 6. Backup und Wiederherstellung
 

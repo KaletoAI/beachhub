@@ -1,0 +1,12 @@
+Hallo {{ b.kunde.name }},
+
+zur Rückabwicklung Ihrer Buchung vom {{ b.beginn|lokal }}:
+{% if guthaben_betrag > 0 %}
+{{ guthaben_betrag|euro }} wurden Ihrem Guthaben gutgeschrieben. Wir verrechnen das Guthaben mit Ihrer nächsten Buchung oder Rechnung. Bei Wertgutscheinen erhöht die Gutschrift den Gutscheinrest nicht.
+{% endif %}
+{% for code, bis, nutzbar in zurueck %}
+Gutscheincode {{ code }} wurde zurückgegeben.{% if nutzbar %} Er ist wieder gültig.{% else %} Er ist derzeit nicht einlösbar (gesperrt oder verfallen).{% endif %} Die ursprüngliche Gültigkeit bis {{ bis|datum }} bleibt unverändert.
+{% endfor %}
+
+Viele Grüße
+{{ betreiber }}

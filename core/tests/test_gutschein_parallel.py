@@ -1,4 +1,4 @@
-"""Echte PostgreSQL-Locks; der Verbrauchsdienst folgt erst im Einlösungs-Task."""
+"""Echte PostgreSQL-Vorgangslocks, Rückabwicklung und Reservierungsrennen."""
 
 import time
 import uuid
@@ -407,3 +407,242 @@ def test_beenden_neuer_termin_waehrend_vorbereitung_erfordert_retry(db: Session,
         db.rollback()
     assert wurde_eingefuegt
     assert db.get(Buchung, alt_id).status == Buchung.BESTAETIGT
+
+
+def test_gleichzeitige_wert_rueckabwicklung_nur_eine_gutschrift(db, gwelt):
+    from concurrent.futures import ThreadPoolExecutor
+    from decimal import Decimal
+    from threading import Event
+
+    from beachhub_core.models import Buchung, GutscheinEinloesung, Rechnung
+    from beachhub_core.services import gutschein_einloesung
+    from hilfen_parallel import warte_auf_sperre
+    from test_gutschein_einloesung import buchen, code
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("50"),
+        kaufpreis_brutto=Decimal("50"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    bid = erg.antwort.buchung_id
+    kontext = sperren.bereite_buchungen_vor(db, [bid])
+    erster = gutschein_einloesung.storno_rueckgaengig(
+        db, db.get(Buchung, bid), grund="Storno", quelle="admin", sperrkontext=kontext
+    )
+    bereit, pids = Event(), []
+
+    def lauf():
+        with SessionLocal() as session:
+            pids.append(session.scalar(text("select pg_backend_pid()")))
+            bereit.set()
+            kontext = sperren.bereite_buchungen_vor(session, [bid])
+            rueck = gutschein_einloesung.storno_rueckgaengig(
+                session,
+                session.get(Buchung, bid),
+                grund="nochmal",
+                quelle="admin",
+                sperrkontext=kontext,
+            )
+            session.commit()
+            return rueck.guthaben_betrag, len(rueck.korrekturbelege)
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lauf)
+        assert bereit.wait(5)
+        try:
+            warte_auf_sperre(pids[0])
+            db.commit()
+        finally:
+            db.rollback()
+        assert future.result(timeout=5) == (Decimal("0"), 0)
+    db.expire_all()
+    assert erster.guthaben_betrag == Decimal("30")
+    assert gwelt.nichtmitglied.guthaben == Decimal("30") and gwelt.mitglied.guthaben == Decimal("0")
+    assert g.restwert == Decimal("20")
+    assert db.scalar(select(GutscheinEinloesung)).korrektur_rechnung_id is not None
+    assert len(db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all()) == 1
+
+
+@pytest.mark.parametrize("callback_zuerst", [False, True])
+def test_job_und_spaetcallback_echte_sessions(db, gwelt, callback_zuerst):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+    from decimal import Decimal
+    from threading import Event
+
+    from beachhub_core import clock
+    from beachhub_core.models import Buchung, GutscheinEinloesung, Rechnung, Zahlung
+    from beachhub_core.services import guthaben, online_buchung
+    from hilfen_parallel import warte_auf_sperre
+    from test_gutschein_einloesung import buchen, code, rueckmeldung
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        steuer="bei_einloesung",
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("30"),
+        restwert=Decimal("30"),
+        kaufpreis_brutto=Decimal("30"),
+    )
+    guthaben.buche(db, kunde=gwelt.nichtmitglied, betrag=Decimal("5"), art="manuell")
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied)
+    db.commit()
+    bid = erg.antwort.buchung_id
+    b = db.get(Buchung, bid)
+    ref = db.scalar(select(Zahlung).where(Zahlung.buchung_id == bid)).provider_ref
+    b.reserviert_bis = clock.now(db) - timedelta(seconds=1)
+    db.commit()
+
+    def callback(session):
+        return online_buchung.zahlung_eingegangen(session, rueckmeldung(ref, "10.00"))
+
+    erstes = callback if callback_zuerst else online_buchung.verfalle_abgelaufene
+    zweites = online_buchung.verfalle_abgelaufene if callback_zuerst else callback
+    erstes(db)
+    bereit, pids = Event(), []
+
+    def lauf():
+        with SessionLocal() as session:
+            pids.append(session.scalar(text("select pg_backend_pid()")))
+            bereit.set()
+            zweites(session)
+            session.commit()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lauf)
+        assert bereit.wait(5)
+        try:
+            warte_auf_sperre(pids[0])
+            db.commit()
+        finally:
+            db.rollback()
+        future.result(timeout=5)
+    db.expire_all()
+    assert b.status == "verfallen" and g.restwert == Decimal("30")
+    assert gwelt.nichtmitglied.guthaben == Decimal("15")
+    assert db.scalar(select(GutscheinEinloesung)).status == "rueckgaengig"
+    assert db.scalars(select(Rechnung).where(Rechnung.gutschein_rolle == "einloesung")).all() == []
+    assert callback(db).nach_commit == []
+    db.commit()
+    assert gwelt.nichtmitglied.guthaben == Decimal("15")
+
+
+def test_batch_zwei_stornos_verwendet_vollstaendigen_kontext_bis_zum_ende(db, gwelt):
+    from decimal import Decimal
+
+    from beachhub_core.models import Buchung, GutscheinEinloesung, Rechnung
+    from beachhub_core.services import sperren as hallsperren
+    from test_gutschein_einloesung import buchen, code
+
+    gs = [code(db, gwelt, steuer="bei_einloesung", nur_mitglieder=False) for _ in range(2)]
+    db.commit()
+    bs = []
+    for tag, g, kunde in ((1, gs[0], gwelt.mitglied), (2, gs[1], gwelt.nichtmitglied)):
+        erg = buchen(db, gwelt, [g.code], stunden=2, tag=date(2027, 12, tag), kunde=kunde)
+        db.commit()
+        bs.append(db.get(Buchung, erg.antwort.buchung_id))
+    statements = []
+
+    def beobachte(conn, cursor, statement, parameters, context, executemany):
+        statements.append(statement.lower())
+
+    event.listen(engine, "before_cursor_execute", beobachte)
+    try:
+        hallsperren.lege_an(
+            db,
+            feld_ids=[gwelt.feld.id],
+            beginn=bs[0].beginn,
+            ende=bs[1].ende,
+            grund="Batch",
+            admin_user_id=None,
+            entscheidungen={b.id: "stornieren" for b in bs},
+        )
+        db.commit()
+    finally:
+        event.remove(engine, "before_cursor_execute", beobachte)
+    glocks = [
+        i for i, sql in enumerate(statements) if "from gutschein \n" in sql and "for update" in sql
+    ]
+    nummernkreis = next(
+        i for i, sql in enumerate(statements) if "from nummernkreis" in sql and "for update" in sql
+    )
+    assert len(glocks) == 1 and glocks[0] < nummernkreis
+    assert all(g.status == "aktiv" for g in gs)
+    assert all(b.status == "storniert" for b in bs)
+    assert all(e.korrektur_rechnung_id is not None for e in db.scalars(select(GutscheinEinloesung)))
+    assert len(db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all()) == 2
+    assert gwelt.mitglied.guthaben == Decimal("0") and gwelt.nichtmitglied.guthaben == Decimal("0")
+
+
+@pytest.mark.parametrize("verfall_zuerst", [False, True])
+def test_codeverfall_und_bestaetigter_wertstorno_echte_sessions(db, gwelt, verfall_zuerst):
+    from concurrent.futures import ThreadPoolExecutor
+    from datetime import timedelta
+    from decimal import Decimal
+    from threading import Event
+
+    from beachhub_core import clock
+    from beachhub_core.models import Buchung, Rechnung
+    from beachhub_core.services import gutscheine, storno
+    from hilfen_parallel import warte_auf_sperre
+    from test_gutschein_einloesung import buchen, code
+
+    g = code(
+        db,
+        gwelt,
+        modell="wert",
+        minuten=None,
+        nur_mitglieder=False,
+        nennwert_brutto=Decimal("50"),
+        restwert=Decimal("50"),
+        kaufpreis_brutto=Decimal("50"),
+    )
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], kunde=gwelt.nichtmitglied, stunden=2)
+    db.commit()
+    bid = erg.antwort.buchung_id
+    g.gueltig_bis = clock.today(db) - timedelta(days=1)
+    db.commit()
+
+    def stornieren(session):
+        return storno.storniere(
+            session, session.get(Buchung, bid), durch="betreiber", kostenfrei=True
+        )
+
+    erstes = gutscheine.verfalle if verfall_zuerst else stornieren
+    zweites = stornieren if verfall_zuerst else gutscheine.verfalle
+    erstes(db)
+    bereit, pids = Event(), []
+
+    def lauf():
+        with SessionLocal() as session:
+            pids.append(session.scalar(text("select pg_backend_pid()")))
+            bereit.set()
+            zweites(session)
+            session.commit()
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(lauf)
+        assert bereit.wait(5)
+        try:
+            warte_auf_sperre(pids[0])
+            db.commit()
+        finally:
+            db.rollback()
+        future.result(timeout=5)
+    db.expire_all()
+    assert g.status == "verfallen" and g.restwert == Decimal("20")
+    assert gwelt.nichtmitglied.guthaben == Decimal("30") and gwelt.mitglied.guthaben == Decimal("0")
+    assert len(db.scalars(select(Rechnung).where(Rechnung.art == "storno")).all()) == 1

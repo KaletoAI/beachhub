@@ -213,6 +213,24 @@ def korrigiere(
     ursprüngliche Rechnung bleibt unverändert (A-RECH-4); sind danach alle ihre Positionen
     korrigiert, gilt sie als storniert (Abweichung B-4). Guthaben entsteht hier nicht – das
     entscheidet `storno.gutschreiben_positionen`."""
+    return _korrigiere_positionen(
+        db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
+    )
+
+
+def _korrigiere_positionen(
+    db: Session,
+    positionen: Sequence[RechnungPosition],
+    *,
+    grund: str,
+    quelle: str,
+    admin_user_id: uuid.UUID | None = None,
+) -> Rechnung:
+    """(Teil-)Stornorechnung über genau diese Positionen einer Rechnung (A-RECH-7). Die
+    ursprüngliche Rechnung bleibt unverändert (A-RECH-4); sind danach alle ihre Positionen
+    korrigiert, gilt sie als storniert (Abweichung B-4). Guthaben entsteht hier nicht – das
+    entscheidet der aufrufende Stornodienst. Interner Belegweg unterhalb öffentlicher
+    Aktionsguards; ein Gutschein-Fachpfad muss seinen vollständigen Vorgang vorbereiten."""
     if not positionen:
         raise RechnungsFehler("keine_positionen")
     positionen = list({p.id: p for p in positionen}.values())

@@ -7,16 +7,25 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Buchung, Dauerbuchung, Rechnung, RechnungPosition, Storno
+from beachhub_core.models import (
+    Buchung,
+    Dauerbuchung,
+    GutscheinEinloesung,
+    Rechnung,
+    RechnungPosition,
+    Storno,
+)
 from beachhub_core.services import (
     audit,
     buchungen,
     guthaben,
+    gutschein_einloesung,
+    gutschein_sperren,
     konfiguration,
-    kunden,
     rechnungen,
     sperren,
 )
+from beachhub_core.services.gutschein_typen import GutscheinSperrkontext
 
 NULL = Decimal("0.00")
 
@@ -34,16 +43,35 @@ def gutschreiben_positionen(
     admin_user_id: uuid.UUID | None = None,
 ) -> Rechnung:
     """Korrigiert Positionen einer Rechnung und schreibt den bereits bezahlten Anteil als Guthaben
-    gut. Der einzige Weg zu Guthaben der Art `storno_gutschrift` (A-STORNO-6): Ohne
+    gut. Ohne
     Korrekturbeleg bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG).
     Bei offener Rechnung sinkt zuerst die Forderung (A-RECH-7, Abweichung B-3)."""
+    return _gutschreiben_positionen(
+        db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
+    )
+
+
+def _gutschreiben_positionen(
+    db: Session,
+    positionen: Sequence[RechnungPosition],
+    *,
+    grund: str,
+    quelle: str,
+    admin_user_id: uuid.UUID | None = None,
+) -> Rechnung:
+    """Korrigiert Positionen einer Rechnung und schreibt den bereits bezahlten Anteil als Guthaben
+    gut. Ohne
+    Korrekturbeleg bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG).
+    Bei offener Rechnung sinkt zuerst die Forderung (A-RECH-7, Abweichung B-3).
+    Interner Finanzweg für vollständig vorbereitete koordinierte Gutschein-Stornos.
+    Öffentliche Aktionsguards gehören an die aufrufenden allgemeinen Dienste."""
     if not positionen:
         raise rechnungen.RechnungsFehler("keine_positionen")
     positionen = list({p.id: p for p in positionen}.values())
     rechnung = positionen[0].rechnung
     rechnungen.sperre(db, rechnung)
     offen_vorher = rechnungen.offener_betrag(db, rechnung)
-    beleg = rechnungen.korrigiere(
+    beleg = rechnungen._korrigiere_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )
     betrag = sum((p.brutto for p in positionen), NULL)
@@ -79,19 +107,35 @@ def gutschreiben_alle(
     grund: str,
     quelle: str,
     admin_user_id: uuid.UUID | None = None,
+    sperrkontext: GutscheinSperrkontext | None = None,
 ) -> list[Rechnung]:
     """Korrekturbelege für kostenfrei gewordene Buchungen – einer je Rechnung, etwa beim Beenden
     einer Dauerbuchung (A-RECH-7). Verknüpft jedes Storno mit seinem Beleg. Buchungen ohne
     (noch nicht korrigierte) Rechnungsposition bleiben ohne Beleg und ohne Guthaben."""
-    kunden.sperre_mehrere(db, (b.kunde_id for b in gebucht))
+    if sperrkontext is None:
+        sperrkontext = gutschein_sperren.bereite_buchungen_vor(db, (b.id for b in gebucht))
+    belege = []
     gruppen: dict[uuid.UUID, list[tuple[Buchung, RechnungPosition]]] = {}
     for b in gebucht:
         # Saisonrechnung/Neuausstellung kann den zuvor geladenen Zeiger ersetzt haben.
         db.refresh(b)
+        if (
+            db.scalar(select(GutscheinEinloesung.id).where(GutscheinEinloesung.buchung_id == b.id))
+            is not None
+        ):
+            rueck = gutschein_einloesung.storno_rueckgaengig(
+                db,
+                b,
+                grund=grund,
+                quelle=quelle,
+                admin_user_id=admin_user_id,
+                sperrkontext=sperrkontext,
+            )
+            belege.extend(rueck.korrekturbelege)
+            continue
         pos = _offene_position(db, b)
         if pos is not None:
             gruppen.setdefault(pos.rechnung_id, []).append((b, pos))
-    belege = []
     for paare in gruppen.values():
         beleg = gutschreiben_positionen(
             db,
@@ -116,9 +160,15 @@ def gutschreiben(
     grund: str,
     quelle: str,
     admin_user_id: uuid.UUID | None = None,
+    sperrkontext: GutscheinSperrkontext | None = None,
 ) -> Rechnung | None:
     belege = gutschreiben_alle(
-        db, [buchung], grund=grund, quelle=quelle, admin_user_id=admin_user_id
+        db,
+        [buchung],
+        grund=grund,
+        quelle=quelle,
+        admin_user_id=admin_user_id,
+        sperrkontext=sperrkontext,
     )
     return belege[0] if belege else None
 
@@ -142,11 +192,13 @@ def storniere(
     grund: str = "",
     kostenfrei: bool | None = None,
     korrigieren: bool = True,
+    sperrkontext: GutscheinSperrkontext | None = None,
 ) -> Storno:
     """Storniert eine Buchung. Ist das Storno kostenfrei, korrigiert es die Rechnung der Buchung
     (`gutschreiben`) – außer mit `korrigieren=False`: Dann bündelt der Aufrufer die Belege mit
     `gutschreiben_alle`."""
-    kunden.sperre_mehrere(db, [buchung.kunde_id])
+    if sperrkontext is None:
+        sperrkontext = gutschein_sperren.bereite_buchungen_vor(db, [buchung.id])
     db.refresh(buchung, with_for_update=True)
     if not buchung.aktiv:
         raise StornoFehler("nicht_aktiv")
@@ -198,6 +250,7 @@ def storniere(
         gutschreiben(
             db,
             buchung,
+            sperrkontext=sperrkontext,
             grund=f"Storno: {grund}" if grund else "Storno",
             quelle=quelle,
             admin_user_id=admin_user_id,
@@ -218,7 +271,7 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
     """Stellt ein kostenpflichtiges Storno nachträglich frei – mit Korrekturbeleg (A-STORNO-4,
     A-STORNO-6). Ein bereits kostenfreies Storno bleibt unberührt – sonst entstünde ein zweites
     Mal Guthaben."""
-    kunden.sperre_mehrere(db, [s.buchung.kunde_id])
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(db, [s.buchung_id])
     db.refresh(s)
     if s.kostenfrei:
         return
@@ -227,7 +280,12 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
     s.grund = (s.grund + " | " if s.grund else "") + f"Kulanz: {grund}"
     db.flush()
     gutschreiben(
-        db, s.buchung, grund=f"Kulanz: {grund}", quelle="admin", admin_user_id=admin_user_id
+        db,
+        s.buchung,
+        grund=f"Kulanz: {grund}",
+        quelle="admin",
+        admin_user_id=admin_user_id,
+        sperrkontext=sperrkontext,
     )
     db.flush()
     audit.protokolliere(

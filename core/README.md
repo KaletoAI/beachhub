@@ -100,7 +100,7 @@ Freischaltcodes lassen sich unter **Gutscheine → Freischaltcodes** ausstellen 
 exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsänderungen mit Audit.
 Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
 dauerhaft gesperrt. Die Einlösung und getrennte Buchungsbelege sind im Hauptsystem-Kanal implementiert;
-Kauf, Rückabwicklung und Portaloberfläche folgen in den weiteren Umsetzungsschritten.
+Die Rückabwicklung ist implementiert; Kauf und Portaloberfläche folgen in weiteren Schritten.
 Der Gutschein-Nachtjob läuft täglich um 00:20 Europe/Berlin; das Ablaufdatum gilt einschließlich.
 Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
 `gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes
@@ -129,3 +129,18 @@ Für Buchungspreis und Gutschein-Tarifdeckung gilt derselbe unveränderliche Slo
 `preisstand` explizit, prüft Feld, Zeitraum, Gruppe, Slotfolge und Summe und liest keine
 aktuellen Tarife nach. Alle Tarifregeln der Slotpreisliste stammen aus einer einzigen Abfrage.
 Der Preisstand ist kein Feld des Portal-Kanalvertrags.
+
+Kostenfreier bestätigter Storno schreibt Wertanteile dem Einlöser mit Gegenbeleg gut;
+der Gutscheinrest bleibt unverändert. Einheiten/Freicodes erhalten ihren Bestand zurück,
+Mehrzweck-Einheiten einen steuerlichen Gegenbeleg ohne Gutscheinwertguthaben. Die ursprüngliche
+Gültigkeit bleibt bestehen; gesperrte/verfallene Codes werden nicht reaktiviert. Geldrest und
+Käuferbeleg bleiben getrennt. Reservierungsabbruch/-verfall stellt lediglich den ursprünglichen
+Bestand wieder her. Der Zahlungs-Callback prüft `reserviert_bis` selbst; nach Ablauf entstehen
+Rücknahme und Spätzahlungsguthaben atomar, auch wenn der Job noch nicht gelaufen ist.
+`gutschein_einloesung.storno_rueckgaengig` konsumiert den vollständigen Sperrkontext und liefert
+freigegebene Gutscheine, tatsächliches Guthaben und sämtliche Gegenbelege. Batch-Einstiege
+reichen denselben Kontext bis zur letzten Korrektur weiter. `gutschein_belege.korrigiere_wertanteil`
+berechnet die Nettodifferenz aus kumulativ korrigiertem Brutto/Netto, unabhängig von der
+Stornoreihenfolge. Ursprungpositionen erhalten ihren Korrekturmarker erst bei vollständiger
+Korrektur. Gegenbelege und Einlöserhinweise werden nach Commit versandt; Käufer-PDFs gehen
+nur an den Käufer. Die öffentlichen Rechnungsaktionsguards folgen in Task 8.

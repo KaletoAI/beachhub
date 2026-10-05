@@ -14,12 +14,13 @@ der Hallenhersteller die Schnittstellen festlegt.
 Für Stufe 1a-III ist die Gutschein-Datenbasis mit Revision `0015` vorbereitet:
 Kauf-Snapshots, Einlösungsbelegbasis und ein eigener Kaufbelegnummernkreis.
 Freischaltcodes, Verwaltung und die atomare Einlösung im Hauptsystem-Kanal sind implementiert;
-Kauf, Rückabwicklung und Portaloberfläche folgen in weiteren Schritten.
+Die Rückabwicklung einschließlich Kulanz und Reservierungsverfall ist implementiert;
+Kauf und Portaloberfläche folgen in weiteren Schritten.
 Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit sind vorbereitet;
 die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
 Buchungen trennen Gutschein-Einlösungsbelege vom Geld-/Guthabenrest; Mehrzweck-Einheiten
 werden mit dem Kaufpreis abgerechnet. Die vollständigen Betriebsabläufe bleiben bis zur
-Gutschein-Rückabwicklung und Portalintegration in Arbeit.
+Gutscheinkauf und Portalintegration in Arbeit.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
