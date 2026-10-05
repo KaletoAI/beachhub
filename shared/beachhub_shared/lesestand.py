@@ -99,9 +99,12 @@ class KontoBuchung(BaseModel):
     # (Hauptspec § 8.1). Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
     checkout_url: str | None = None
     reserviert_bis: datetime | None = None
-    # Darf der Kunde die Buchung im Portal stornieren (nur Portal-Buchungen, keine
-    # Dauerbuchungstermine)? Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
+    # Portal-Buchungen und Dauerbuchungstermine können Kunden im Portal absagen.
+    # Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
     stornierbar: bool = True
+    # Termin einer Dauerbuchung und verbleibende freie Absagen dieses Abos (A-DAUER-3).
+    abo: bool = False
+    freie_absagen_rest: int | None = None
 
 
 class KontoRechnung(BaseModel):

@@ -47,6 +47,7 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "mindestvorlauf_minuten": (int, 60),
     "storno_frist_stunden": (int, 24),
     "abo_nur_mitglieder": (bool, True),
+    "abo_freie_absagen": (int, 3),
     "zahlungsfrist_minuten": (int, 15),
     "saison_zahlungsziel_tage": (int, 14),
     "guthaben_auf_saisonrechnung": (bool, True),
@@ -93,6 +94,14 @@ class Beschreibung:
 
 
 BESCHREIBUNGEN: dict[str, Beschreibung] = {
+    "abo_freie_absagen": Beschreibung(
+        "Buchung und Storno",
+        "Kostenfreie Absagen im Abo",
+        "je Abo",
+        "So viele Termine eines Saisonabos kann der Kunde innerhalb der Stornofrist kostenfrei "
+        "absagen; der bezahlte Anteil wird Guthaben, sonst sinkt die Forderung. 0 heißt: Die "
+        "Saison ist fest bezahlt.",
+    ),
     "fenster_tage": Beschreibung(
         "Buchung und Storno",
         "Buchungsfenster",
@@ -288,6 +297,8 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
     zeile = db.get(Konfiguration, schluessel)
     vorher = zeile.wert if zeile else str(default)
     geparst = _parse(typ, str(wert))
+    if schluessel == "abo_freie_absagen" and geparst < 0:
+        raise ValueError("Kostenfreie Absagen dürfen nicht negativ sein")
     if schluessel == "event_ust_satz" and not Decimal("0") <= geparst < Decimal("100"):
         raise ValueError("Steuersatz ungültig")
     neu = str(geparst)
@@ -328,3 +339,8 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
 
         # Der Wert steht als online_buchen im Konto-Dokument jedes Rechnungskunden.
         lesestand.markiere_rechnungskunden(db)
+    if schluessel == "abo_freie_absagen":
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_rechnungskunden(db)
+        lesestand.markiere_abo_kunden(db)

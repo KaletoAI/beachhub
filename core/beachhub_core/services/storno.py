@@ -3,11 +3,11 @@ from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import Buchung, Kunde, Rechnung, RechnungPosition, Storno
+from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, RechnungPosition, Storno
 from beachhub_core.services import (
     audit,
     buchungen,
@@ -123,6 +123,16 @@ def gutschreiben(
     return belege[0] if belege else None
 
 
+def freie_absagen_rest(db: Session, dauer: Dauerbuchung) -> int:
+    """Kontingent je Abo abzüglich freier Kundenabsagen; Kulanz und Betreiber zählen nicht."""
+    genutzt = db.scalar(
+        select(func.count(Storno.id))
+        .join(Buchung, Storno.buchung_id == Buchung.id)
+        .where(Buchung.dauerbuchung_id == dauer.id, Storno.freie_absage.is_(True))
+    )
+    return max(0, int(konfiguration.hole(db, "abo_freie_absagen")) - int(genutzt or 0))
+
+
 def storniere(
     db: Session,
     buchung: Buchung,
@@ -137,7 +147,7 @@ def storniere(
     (`gutschreiben`) – außer mit `korrigieren=False`: Dann bündelt der Aufrufer die Belege mit
     `gutschreiben_alle`."""
     db.execute(select(Kunde).where(Kunde.id == buchung.kunde_id).with_for_update())
-    db.refresh(buchung)
+    db.refresh(buchung, with_for_update=True)
     if not buchung.aktiv:
         raise StornoFehler("nicht_aktiv")
     jetzt = clock.now(db)
@@ -148,10 +158,28 @@ def storniere(
         raise StornoFehler("zu_spaet")
     if buchung.ende <= jetzt:
         raise StornoFehler("zu_spaet")
+    freie_absage = False
     if kostenfrei is None:
         frist = timedelta(hours=konfiguration.hole(db, "storno_frist_stunden"))
         kostenfrei = jetzt <= buchung.beginn - frist
-    s = Storno(buchung_id=buchung.id, durch=durch, kostenfrei=kostenfrei, grund=grund)
+        if buchung.dauerbuchung_id is not None and durch == "kunde":
+            # Kunde ist bereits gesperrt. Prüfung und Verbrauch erfolgen in derselben
+            # Transaktion unter der Abo-Sperre, auch bei gleichzeitig letzter freier Absage.
+            dauer = db.scalar(
+                select(Dauerbuchung)
+                .where(Dauerbuchung.id == buchung.dauerbuchung_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            freie_absage = bool(kostenfrei and dauer and freie_absagen_rest(db, dauer) > 0)
+            kostenfrei = freie_absage
+    s = Storno(
+        buchung_id=buchung.id,
+        durch=durch,
+        kostenfrei=kostenfrei,
+        freie_absage=freie_absage,
+        grund=grund,
+    )
     db.add(s)
     quelle = "admin" if durch == "betreiber" else ("portal" if durch == "kunde" else "system")
     buchungen.setze_status(

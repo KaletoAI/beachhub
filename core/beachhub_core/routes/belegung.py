@@ -694,6 +694,8 @@ def dauer_detail(
         saison=saison,
         offen=rechnungen.offener_betrag(db, saison) if saison else None,
         rechnung_erstellbar=rechnung_erstellbar,
+        freie_absagen=storno.freie_absagen_rest(db, d),
+        freie_absagen_max=konfiguration.hole(db, "abo_freie_absagen"),
     )
 
 

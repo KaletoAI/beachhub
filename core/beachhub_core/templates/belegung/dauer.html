@@ -7,6 +7,7 @@
   <p>Gültig: {{ d.gueltig_von|datum }} – {{ d.gueltig_bis|datum }}</p>
   <p>PIN: <strong class="pin-gross">{{ pin }}</strong></p>
   {% if saison %}<p>Saisonrechnung: <a href="/admin/rechnungen/{{ saison.id }}">{{ saison.nummer }}</a> · {{ saison.status }}{% if offen %} · offen {{ offen|euro }}{% endif %}</p>{% endif %}
+  <p>Kostenfreie Absagen übrig: {{ freie_absagen }} von {{ freie_absagen_max }}</p>
   {% if rechnung_erstellbar and admin.rolle == "admin" %}
   <form method="post" action="/admin/belegung/dauer/{{ d.id }}/rechnung">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

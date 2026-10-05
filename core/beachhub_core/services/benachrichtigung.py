@@ -37,8 +37,16 @@ def buchung_bestaetigt(db: Session, b: Buchung) -> None:
 
 
 def storno(db: Session, s: Storno) -> None:
+    rest = None
+    if s.buchung.dauerbuchung_id is not None:
+        from beachhub_core.services import storno as storno_dienst
+
+        dauer = db.get(Dauerbuchung, s.buchung.dauerbuchung_id)
+        rest = storno_dienst.freie_absagen_rest(db, dauer) if dauer is not None else None
     mail.sende(
-        s.buchung.kunde.email, "Stornierung Ihrer Buchung", _text("storno", s=s, b=s.buchung)
+        s.buchung.kunde.email,
+        "Stornierung Ihrer Buchung",
+        _text("storno", s=s, b=s.buchung, rest=rest),
     )
 
 

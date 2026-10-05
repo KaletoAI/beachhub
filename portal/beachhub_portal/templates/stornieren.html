@@ -3,7 +3,15 @@
 <h1>Buchung stornieren</h1>
 <div class="karte">
   <p><strong>{{ b.feld_name }}</strong> · {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr · {{ b.preis|euro }}</p>
-  {% if kostenfrei %}
+  {% if b.abo %}
+  {% if b.freie_absagen_rest is not none %}<p>Kostenfreie Absagen übrig: {{ b.freie_absagen_rest }}</p>{% endif %}
+  {% if b.freie_absagen_rest == 0 %}
+  <p>Laut aktuellem Kontostand stehen keine kostenfreien Absagen zur Verfügung. Der Termin wird freigegeben, <strong>bleibt berechnet</strong>.</p>
+  {% else %}
+  <p>Eine Abo-Absage ist nur innerhalb der Stornofrist von {{ frist }} Stunden und mit verbleibendem Kontingent kostenfrei. Ob die Absage kostenfrei ist, entscheidet das Buchungssystem bei der Bearbeitung.</p>
+  <p>Bei einer kostenfreien Absage sinkt die offene Forderung; der bereits bezahlte Anteil wird Guthaben. Andernfalls bleibt der Termin berechnet. Der Platz wird in jedem Fall freigegeben.</p>
+  {% endif %}
+  {% elif kostenfrei %}
   <p>Die Stornierung ist <strong>kostenfrei</strong>.{% if b.status == "bestaetigt" %} Der Betrag wird deinem Guthaben gutgeschrieben und mit der nächsten Buchung verrechnet.{% endif %}</p>
   {% else %}
   <p>Die Stornofrist von {{ frist }} Stunden ist abgelaufen. Der Termin wird freigegeben, <strong>der Betrag bleibt aber fällig</strong>.</p>

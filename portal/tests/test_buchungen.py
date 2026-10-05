@@ -1,7 +1,9 @@
 import uuid
 from datetime import date, time
 
+import pytest
 from beachhub_portal.models import Anfrage, Konto
+from beachhub_portal.services import anfragen
 from beachhub_shared.zeit import kombiniere
 from fastapi.testclient import TestClient
 from hilfen import KUNDE_ID, belegung, buchung, konto, speichere
@@ -90,12 +92,64 @@ def test_stornieren_kostenfrei_und_kostenpflichtig(angemeldet: TestClient, db: S
     spaet = _b(MORGEN, 9)  # 23 h vorher (jetzt: 25.11. 10:00)
     reserviert = _b(MORGEN, 10, status="reserviert")
     speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[frueh, spaet, reserviert]))
-    assert (
-        "<strong>kostenfrei</strong>" in angemeldet.get(f"/buchungen/{frueh['id']}/stornieren").text
-    )
+    fruehe_seite = angemeldet.get(f"/buchungen/{frueh['id']}/stornieren").text
+    assert "<strong>kostenfrei</strong>" in fruehe_seite
+    assert "Der Betrag wird deinem Guthaben gutgeschrieben" in fruehe_seite
     assert "bleibt aber fällig" in angemeldet.get(f"/buchungen/{spaet['id']}/stornieren").text
     seite = angemeldet.get(f"/buchungen/{reserviert['id']}/stornieren").text
     assert "<strong>kostenfrei</strong>" in seite
+    assert "Der Betrag wird deinem Guthaben gutgeschrieben" not in seite
+
+
+@pytest.mark.parametrize("rest", [0, 2, None])
+def test_abo_stornoseite_zeigt_kontingent_und_bedingte_korrektur(
+    angemeldet: TestClient, db: Session, rest: int | None
+) -> None:
+    b = {**_b(UEBERMORGEN, 19), "abo": True, "freie_absagen_rest": rest}
+    speichere(db, "belegung", belegung())
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[b]))
+    seite = angemeldet.get(f"/buchungen/{b['id']}/stornieren").text
+    assert "Verbindlich stornieren" in seite
+    assert "Der Betrag wird deinem Guthaben gutgeschrieben" not in seite
+    if rest == 0:
+        assert "keine kostenfreien Absagen" in seite
+        assert "bleibt berechnet" in seite
+        assert "Stornofrist von 24 Stunden ist abgelaufen" not in seite
+    else:
+        assert "innerhalb der Stornofrist" in seite
+        assert "offene Forderung" in seite and "bezahlte Anteil" in seite
+        assert "entscheidet das Buchungssystem" in seite
+        if rest is not None:
+            assert "Kostenfreie Absagen übrig: 2" in seite
+
+
+@pytest.mark.parametrize("kostenfrei", [False, True])
+def test_abo_stornoerfolg_nennt_kosten_ohne_falschen_fristgrund(
+    angemeldet: TestClient, db: Session, kostenfrei: bool
+) -> None:
+    a = anfragen.stelle(
+        db,
+        typ="buchung_stornieren",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"buchung_id": str(uuid.uuid4())},
+    )
+    a.status = Anfrage.BEANTWORTET
+    a.antwort_json = {
+        "status": "ok",
+        "kostenfrei": kostenfrei,
+        "freie_absage": kostenfrei,
+        "verbleibende_freie_absagen": 0,
+    }
+    db.commit()
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand").json()
+    assert stand["zustand"] == "fertig"
+    assert "freie Absagen" in stand["text"]
+    seite = angemeldet.get(stand["ziel"]).text
+    if kostenfrei:
+        assert "offene Forderung" in seite and "bezahlte Anteil" in seite
+    else:
+        assert "bleibt berechnet" in seite
+        assert "Da die Stornofrist abgelaufen war" not in seite
 
 
 def test_stornieren_legt_anfrage_an(angemeldet: TestClient, db: Session) -> None:
@@ -125,7 +179,7 @@ def test_stornieren_unbekannt_oder_vergangen(angemeldet: TestClient, db: Session
 
 
 def test_nicht_stornierbar_ohne_link_und_abgewiesen(angemeldet: TestClient, db: Session) -> None:
-    # Dauerbuchungstermine und Betreiber-Buchungen storniert nur der Betreiber.
+    # Betreiber-Einzelbuchungen bleiben entsprechend dem Lesestand nicht stornierbar.
     dauer = _b(UEBERMORGEN, 19, stornierbar=False)
     eigen = _b(UEBERMORGEN, 21)
     speichere(db, "belegung", belegung())

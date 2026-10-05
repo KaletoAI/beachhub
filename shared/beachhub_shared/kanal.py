@@ -125,6 +125,9 @@ class Antwort(BaseModel):
     # Zeitzonenbewusst: Zeiten im Kanal-Schema sind durchgehend AwareDatetime (Global Constraint).
     reserviert_bis: AwareDatetime | None = None
     kostenfrei: bool | None = None
+    # Abo-Absage: zählt sie zum Kontingent, und wie viele freie Absagen bleiben?
+    freie_absage: bool | None = None
+    verbleibende_freie_absagen: int | None = None
     pdf_base64: str | None = None
     dateiname: str | None = None
 

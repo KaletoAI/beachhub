@@ -77,11 +77,9 @@ class Buchung(UUIDMixin, ZeitstempelMixin, Base):
 
     @property
     def im_portal_stornierbar(self) -> bool:
-        """Nur Portal-Buchungen: Nur bei ihnen weiß das System, dass sie vollständig bezahlt
-        sind (Zahlung beim Anbieter und/oder verrechnetes Guthaben), bevor sie bestätigt werden.
-        Betreiber-Buchungen werden außerhalb bezahlt, Dauerbuchungstermine nie einzeln – deren
-        Storno samt Gutschrift entscheidet der Betreiber."""
-        return self.quelle == "portal" and self.dauerbuchung_id is None
+        """Portal-Buchungen und Abo-Termine: Das Hauptsystem kennt ihre Rechnung und korrigiert
+        sie bei kostenfreiem Storno. Betreiber-Einzelbuchungen storniert nur der Betreiber."""
+        return self.quelle == "portal" or self.dauerbuchung_id is not None
 
 
 class Dauerbuchung(UUIDMixin, ZeitstempelMixin, Base):

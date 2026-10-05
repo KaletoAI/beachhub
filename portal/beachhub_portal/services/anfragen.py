@@ -301,6 +301,13 @@ MELDUNGEN: dict[str, str] = {
     "storniert_kostenpflichtig": (
         "Deine Buchung ist storniert. Da die Stornofrist abgelaufen war, bleibt der Betrag fällig."
     ),
+    "abo_storniert_kostenfrei": (
+        "Dein Abo-Termin ist storniert. Die Absage ist kostenfrei. Die offene Forderung sinkt; "
+        "der bereits bezahlte Anteil wird Guthaben."
+    ),
+    "abo_storniert_kostenpflichtig": (
+        "Dein Abo-Termin ist storniert und der Platz wieder frei. Der Termin bleibt berechnet."
+    ),
 }
 
 
@@ -404,7 +411,13 @@ def stand(
         return _nach_zahlung(db, antwort, kunde_id, weiter)
     if a.typ == "buchung_stornieren":
         art = "storniert_kostenfrei" if antwort.get("kostenfrei") else "storniert_kostenpflichtig"
-        return Stand("fertig", MELDUNGEN[art], ziel=f"/buchungen?meldung={art}")
+        if antwort.get("freie_absage") is not None:
+            art = f"abo_{art}"
+        text = MELDUNGEN[art]
+        rest = antwort.get("verbleibende_freie_absagen")
+        if rest is not None:
+            text += f" Verbleibende freie Absagen: {rest}."
+        return Stand("fertig", text, ziel=f"/buchungen?meldung={art}")
     if a.typ == "rechnung_anfordern":
         token = antwort.get("link_token")
         if token:

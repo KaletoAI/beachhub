@@ -14,7 +14,16 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock, zahlung
-from beachhub_core.models import Buchung, GuthabenBuchung, Kunde, Rechnung, Storno, Zahlung, utcnow
+from beachhub_core.models import (
+    Buchung,
+    Dauerbuchung,
+    GuthabenBuchung,
+    Kunde,
+    Rechnung,
+    Storno,
+    Zahlung,
+    utcnow,
+)
 from beachhub_core.services import (
     benachrichtigung,
     buchungen,
@@ -314,7 +323,12 @@ def zahlung_eingegangen(db: Session, n: kanal.ZahlungEingegangen) -> Ergebnis:
 def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) -> Ergebnis:
     # Finanzielle Stornos sperren den Kunden vor Buchung/Dauerbuchung/Rechnung.
     db.execute(select(Kunde).where(Kunde.id == kunde.id).with_for_update())
-    b = db.scalar(select(Buchung).where(Buchung.id == buchung_id).with_for_update())
+    b = db.scalar(
+        select(Buchung)
+        .where(Buchung.id == buchung_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if (
         b is None
         or b.kunde_id != kunde.id
@@ -324,8 +338,7 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
     if clock.now(db) >= b.beginn:
         return abgelehnt("zu_spaet")
     if not b.im_portal_stornierbar:
-        # Betreiberbuchungen rechnet der Betreiber außerhalb des Portals ab;
-        # ihr Storno entscheidet er.
+        # Einzelbuchungen des Betreibers storniert nur er.
         return abgelehnt("nicht_stornierbar")
     war_reserviert = b.status == Buchung.RESERVIERT
     s = storno.storniere(
@@ -338,7 +351,17 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
     )
     if war_reserviert:
         _buche_verrechnung_zurueck(db, b, quelle="portal")
-    return Ergebnis(kanal.Antwort(status="ok", kostenfrei=s.kostenfrei), [_storno_mail(s.id)])
+    rest = None
+    if b.dauerbuchung_id is not None:
+        dauer = db.get(Dauerbuchung, b.dauerbuchung_id)
+        rest = storno.freie_absagen_rest(db, dauer) if dauer is not None else None
+    antwort = kanal.Antwort(
+        status="ok",
+        kostenfrei=s.kostenfrei,
+        freie_absage=s.freie_absage if b.dauerbuchung_id is not None else None,
+        verbleibende_freie_absagen=rest,
+    )
+    return Ergebnis(antwort, [_storno_mail(s.id)])
 
 
 def verfalle_abgelaufene(db: Session) -> list[Buchung]:

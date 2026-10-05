@@ -121,3 +121,23 @@ def test_mitgliedschaft_beantragen_validiert() -> None:
     for falsch in ({"hinweis_text": ""}, {"hinweis_text": "x" * 501}, {}):
         with pytest.raises(ValidationError):
             kanal.MitgliedschaftBeantragen.model_validate(falsch)
+
+
+def test_antwort_und_konto_kennen_freie_absagen() -> None:
+    a = kanal.Antwort(status="ok", kostenfrei=True, freie_absage=True, verbleibende_freie_absagen=2)
+    d = a.model_dump(mode="json", exclude_none=True)
+    assert d["freie_absage"] is True and d["verbleibende_freie_absagen"] == 2
+    assert "freie_absage" not in kanal.Antwort(status="ok").model_dump(exclude_none=True)
+    alt = {
+        "id": "b",
+        "feld_id": "f",
+        "feld_name": "F1",
+        "beginn": "2027-12-01T18:00:00Z",
+        "ende": "2027-12-01T19:00:00Z",
+        "status": "bestaetigt",
+        "preis": "30.00",
+        "pin": None,
+        "storno": None,
+    }
+    b = KontoBuchung.model_validate(alt)
+    assert b.abo is False and b.freie_absagen_rest is None

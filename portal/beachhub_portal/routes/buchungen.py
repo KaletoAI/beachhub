@@ -95,7 +95,11 @@ def stornieren_seite(
         )
     belegung = lesestand.belegung(db)
     frist = belegung.storno_frist_stunden if belegung else 24
-    kostenfrei = b.status == "reserviert" or uhr.jetzt() <= b.beginn - timedelta(hours=frist)
+    # Bei Abos wird nur der signierte Kontostand angezeigt; über die freie Absage
+    # entscheidet das Hauptsystem bei der Verarbeitung der Anfrage.
+    kostenfrei = None
+    if not b.abo:
+        kostenfrei = b.status == "reserviert" or uhr.jetzt() <= b.beginn - timedelta(hours=frist)
     return render(request, "stornieren.html", konto=konto, b=b, kostenfrei=kostenfrei, frist=frist)
 
 
