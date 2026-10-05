@@ -1,5 +1,8 @@
 # Stufe 1a-III: Gutscheine und Freischaltcodes – Implementierungsplan
 
+> Historischer Entwurf: Für die Ausführung abgelöst durch [den aktualisierten Plan vom 05.10.2026](2026-10-05-stufe-1a-III-gutscheine.md). Insbesondere gilt beim kostenfreien Wertgutschein-Storno Kundenguthaben gemäß bestätigter Spezifikation.
+
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Kunden kaufen über das Portal Gutscheine (eine Buchungseinheit oder einen Eurobetrag) mit Online-Zahlung und Kaufrechnung bzw. Kaufbeleg, lösen gekaufte Gutscheine und vom Betreiber ausgestellte Freischaltcodes direkt in der Buchung ein (auch mehrere je Buchung), bekommen sie bei kostenfreiem Storno zurück; der Betreiber stellt Freischaltcodes einzeln und als Serie aus, sperrt, verlängert, reaktiviert und nimmt Gutscheine zurück.
