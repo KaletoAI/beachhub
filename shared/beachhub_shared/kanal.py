@@ -7,7 +7,7 @@ validieren gegen diese Schemata; eine Änderung hier ist eine Änderung des Vert
 
 import uuid
 from decimal import Decimal
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import AwareDatetime, BaseModel, Field
 
@@ -22,6 +22,7 @@ ANFRAGETYPEN: tuple[str, ...] = (
     "zahlung_eingegangen",
     "rechnung_anfordern",
     "mitgliedschaft_beantragen",
+    "gutschein_kaufen",
 )
 
 # Allowlist: Ein Dokument geht nur ans Portal, wenn es hier ausdrücklich steht. Neue Dokumente
@@ -63,6 +64,9 @@ class BuchungAnfragen(BaseModel):
     feld_id: uuid.UUID
     beginn: AwareDatetime
     ende: AwareDatetime
+    gutschein_codes: list[Annotated[str, Field(min_length=1, max_length=40)]] = Field(
+        default_factory=list, max_length=10
+    )
 
 
 class BuchungStornieren(BaseModel):
@@ -84,6 +88,14 @@ class MitgliedschaftBeantragen(BaseModel):
     hinweis_text: str = Field(min_length=1, max_length=500)
 
 
+class GutscheinKaufen(BaseModel):
+    empfaenger_email: str | None = Field(default=None, min_length=3, max_length=200)
+    # Ob der Betrag angeboten wird, entscheidet das Hauptsystem anhand seiner Einstellungen.
+    betrag: Decimal | None = Field(
+        default=None, gt=0, max_digits=10, decimal_places=2, allow_inf_nan=False
+    )
+
+
 NUTZLAST: dict[str, type[BaseModel]] = {
     "konto_angelegt": KontoAngelegt,
     "konto_geaendert": KontoGeaendert,
@@ -93,6 +105,7 @@ NUTZLAST: dict[str, type[BaseModel]] = {
     "zahlung_eingegangen": ZahlungEingegangen,
     "rechnung_anfordern": RechnungAnfordern,
     "mitgliedschaft_beantragen": MitgliedschaftBeantragen,
+    "gutschein_kaufen": GutscheinKaufen,
 }
 
 
@@ -120,6 +133,8 @@ class Antwort(BaseModel):
     buchung_id: uuid.UUID | None = None
     preis: Decimal | None = None
     guthaben_verrechnet: Decimal | None = None
+    gutschein_verrechnet: Decimal | None = None
+    gutschein_wieder_gueltig: bool | None = None
     zu_zahlen: Decimal | None = None
     checkout_url: str | None = None
     # Zeitzonenbewusst: Zeiten im Kanal-Schema sind durchgehend AwareDatetime (Global Constraint).

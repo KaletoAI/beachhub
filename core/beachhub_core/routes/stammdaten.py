@@ -463,6 +463,7 @@ def _einstellungen(
         admin=admin,
         gruppen=konfiguration.gruppiert(werte),
         defaults=konfiguration.DEFAULTS,
+        auswahl=konfiguration.AUSWAHL,
         fehler=fehler,
         warnung=mitgliedschaft.abgleich_warnung(db, clock.today(db)),
     )

@@ -7,10 +7,14 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Konfiguration
+from beachhub_core.models import Konfiguration, Kunde
 from beachhub_core.services import audit
+
+# Rechnungs- und Gutscheinbeträge werden als DECIMAL(10, 2) gespeichert.
+_MAX_GELDBETRAG = Decimal("99999999.99")
 
 
 class TagMonat(str):
@@ -42,6 +46,52 @@ class TagMonat(str):
         return date(jahr, self.monat, self.tag)
 
 
+class Obergrenze(str):
+    """Höchstzahl je Buchung: volle Einheiten oder eine positive ganze Zahl."""
+
+    __slots__ = ()
+
+    def __new__(cls, roh: str) -> "Obergrenze":
+        wert = roh.strip().lower().replace(" ", "_")
+        if wert == "volle_einheiten":
+            return super().__new__(cls, wert)
+        if not re.fullmatch(r"\d+", wert) or int(wert) < 1:
+            raise ValueError("Bitte volle_einheiten oder eine ganze Zahl ab 1 angeben")
+        return super().__new__(cls, str(int(wert)))
+
+    @property
+    def zahl(self) -> int | None:
+        return None if self == "volle_einheiten" else int(self)
+
+
+class Betragsliste(str):
+    """Positive Centbeträge, sortiert und ohne doppelte Einträge."""
+
+    __slots__ = ()
+
+    def __new__(cls, roh: str) -> "Betragsliste":
+        betraege: set[Decimal] = set()
+        for teil in roh.split(";"):
+            try:
+                betrag = Decimal(teil.strip().replace(",", "."))
+                if not betrag.is_finite() or betrag <= 0:
+                    raise ValueError("Bitte positive, endliche Eurobeträge angeben")
+                if betrag > _MAX_GELDBETRAG:
+                    raise ValueError("Eurobeträge dürfen höchstens 99.999.999,99 Euro betragen")
+                cent = betrag.quantize(Decimal("0.01"))
+                if betrag != cent:
+                    raise ValueError("Eurobeträge dürfen höchstens zwei Nachkommastellen haben")
+            except InvalidOperation as e:
+                raise ValueError("Bitte Eurobeträge mit Semikolon getrennt angeben") from e
+            betraege.add(cent)
+        wert = "; ".join(format(b, ".2f").replace(".", ",") for b in sorted(betraege))
+        return super().__new__(cls, wert)
+
+    @property
+    def betraege(self) -> list[Decimal]:
+        return [Decimal(teil.strip().replace(",", ".")) for teil in self.split(";")]
+
+
 DEFAULTS: dict[str, tuple[type, Any]] = {
     "fenster_tage": (int, 14),
     "mindestvorlauf_minuten": (int, 60),
@@ -67,7 +117,38 @@ DEFAULTS: dict[str, tuple[type, Any]] = {
     "antwort_hinweis_sekunden": (int, 120),
     "pin_laenge": (int, 6),
     "rechnungskunden_online_buchen": (bool, False),
+    "gutschein_modell": (str, "einheit"),
+    "gutschein_minuten": (int, 120),
+    "gutscheine_je_buchung": (Obergrenze, Obergrenze("volle_einheiten")),
+    "gutschein_preis_mitglied": (Decimal, Decimal("0.00")),
+    "gutschein_preis_nichtmitglied": (Decimal, Decimal("0.00")),
+    "gutschein_betraege": (Betragsliste, Betragsliste("25,00; 50,00; 100,00")),
+    "mitgliedsgutschein_nur_mitglieder": (bool, True),
+    "gutschein_steuer": (str, "beim_kauf"),
+    "gutschein_gueltig_tage": (int, 730),
+    "freicode_gueltig_tage": (int, 90),
+    "rechnungskunden_gutscheinkauf": (bool, True),
+    "gutschein_gastkauf": (bool, False),
 }
+
+AUSWAHL: dict[str, dict[str, str]] = {
+    "gutschein_modell": {"einheit": "Buchungseinheit", "wert": "Eurobetrag mit Restwert"},
+    "gutschein_steuer": {"beim_kauf": "Beim Kauf", "bei_einloesung": "Bei der Einlösung"},
+}
+
+# Diese Einstellungen verändern Angebot oder Kaufberechtigung im signierten Lesestand.
+GUTSCHEIN_ANGEBOT: tuple[str, ...] = (
+    "gutschein_modell",
+    "gutschein_minuten",
+    "gutscheine_je_buchung",
+    "gutschein_preis_mitglied",
+    "gutschein_preis_nichtmitglied",
+    "gutschein_betraege",
+    "mitgliedsgutschein_nur_mitglieder",
+    "gutschein_steuer",
+    "gutschein_gueltig_tage",
+    "gutschein_gastkauf",
+)
 
 # Werte, die in den Plan der Halle eingehen (shared.hallenplan.PlanKonfig).
 HALLEN_KONFIG: tuple[str, ...] = (
@@ -80,7 +161,15 @@ HALLEN_KONFIG: tuple[str, ...] = (
     "praesenz_alarm_minuten",
 )
 
-_TYP_NAME = {int: "int", Decimal: "decimal", str: "str", bool: "bool", TagMonat: "tagmonat"}
+_TYP_NAME = {
+    int: "int",
+    Decimal: "decimal",
+    str: "str",
+    bool: "bool",
+    TagMonat: "tagmonat",
+    Obergrenze: "obergrenze",
+    Betragsliste: "betraege",
+}
 
 
 @dataclass(frozen=True)
@@ -95,6 +184,87 @@ class Beschreibung:
 
 
 BESCHREIBUNGEN: dict[str, Beschreibung] = {
+    "gutschein_modell": Beschreibung(
+        "Gutscheine",
+        "Gutscheinmodell",
+        "",
+        "Buchungseinheit: ein Feld für die eingestellte Dauer, ohne Restwert. "
+        "Eurobetrag: Einlösungen verringern den Restwert.",
+    ),
+    "gutschein_minuten": Beschreibung(
+        "Gutscheine",
+        "Dauer einer Gutscheineinheit",
+        "Minuten",
+        "Gilt für Einheitsgutscheine und Freischaltcodes. Kürzere Buchungen verbrauchen "
+        "die Einheit ganz; längere Buchungen können weitere Einheiten verwenden.",
+    ),
+    "gutscheine_je_buchung": Beschreibung(
+        "Gutscheine",
+        "Gutscheine je Buchung",
+        "",
+        "volle_einheiten: je voller Buchungseinheit ein Code, mindestens einer. "
+        "Alternativ eine feste Obergrenze ab 1. Freischaltcodes zählen mit.",
+    ),
+    "gutschein_preis_mitglied": Beschreibung(
+        "Gutscheine",
+        "Gutscheinpreis für Mitglieder",
+        "Euro",
+        "Preis eines Einheitsgutscheins für Mitglieder. 0 deaktiviert den Verkauf "
+        "für diese Gruppe. Der Kaufpreis wird bei der Ausgabe gespeichert.",
+    ),
+    "gutschein_preis_nichtmitglied": Beschreibung(
+        "Gutscheine",
+        "Gutscheinpreis für Nicht-Mitglieder",
+        "Euro",
+        "Preis eines Einheitsgutscheins für Nicht-Mitglieder. 0 deaktiviert den "
+        "Verkauf für diese Gruppe. Der Kaufpreis wird bei der Ausgabe gespeichert.",
+    ),
+    "gutschein_betraege": Beschreibung(
+        "Gutscheine",
+        "Angebotene Wertgutscheinbeträge",
+        "Euro",
+        "Positive Beträge mit höchstens zwei Nachkommastellen, durch Semikolon getrennt. "
+        "Gilt nur im Modell Eurobetrag mit Restwert.",
+    ),
+    "mitgliedsgutschein_nur_mitglieder": Beschreibung(
+        "Gutscheine",
+        "Mitgliedsgutscheine nur für Mitglieder",
+        "",
+        "Ja: Ein zum Mitgliedspreis gekaufter Gutschein ist nur für Mitglieder einlösbar. "
+        "Gilt bei Steuer beim Kauf; bei Steuer bei der Einlösung entfällt diese Bindung.",
+    ),
+    "gutschein_steuer": Beschreibung(
+        "Gutscheine",
+        "Steuerzeitpunkt",
+        "",
+        "Beim Kauf: Rechnung mit dem Steuersatz der Käufergruppe. Bei der Einlösung: "
+        "Kaufbeleg ohne Umsatzsteuer; Rechnung erst bei Einlösung. "
+        "Die Einstellung gilt für neue Käufe.",
+    ),
+    "gutschein_gueltig_tage": Beschreibung(
+        "Gutscheine",
+        "Gültigkeit gekaufter Gutscheine",
+        "Tage",
+        "Ab Kaufabschluss; die Dauer wird beim Kaufwunsch gespeichert.",
+    ),
+    "freicode_gueltig_tage": Beschreibung(
+        "Gutscheine",
+        "Gültigkeit von Freischaltcodes",
+        "Tage",
+        "Vorgabe für neue kostenlose Codes. Bei der Ausgabe ist ein eigenes Enddatum möglich.",
+    ),
+    "rechnungskunden_gutscheinkauf": Beschreibung(
+        "Gutscheine",
+        "Rechnungskunden dürfen Gutscheine kaufen",
+        "",
+        "Ja: Auch Rechnungskunden kaufen Gutscheine online und bezahlen sie online.",
+    ),
+    "gutschein_gastkauf": Beschreibung(
+        "Gutscheine",
+        "Gutscheinkauf ohne Kundenkonto",
+        "",
+        "Vorgabe: nein. Der Gastkauf ist noch nicht verfügbar; der Kauf benötigt ein Kundenkonto.",
+    ),
     "abo_freie_absagen": Beschreibung(
         "Buchung und Storno",
         "Kostenfreie Absagen im Abo",
@@ -241,6 +411,7 @@ GRUPPEN: list[str] = [
     "Buchung und Storno",
     "Zahlung und Rechnung",
     "Mitgliedschaft",
+    "Gutscheine",
     "Halle",
     "Portal und Zugang",
 ]
@@ -248,9 +419,8 @@ GRUPPEN: list[str] = [
 
 def gruppiert(
     werte: dict[str, Any],
-) -> list[tuple[str, list[tuple[str, Any, Beschreibung, bool]]]]:
-    """Ordnet die Werte den Gruppen zu, in der Reihenfolge von GRUPPEN. Das vierte Element sagt,
-    ob der Wert ja/nein ist – die Seite zeigt dafür eine Auswahl statt eines Textfelds."""
+) -> list[tuple[str, list[tuple[str, Any, Beschreibung, str]]]]:
+    """Ordnet Werte und Darstellungsart (bool/auswahl/text) den Verwaltungsgruppen zu."""
     return [
         (
             gruppe,
@@ -259,7 +429,11 @@ def gruppiert(
                     schluessel,
                     werte[schluessel],
                     BESCHREIBUNGEN[schluessel],
-                    DEFAULTS[schluessel][0] is bool,
+                    "bool"
+                    if DEFAULTS[schluessel][0] is bool
+                    else "auswahl"
+                    if schluessel in AUSWAHL
+                    else "text",
                 )
                 for schluessel in DEFAULTS
                 if schluessel in werte and BESCHREIBUNGEN[schluessel].gruppe == gruppe
@@ -309,6 +483,18 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         raise ValueError("Kostenfreie Absagen dürfen nicht negativ sein")
     if schluessel == "event_ust_satz" and not Decimal("0") <= geparst < Decimal("100"):
         raise ValueError("Steuersatz ungültig")
+    if schluessel in AUSWAHL and geparst not in AUSWAHL[schluessel]:
+        raise ValueError("Bitte einen der vorgesehenen Werte wählen")
+    if schluessel in ("gutschein_minuten", "gutschein_gueltig_tage", "freicode_gueltig_tage"):
+        if geparst < 1:
+            raise ValueError("Bitte eine ganze Zahl ab 1 angeben")
+    if schluessel in ("gutschein_preis_mitglied", "gutschein_preis_nichtmitglied"):
+        if geparst < 0:
+            raise ValueError("Gutscheinpreise dürfen nicht negativ sein")
+        if geparst > _MAX_GELDBETRAG:
+            raise ValueError("Gutscheinpreise dürfen höchstens 99.999.999,99 Euro betragen")
+        if geparst != geparst.quantize(Decimal("0.01")):
+            raise ValueError("Gutscheinpreise dürfen höchstens zwei Nachkommastellen haben")
     neu = str(geparst)
     aktuell = zeile.wert if zeile else str(_parse(typ, str(default)))
     if neu == aktuell:
@@ -352,3 +538,12 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
 
         lesestand.markiere_rechnungskunden(db)
         lesestand.markiere_abo_kunden(db)
+    if schluessel in GUTSCHEIN_ANGEBOT:
+        from beachhub_core.services import lesestand
+
+        ids = db.scalars(select(Kunde.id).where(Kunde.anonymisiert_am.is_(None))).all()
+        lesestand.markiere_geaendert(db, "tarife", *(f"konto:{i}" for i in ids))
+    if schluessel == "rechnungskunden_gutscheinkauf":
+        from beachhub_core.services import lesestand
+
+        lesestand.markiere_rechnungskunden(db)

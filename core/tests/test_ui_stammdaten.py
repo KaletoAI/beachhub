@@ -1,11 +1,55 @@
 from datetime import date, time
 from decimal import Decimal
 
+import pytest
 from beachhub_core import clock
 from beachhub_core.models import Betriebszeit, Feld, Konfiguration, Tarif
 from beachhub_core.services import konfiguration, kundengruppen
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+
+
+def test_gutschein_einstellungen_anzeigen_und_speichern(
+    eingeloggt: TestClient, db: Session
+) -> None:
+    c = eingeloggt
+    text = c.get("/admin/konfiguration").text
+    assert '<select name="gutschein_modell">' in text
+    assert "Eurobetrag mit Restwert" in text
+    assert '<select name="gutschein_steuer">' in text
+    assert '<select name="mitgliedsgutschein_nur_mitglieder">' in text
+    assert 'name="gutschein_betraege" value="25,00; 50,00; 100,00"' in text
+    r = c.post(
+        "/admin/konfiguration",
+        data={
+            "csrf_token": c.csrf,
+            "gutschein_modell": "wert",
+            "gutschein_betraege": "50; 100",
+            "gutschein_preis_mitglied": "26,00",
+            "gutschein_steuer": "bei_einloesung",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.expire_all()
+    assert konfiguration.hole(db, "gutschein_modell") == "wert"
+    assert konfiguration.hole(db, "gutschein_preis_mitglied") == Decimal("26.00")
+
+
+@pytest.mark.parametrize(
+    "schluessel,roh",
+    [("gutschein_modell", "gratis"), ("gutschein_minuten", "0"), ("gutschein_betraege", "NaN")],
+)
+def test_gutschein_formular_fehler_rollt_aenderungen_zurueck(
+    eingeloggt: TestClient, db: Session, schluessel: str, roh: str
+) -> None:
+    c = eingeloggt
+    r = c.post(
+        "/admin/konfiguration", data={"csrf_token": c.csrf, "fenster_tage": "25", schluessel: roh}
+    )
+    assert r.status_code == 200 and 'class="fehler"' in r.text
+    db.expire_all()
+    assert konfiguration.hole(db, "fenster_tage") == 14
 
 
 def test_feld_anlegen_und_raster(eingeloggt: TestClient, db: Session) -> None:
