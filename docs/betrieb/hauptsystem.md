@@ -363,8 +363,8 @@ Erst danach werden Wertgutscheine und das Guthaben des Einlösers gegen den Rest
 Die Buchungsbestätigung zeigt Tarifwert, Gutscheindeckung und Geld-/Guthabenanteil getrennt.
 Ein Mehrzweck-Einheitsgutschein über 26 € erzeugt bei Einlösung einen Beleg über 26 €,
 auch wenn er 30 € Tarifwert deckt. Ein Geldrest erhält eine eigene Rechnung.
-Der Kauf ist im Hauptsystem-Kanal implementiert; signierter Gutscheinbestand, Portalbedienung
-und manuelle Kaufgutscheinrückgabe folgen in späteren Umsetzungsschritten.
+Der Kauf, signierte Gutscheinbestand und die manuelle Kaufgutscheinrückgabe sind implementiert;
+Verkaufs- und Codeeingabeoberfläche im Portal folgen in Stufe 2.
 Ein Kauf benötigt ein verknüpftes Portalkonto. Rechnungskunden dürfen kaufen, solange
 **Rechnungskunden dürfen Gutscheine kaufen** eingeschaltet ist; bezahlt wird ebenfalls online.
 Die Portalbindung wird nach der Kundensperre frisch gegen das anfragende Konto geprüft.
@@ -596,3 +596,14 @@ sudo systemctl daemon-reload
   docker compose run --rm app beachhub-core zertifikate --ziel /app/data/zertifikate
   docker compose up -d
   ```
+
+### Gutscheinbestand im signierten Lesestand
+
+Der aktuelle Inhaber sieht nur aktive, heute gültige Codes mit Restwert oder verbleibenden Nutzungen.
+Ein abgelaufener Code verschwindet beim Erzeugen auch dann, wenn der Nachtjob noch nicht gelaufen
+ist. Bei Einlösung wechselt der Bestand zum Einlöser; der frühere Inhaber sieht den Code anschließend
+nicht mehr. Der Käufer behält ausschließlich seine eigenen Kaufbelege und offenen Kaufwünsche.
+Offene Käufe stehen nur bis zur gespeicherten Zahlungsfrist beim Käufer, mit Zahlungslink und ohne
+Code. Eine spätere Änderung der Zahlungsfrist verschiebt bestehende Käufe nicht. Änderungen am
+Angebot oder der Kaufberechtigung veröffentlichen Tarif- und betroffene Kontodokumente neu.
+Der signierte Bestand schafft noch keine Verkaufs- oder Codeeingabeoberfläche im Portal.

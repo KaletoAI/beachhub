@@ -547,3 +547,4 @@ def setze(db: Session, schluessel: str, wert: Any, admin_user_id: uuid.UUID | No
         from beachhub_core.services import lesestand
 
         lesestand.markiere_rechnungskunden(db)
+        lesestand.markiere_geaendert(db, "tarife")

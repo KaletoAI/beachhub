@@ -16,14 +16,15 @@ Kauf-Snapshots, Einlösungsbelegbasis und ein eigener Kaufbelegnummernkreis.
 Freischaltcodes, Verwaltung und die atomare Einlösung im Hauptsystem-Kanal sind implementiert;
 Die Rückabwicklung einschließlich Kulanz und Reservierungsverfall ist implementiert;
 Der Kauf über den Hauptsystem-Kanal mit Zahlung, Kaufabbruch und Beleg-/Codeversand ist
-implementiert; Portaloberfläche und signierter Gutscheinbestand folgen in weiteren Schritten.
+implementiert; signierter Gutscheinbestand und offene Käufe sind im Lesestand enthalten.
+Die Verkaufs- und Codeeingabeoberfläche im Portal folgt in Stufe 2.
 Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit sind vorbereitet;
 die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
 Buchungen trennen Gutschein-Einlösungsbelege vom Geld-/Guthabenrest; Mehrzweck-Einheiten
 werden mit dem Kaufpreis abgerechnet. Kaufbedingungen und Zahlungsfrist bleiben als Snapshot
 erhalten. Die manuelle Rückgabe vollständig ungenutzter Kaufgutscheine mit dauerhafter Sperre
 und zentralem Schutz der allgemeinen Rechnungsaktionen ist implementiert; dabei entsteht
-kein Kundenguthaben. Signierter Bestand und Portalbedienung bleiben in Arbeit.
+kein Kundenguthaben. Signierter Bestand ist implementiert; die Verkaufs- und Codeeingabeoberfläche bleibt für Stufe 2 offen.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`

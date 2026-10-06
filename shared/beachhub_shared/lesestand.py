@@ -4,7 +4,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Dokument(BaseModel):
@@ -73,8 +73,20 @@ class TarifInfo(BaseModel):
     gueltig_bis: date | None
 
 
+class GutscheinAngebot(BaseModel):
+    modell: Literal["einheit", "wert"]
+    steuer: Literal["beim_kauf", "bei_einloesung"]
+    minuten: int | None
+    preis_mitglied: Decimal
+    preis_nichtmitglied: Decimal
+    betraege: list[Decimal]
+    nur_mitglieder: bool
+    gueltig_tage: int
+
+
 class TarifeInhalt(BaseModel):
     regeln: list[TarifInfo]
+    gutschein_angebot: GutscheinAngebot | None = None
     # Namen der beiden festen Gruppen (A-KUND-2), damit das Portal die Gruppe eines Termins aus
     # mitglied_bis ableiten kann. Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
     gruppe_mitglied: str | None = None
@@ -105,6 +117,8 @@ class KontoBuchung(BaseModel):
     # Termin einer Dauerbuchung und verbleibende freie Absagen dieses Abos (A-DAUER-3).
     abo: bool = False
     freie_absagen_rest: int | None = None
+    # Modelle der tatsächlichen Deckung, ohne fremde Codes oder Kaufbelegrechte.
+    gutschein_modelle: list[Literal["einheit", "wert"]] = Field(default_factory=list)
 
 
 class KontoRechnung(BaseModel):
@@ -112,6 +126,27 @@ class KontoRechnung(BaseModel):
     datum: date
     brutto: Decimal
     status: str
+
+
+class KontoGutschein(BaseModel):
+    code: str
+    art: Literal["kauf", "frei"]
+    modell: Literal["einheit", "wert"]
+    status: Literal["aktiv", "teilweise_eingeloest"]
+    gueltig_bis: date
+    minuten: int | None
+    restwert: Decimal | None
+    verbleibende_einloesungen: int | None
+    gruppenhinweis: str
+
+
+class KontoGutscheinKauf(BaseModel):
+    # Vor Abschluss gibt es ausdrücklich keinen Code im öffentlichen Vertrag.
+    id: str
+    status: Literal["offen"]
+    preis: Decimal
+    reserviert_bis: datetime
+    checkout_url: str | None = None
 
 
 class KontoInhalt(BaseModel):
@@ -129,3 +164,8 @@ class KontoInhalt(BaseModel):
     mitgliedschaft: Literal["mitglied", "beantragt", "nicht_mitglied"] = "nicht_mitglied"
     mitglied_bis: date | None = None
     antrag_am: datetime | None = None
+
+    # Alt-Dokumente dürfen keinen Verkauf freischalten.
+    gutscheine: list[KontoGutschein] = Field(default_factory=list)
+    gutschein_kaeufe: list[KontoGutscheinKauf] = Field(default_factory=list)
+    gutschein_kauf: bool = False

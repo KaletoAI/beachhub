@@ -101,7 +101,8 @@ exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsän
 Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
 dauerhaft gesperrt. Die Einlösung und getrennte Buchungsbelege sind im Hauptsystem-Kanal implementiert;
 Die Rückabwicklung und der Kauf über den Hauptsystem-Kanal sind implementiert;
-signierter Gutscheinbestand und Portaloberfläche folgen in weiteren Schritten.
+signierter Gutscheinbestand und offene Käufe sind implementiert; Verkaufs- und Codeeingabeoberfläche
+folgen in Stufe 2.
 Der Gutschein-Nachtjob läuft täglich um 00:20 Europe/Berlin; das Ablaufdatum gilt einschließlich.
 Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
 `gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes
@@ -194,3 +195,15 @@ Die Adminaktion erfordert Rolle und CSRF. Öffentliche Rechnungsdienste prüfen 
 `pruefe_allgemeinen_rechnungsvorgang`; ausschließlich koordinierte Fachpfade nutzen die
 privaten Korrekturhilfen. Keine Ausnahme aus HTTP-Daten. Freicode-Einlösungslimits liegen
 zwischen 1 und 2147483647; größere Werte ergeben einen deutschen Formularfehler.
+
+## Gutschein-Lesestand
+
+`konto:<id>` enthält ausschließlich aktuell gültige aktive Gutscheine des Inhabers mit positivem
+Restwert oder verbleibender Nutzung. Die Fachuhrprüfung erfolgt beim Erzeugen, unabhängig vom
+Nachtjob. Besitzwechsel markieren Käufer sowie alten und neuen Inhaber. Der Käufer behält seine
+Kaufbelege; Einlöser erhalten durch den Bestand keine Rechte auf fremde PDFs.
+Offene Kaufwünsche stehen ausschließlich beim Käufer und nur vor der gespeicherten Zahlungsfrist,
+mit persistiertem Zahlungslink und ohne Code. Das Tarifdokument enthält das aktuelle Angebot;
+`gutschein_kauf` im Konto berücksichtigt Käufergruppe, positiven Einheitspreis und Berechtigung.
+Der Hauptsystem-Kanal prüft den Kauf weiterhin eigenständig. Angebotsänderungen markieren
+Tarifdokument und Konten. Alte Dokumente verwenden leere Bestände und `gutschein_kauf=False`.

@@ -61,3 +61,13 @@ Port `5433`) `TEST_PORTAL_DATABASE_URL` entsprechend anpassen. Die Testdatenbank
 händisch erstellt werden (Befehl s. o.).
 
 Ende-zu-Ende mit dem Hauptsystem (aus der Repo-Wurzel): `pytest -q e2e`
+
+## Gutscheinverträge
+
+Der signierte Kontolesestand unterstützt eigenen Gutscheinbestand und offene Kaufwünsche ohne
+Code sowie eine ausdrücklich vom Hauptsystem gesetzte Kaufberechtigung. Alte Dokumente zeigen
+leere Listen und aktivieren keinen Verkauf. Verkaufs- und Codeeingabeoberfläche bleiben Stufe 2.
+Die bestehende Stornoseite unterscheidet Gutscheinmodelle und Reservierungen: bestätigte Einheiten
+geben die Nutzung unter ursprünglicher Gültigkeit zurück, bestätigter Wertverbrauch wird Guthaben
+mit Gegenbeleg, Reservierungen stellen den ursprünglichen Bestand wieder her. Kauf-PDFs bleiben
+beim Käufer; der Bestand erweitert keine Rechnungsrechte.
