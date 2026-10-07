@@ -1,3 +1,4 @@
+{% set ohne_steuer = r.gutschein_rolle == "kauf" and (r.nummer.startswith("GB-") or (r.korrigiert and r.korrigiert.nummer.startswith("GB-"))) %}
 <!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
 <style>
 @page { size: A4; margin: 20mm; @bottom-center { content: "Seite " counter(page) " von " counter(pages); font-size: 9pt; color:#666; } }
@@ -17,21 +18,22 @@ td.r, th.r { text-align: right; }
     {{ r.adresse_snapshot.name }}<br>{{ r.adresse_snapshot.strasse }}<br>{{ r.adresse_snapshot.plz }} {{ r.adresse_snapshot.ort }}
   </div>
   <div>
-    <strong>{{ betreiber.name }}</strong><br>{{ betreiber.adresse }}<br>USt-IdNr. {{ betreiber.ust_id }}
+    <strong>{{ betreiber.name }}</strong><br>{{ betreiber.adresse }}{% if not ohne_steuer %}<br>USt-IdNr. {{ betreiber.ust_id }}{% endif %}
   </div>
 </div>
-<h1>{% if r.art == "storno" %}Stornorechnung{% elif r.art == "saison" %}Saisonrechnung{% else %}Rechnung{% endif %} {{ r.nummer }}</h1>
+<h1>{% if r.art == "storno" %}Stornorechnung{% elif ohne_steuer %}Kaufbeleg{% elif r.art == "saison" %}Saisonrechnung{% else %}Rechnung{% endif %} {{ r.nummer }}</h1>
+{% if ohne_steuer %}<p>Mehrzweckgutschein: Der Kaufbeleg weist keine Umsatzsteuer aus. Die Besteuerung erfolgt erst bei der Einlösung.</p>{% endif %}
 <p>Rechnungsdatum: {{ r.datum|datum }} · Leistungszeitraum: {{ r.leistung_von|datum }}{% if r.leistung_bis != r.leistung_von %} – {{ r.leistung_bis|datum }}{% endif %}
 {% if r.status == "offen" %}· Zahlbar bis {{ r.faellig_am|datum }}{% endif %}</p>
 <table>
-  <thead><tr><th>Pos.</th><th>Leistung</th><th class="r">USt</th><th class="r">Betrag</th></tr></thead>
-  <tbody>{% for p in r.positionen %}<tr><td>{{ p.reihenfolge }}</td><td>{{ p.text }}</td><td class="r">{{ p.ust_satz|prozent }}</td><td class="r">{{ p.brutto|euro }}</td></tr>{% endfor %}</tbody>
+  <thead><tr><th>Pos.</th><th>Leistung</th>{% if not ohne_steuer %}<th class="r">USt</th>{% endif %}<th class="r">Betrag</th></tr></thead>
+  <tbody>{% for p in r.positionen %}<tr><td>{{ p.reihenfolge }}</td><td>{{ p.text }}</td>{% if not ohne_steuer %}<td class="r">{{ p.ust_satz|prozent }}</td>{% endif %}<td class="r">{{ p.brutto|euro }}</td></tr>{% endfor %}</tbody>
 </table>
 <table class="summe">
-  {% for z in steuer %}
+  {% if not ohne_steuer %}{% for z in steuer %}
   <tr><td></td><td class="r">Nettobetrag {{ z.ust_satz|prozent }}</td><td class="r">{{ z.netto|euro }}</td></tr>
   <tr><td></td><td class="r">zzgl. {{ z.ust_satz|prozent }} USt</td><td class="r">{{ z.ust|euro }}</td></tr>
-  {% endfor %}
+  {% endfor %}{% endif %}
   <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
 </table>
 {% if verrechnet > 0 or korrekturen != 0 %}
@@ -45,5 +47,5 @@ td.r, th.r { text-align: right; }
 {% elif r.status == "storniert" %}<p>Diese Rechnung wurde vollständig storniert. Es besteht keine Zahlungsforderung aus dieser Rechnung.</p>
 {% elif r.status == "bezahlt" %}<p>Der Betrag ist bereits beglichen. Vielen Dank.</p>
 {% else %}<p>Bitte überweisen Sie {{ offen|euro }} bis zum {{ r.faellig_am|datum }} unter Angabe der Rechnungsnummer auf:<br>{{ betreiber.bank }}</p>{% endif %}
-<div class="fuss">{{ betreiber.name }} · {{ betreiber.adresse }} · USt-IdNr. {{ betreiber.ust_id }}</div>
+<div class="fuss">{{ betreiber.name }} · {{ betreiber.adresse }}{% if not ohne_steuer %} · USt-IdNr. {{ betreiber.ust_id }}{% endif %}</div>
 </body></html>

@@ -310,6 +310,156 @@ Mail an `EMAIL_FROM`; nachgelieferte Alarme nach einem Ausfall gesammelt in eine
 
 Einrichtung des Hallenrechners und von Home Assistant: `docs/betrieb/hallendienst.md`.
 
+## 5c. Gutscheine und Freischaltcodes
+
+Stufe 1a-III ist im Hauptsystem und den Kanalverträgen implementiert. Der Verkauf und die
+Codeeingabe im Kundenportal folgen in Stufe 2; bis dahin gibt es dafür keine Kundenformulare.
+Die E2E-Prüfung verwendet den Fakeanbieter. Eine echte Zahlungsanbindung und die Anbindung
+an echte Hallenhardware stehen weiterhin aus.
+
+Die Schemaänderung liegt ausschließlich in Revision `0015`, direkt nach `0014`. Bei einem
+späteren Betreiberupgrade zuerst Backup und aktuelle Revisionskette prüfen und die regulären
+Migrationen ausführen (Abschnitt 7). Bestehende Jahreszähler und archivierte Rechnungen bleiben
+erhalten. Ein Downgrade mit Gutscheinbestand, Gutscheinbelegen oder verbrauchten
+Gutschein-Nummernkreisen wird abgewiesen, statt diese Daten zu löschen.
+
+### Freischaltcodes und Verwaltung
+
+Unter **Gutscheine → Freischaltcodes** stellt die Admin-Rolle 1 bis 1000 Einzelcodes aus.
+Die lesende Rolle kann Übersicht, Details und CSV ansehen. Die Vorgaben sind eine Einlösung
+und 90 Tage Gültigkeit; Dauer und Standardgültigkeit kommen aus den Einstellungen.
+Das Einlösungslimit ist zwischen 1 und 2147483647 wählbar; größere Werte werden als
+Formularfehler abgewiesen.
+Freischaltcodes bleiben auch im Wertgutscheinmodell Buchungseinheiten ohne Geldwert und Steuerbeleg.
+Feld und Buchungszeitraum sind optional. Eine benannte Serie lässt sich über die Übersicht
+als CSV exportieren; der Export enthält alle Freischaltcodes der Serie.
+Die Übersicht zeigt Käufer und Inhaber und lässt sich mit **Weiter** und **Zurück** in
+Seiten mit je 500 Einträgen durchblättern. Art, Status und Serie bleiben dabei erhalten;
+auch alle Codes einer 1000er-Serie sind so erreichbar. Unzugeordnete Freicodes zeigen „–“.
+
+Die Detailseite zeigt Käufer, Inhaber, Einlösungen und Änderungen. **Sperren** verhindert weitere
+Nutzungen. **Gültigkeit speichern** ändert allein das Ablaufdatum; die optionale Reaktivierung
+steht bei gesperrten oder verfallenen Codes bereit. Verbrauch und Restwert bleiben erhalten,
+auch wenn der Code bereits vollständig verbraucht ist. Zurückgegebene Kaufgutscheine können
+niemals reaktiviert werden. Bei einer gleichzeitig geänderten Zuordnung wird die Aktion
+vollständig zurückgerollt und fordert zum erneuten Ausführen auf.
+
+**Ungenutzten Kaufgutschein zurückgeben:** Auf der Detailseite als Admin einen Grund angeben
+und **Zurückgeben – Betrag anschließend manuell erstatten** wählen. Reservierte oder bestätigte
+Einlösungen verhindern die Rückgabe. Bei Wertgutscheinen muss der gesamte ursprüngliche
+Nennwert unverbraucht sein; eine frühere Wertgutschrift stellt den Gutscheinrest nicht wieder her.
+Kostenfrei zurückgenommene Einheiten und abgebrochene Gutscheinreservierungen sind wieder
+ungenutzt. Das System prüft Bestand und Kaufbasis gemeinsam, erzeugt den Kaufgegenbeleg und
+sperrt den Gutschein dauerhaft. Bei Mehrzweckgutscheinen wird nur der steuerfreie Kaufbeleg
+storniert. Betrag und Grund erscheinen am Gutschein und im Änderungsprotokoll.
+Nach erfolgreichem Speichern wird der neue Gegenbeleg als PDF archiviert und dem
+ursprünglichen Käufer über den vorhandenen Belegversand zugestellt. Ein anderer Inhaber
+oder Geschenkempfänger erhält dieses PDF nicht. PDF-/Versandfehler ändern die Rückgabe
+nicht; die vorhandenen Betreiberhinweise und Logs nennen fehlgeschlagene Nachläufe.
+
+Den angezeigten Betrag anschließend **manuell an den ursprünglichen Käufer** erstatten,
+auch wenn inzwischen jemand anderes Inhaber ist. Diese Aktion führt keinen Banktransfer aus
+und erzeugt kein Kundenguthaben. Ein erneuter Klick erzeugt keinen weiteren Gegenbeleg oder
+Erstattungsauftrag. Ein bereits vollständig korrigierter Kaufbeleg wird nicht erneut korrigiert;
+das System zeigt dann keine weitere Erstattung an. Teilweise korrigierte Kaufbasis muss zunächst
+geklärt werden. Rückgegebene Gutscheine können dauerhaft nicht reaktiviert werden.
+Bei gleichzeitig wechselnder Zuordnung wird die Rückgabe vollständig neu vorbereitet;
+anhaltende Änderungen ergeben einen Fehler ohne Teilwirkung.
+
+Allgemeine Aktionen **Als bezahlt markieren**, **Stornorechnung erzeugen** und **Teil-Storno**
+sind für Gutschein-Kauf-/Einlösungs-/Geldanteilbelege und deren Gegenbelege gesperrt.
+Die Rechnungsseite verweist auf die Gutscheinrückgabe oder den Buchungsstorno. Dort werden
+Gutscheinbestand, Geldanteil und Belege gemeinsam geprüft. Normale Rechnungen behalten die
+vorhandenen Aktionen.
+
+Das Ablaufdatum gilt einschließlich. Täglich um **00:20 Europe/Berlin** setzt der Nachtjob
+noch aktive oder teilweise eingelöste, abgelaufene Codes auf verfallen und aktualisiert die
+betroffenen Kontodokumente. Er erzeugt keine Rechnung und kein Guthaben.
+Die Einlösung ist im Hauptsystem-Kanal implementiert. Einheiten decken chronologisch die
+im Code gespeicherten Minuten; ein angeschnittener Slot wird zeitproportional bewertet.
+Tarifwert, Gutscheindeckung und Rest verwenden denselben Preisstand der Buchungsanlage,
+auch wenn währenddessen neue Tarife gespeichert werden.
+Erst danach werden Wertgutscheine und das Guthaben des Einlösers gegen den Rest verrechnet.
+Die Buchungsbestätigung zeigt Tarifwert, Gutscheindeckung und Geld-/Guthabenanteil getrennt.
+Ein Mehrzweck-Einheitsgutschein über 26 € erzeugt bei Einlösung einen Beleg über 26 €,
+auch wenn er 30 € Tarifwert deckt. Ein Geldrest erhält eine eigene Rechnung.
+Der Kauf, signierte Gutscheinbestand und die manuelle Kaufgutscheinrückgabe sind implementiert;
+Verkaufs- und Codeeingabeoberfläche im Portal folgen in Stufe 2.
+Ein Kauf benötigt ein verknüpftes Portalkonto. Rechnungskunden dürfen kaufen, solange
+**Rechnungskunden dürfen Gutscheine kaufen** eingeschaltet ist; bezahlt wird ebenfalls online.
+Die Portalbindung wird nach der Kundensperre frisch gegen das anfragende Konto geprüft.
+Wird der Kunde während des Wartens auf ein anderes Konto umgehängt, erhält das alte Konto
+keinen Kauf oder Checkout; es entsteht auch keine Bezahlsitzung beim Anbieter.
+Einheitspreis **0** deaktiviert den Verkauf für die betreffende Käufergruppe. Wertgutscheine
+sind nur zu den angebotenen Beträgen erhältlich. Vorhandenes Guthaben bezahlt keinen Gutscheinkauf.
+In **Einstellungen → Gutscheine** sind Modell (`einheit`/`wert`), Steuerzeitpunkt
+(`beim_kauf`/`bei_einloesung`), Minuten, Preise/Beträge, Mitgliedsvoraussetzung und Gültigkeit
+zu prüfen. Einstellungen ändern nur neue Kaufwünsche; vorhandene Gutscheine behalten ihre
+Snapshots. Die Vorgaben sind 120 Minuten, 730 Tage und Steuer beim Kauf; Einheitspreise sind
+zunächst 0. Freischaltcodes bleiben davon unabhängig Einheiten ohne Geldwert und Steuer.
+
+Kauf, Einlösung, Storno und Rückgabe sperren zuerst sämtliche beteiligten Kunden
+(Akteur, Käufer, bisheriger Inhaber, Einlöser/Guthabenempfänger), anschließend vorhandene
+Zahlungen und Gutscheine, jeweils nach UUID sortiert. Erst danach folgen weitere Buchungs-,
+Feld- und Belegsperren. Ändert sich eine Zuordnung während des Wartens, wird der Vorgang
+vollständig zurückgerollt und neu vorbereitet; es gibt keine teilweise Erstattung.
+Bei Buchungsstorno, Kulanz, Sperranlage, verdrängender Aboanlage und Abobeendigung geschieht
+dies automatisch bis zu drei Mal. Anhaltende Änderungen ergeben eine verständliche
+Aufforderung zum erneuten Ausführen ohne Teilwirkung. Reservierungsverfall, Gutscheinverfall
+und Kaufabbruch versuchen ihren gesamten Batch ebenfalls bis zu drei Mal unmittelbar neu;
+nach erschöpften Versuchen wird der Fehler protokolliert. Mails und PDFs entstehen erst
+nach dem erfolgreichen Speichern.
+
+Ein Kaufwunsch speichert Preis, Käufergruppe/Steuersatz, Modell, Minuten/Wert,
+Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsfrist. Spätere Einstellungs- oder
+Mitgliedschaftsänderungen verändern diese Kaufbedingungen nicht. Die Gültigkeit beginnt erst
+am tatsächlichen Kaufabschluss. Solange der Kauf offen oder abgebrochen ist, wird kein Code
+angezeigt oder versandt, auch nicht über das Änderungsprotokoll.
+Der eigene Kaufabbruchjob läuft jede Minute, unabhängig vom Verfall der Buchungsreservierungen.
+Die Frist gilt bereits auf der Grenze als abgelaufen; der Callback prüft sie selbst.
+Bei Unterzahlung wird der Kauf abgebrochen und der tatsächlich eingegangene Betrag einmal
+als Käuferguthaben gebucht. Bei Überzahlung wird ein Gutschein aktiviert und nur der Überschuss
+gutgeschrieben. Geld nach Abbruch/Fristablauf wird einmal Käuferguthaben, niemals ein Gutschein.
+Diese Fälle melden dem Betreiber nach Commit den tatsächlichen Eingang und das Guthaben.
+Ein erneuter Kauf benötigt eine neue Anfrage; eine doppelte Zahlungsrückmeldung ändert nichts.
+Der signierte Lesestand zeigt offene Käufe ausschließlich dem Käufer, mit Zahlungslink und
+gespeicherter Frist, ohne Code. Nach Fristablauf verschwinden sie auch vor dem nächsten Job.
+Eigener Bestand enthält ausschließlich aktuell einlösbare Gutscheine des Inhabers und wird
+nach Besitzwechsel auch für bisherigen Inhaber und Käufer aktualisiert. Kaufbelegrechte
+bleiben beim Käufer, selbst wenn ein anderer Kunde den Gutschein einlöst.
+
+Bei Steuer **beim Kauf** erhält der Käufer die normale Kaufrechnung mit seinem eingefrorenen
+Steuersatz. Bei Steuer **bei Einlösung** erhält er einen **Kaufbeleg GB-JJJJ-NNNNN** ohne
+Umsatzsteuerausweis und mit Mehrzweckhinweis. PDFs und Mails entstehen erst nach Commit.
+Käufer und optionaler Geschenkempfänger erhalten den Code mit Gruppen- und Gültigkeitshinweis;
+der Kaufbeleg geht ausschließlich an den Käufer. Ein Mehrzweck-Mitgliedsgutschein nennt die
+Käufergruppe informativ und ist für alle einlösbar. Ein Fehler eines PDFs oder einer Code-Mail
+verhindert die anderen Nachläufe nicht. SMTP-Zustellung wird dadurch nicht garantiert oder
+automatisch erneut versucht; fehlgeschlagene Nachläufe sind im Log bzw. Betreiberhinweis zu prüfen.
+
+Bei kostenfreiem Storno oder nachträglicher Kulanz gibt das Hauptsystem Einheiten und
+Freischaltcodes an den Einlöser zurück. Das ursprüngliche Ablaufdatum bleibt unverändert;
+ein bereits gesperrter oder verfallener Code bleibt nicht einlösbar. Mehrzweck-Einheiten
+bekommen einen steuerlichen Gegenbeleg, aber kein Geldguthaben aus dem Gutschein.
+Bei Wertgutscheinen erhält der Einlöser stattdessen den verbrauchten Wert als Guthaben mit
+Korrekturbeleg; der Gutscheinrest steigt nicht. Ein 50-€-Wertgutschein mit 30 € Verbrauch
+behält beispielsweise 20 € Rest, der Einlöser erhält 30 € Guthaben. Der Käufer erhält kein
+Guthaben aus fremder Einlösung. Sein Kaufgegenbeleg wird nur ihm zugestellt.
+Der separat bezahlte Geld-/Guthabenrest wird zusätzlich nach den normalen Finanzregeln
+korrigiert. Beim 26-€-Einheitsgutschein mit 15 € Geldrest entstehen genau 15 € Guthaben.
+Kostenpflichtige Absagen lassen den Gutscheinverbrauch bestehen. Wiederholung einer bereits
+vollständigen Rückabwicklung erzeugt kein neues Guthaben und keinen neuen Beleg.
+Reservierungen ohne Bestätigung geben bei Abbruch oder Verfall den ursprünglichen Bestand
+zurück, einschließlich Wertgutscheinrest, ohne Wertgutschein-Gutschrift. Das zuvor reservierte
+Kundenguthaben wird ebenfalls genau einmal zurückgebucht, auch bei kostenfreiem Betreiberstorno,
+Sperranlage und verdrängender Daueranlage. Bei 5 € Guthaben und noch offenen 10 € Checkout
+stehen die 5 € nach dem Abbruch wieder zur Verfügung; eine spätere Zahlung fügt nur ihre
+tatsächlichen 10 € hinzu. Ein Zahlungseingang
+nach der gespeicherten Reservierungsfrist bestätigt nichts mehr, auch vor dem Minutenjob;
+der Geldbetrag wird genau einmal als Spätzahlungsguthaben verbucht. Genau auf der Frist gilt
+wie im Verfallsjob noch kein Verfall. Nach dem Commit werden sämtliche Gegenbelege und
+zutreffende Einlöserhinweise versandt; der Fehler eines Belegs verhindert Folgebelege nicht.
+
 ## 6. Backup und Wiederherstellung
 
 Das Skript `core/deploy/backup.sh` erstellt ein verschlüsseltes Backup aus Datenbank-Dump und dem
@@ -419,6 +569,15 @@ docker compose up -d
 Vor größeren Updates (insbesondere bei neuen Alembic-Migrationen) empfiehlt sich ein Backup gemäß
 Abschnitt 6.
 
+Die vorbereitende Gutscheinmigration `0015` erhält die bisherigen Rechnungsnummern und
+Jahreszähler. Sie führt einen zusätzlichen Nummernkreis für Kaufbelege ohne Steuer ein
+(`GB-JJJJ-NNNNN`). Datenbasis, Codevergabe und interne Vorgangssperren sind vorbereitet;
+die Buchungs- und Batch-Einstiege berücksichtigen diese Sperrreihenfolge bereits.
+Die atomare Kanaleinlösung und getrennte Belege sind implementiert; Kauf, Rückabwicklung
+und die Portalbedienung sind noch keine vollständigen Betriebsabläufe. Ein Downgrade auf `0014` wird bei vorhandenem
+Gutscheinbestand, Gutscheinbelegen oder bereits verbrauchten Gutschein-Nummernkreisen
+mit einer klaren Fehlermeldung abgewiesen; diese Daten werden dabei nicht gelöscht.
+
 ## 8. Störungen
 
 Die Compose-Services `db`, `app` und `caddy` sind mit `restart: unless-stopped` konfiguriert und
@@ -479,3 +638,14 @@ sudo systemctl daemon-reload
   docker compose run --rm app beachhub-core zertifikate --ziel /app/data/zertifikate
   docker compose up -d
   ```
+
+### Gutscheinbestand im signierten Lesestand
+
+Der aktuelle Inhaber sieht nur aktive, heute gültige Codes mit Restwert oder verbleibenden Nutzungen.
+Ein abgelaufener Code verschwindet beim Erzeugen auch dann, wenn der Nachtjob noch nicht gelaufen
+ist. Bei Einlösung wechselt der Bestand zum Einlöser; der frühere Inhaber sieht den Code anschließend
+nicht mehr. Der Käufer behält ausschließlich seine eigenen Kaufbelege und offenen Kaufwünsche.
+Offene Käufe stehen nur bis zur gespeicherten Zahlungsfrist beim Käufer, mit Zahlungslink und ohne
+Code. Eine spätere Änderung der Zahlungsfrist verschiebt bestehende Käufe nicht. Änderungen am
+Angebot oder der Kaufberechtigung veröffentlichen Tarif- und betroffene Kontodokumente neu.
+Der signierte Bestand schafft noch keine Verkaufs- oder Codeeingabeoberfläche im Portal.

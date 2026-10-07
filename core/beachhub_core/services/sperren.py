@@ -7,7 +7,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from beachhub_core.models import Buchung, Sperre
-from beachhub_core.services import audit, kunden
+from beachhub_core.services import audit, gutschein_sperren
 
 
 class SperrenFehler(Exception):  # noqa: N818
@@ -58,8 +58,8 @@ def lege_an(
     for b in betroffen:
         if entscheidungen.get(b.id) not in ("behalten", "stornieren"):
             raise SperrenFehler("entscheidung_fehlt")
-    kunden.sperre_mehrere(
-        db, (b.kunde_id for b in betroffen if entscheidungen[b.id] == "stornieren")
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(
+        db, (b.id for b in betroffen if entscheidungen[b.id] == "stornieren")
     )
     ergebnis: list[Sperre] = []
     fids: list[uuid.UUID | None] = list(feld_ids) if feld_ids is not None else [None]
@@ -85,6 +85,7 @@ def lege_an(
                 durch="betreiber",
                 kostenfrei=True,
                 grund=f"Sperre: {grund}",
+                sperrkontext=sperrkontext,
                 admin_user_id=admin_user_id,
             )
     from beachhub_core.services import lesestand

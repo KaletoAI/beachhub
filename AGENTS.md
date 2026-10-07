@@ -97,7 +97,26 @@ der Termin ist bereits gutgeschrieben; auch unberechnete Termine verbrauchen Kon
 Die Portalbestätigung zeigt das freie Absagekontingent und bedingte finanzielle Hinweise;
 eine ausführlichere Abo-Übersicht bleibt für Stufe 2 offen. Die jährliche Guthabenerinnerung
 läuft um 07:05 Europe/Berlin; SMTP-Fehler nach Marker-Commit werden nicht automatisch wiederholt.
-Als nächster fachlicher Ausbauschritt ist Stufe 1a-III (Gutscheine) vorgesehen.
-Vor dessen Migrationen die bestehende Revisionskette bis 0014 und die Korrekturverträge prüfen.
-Der echte Zahlungsanbieter und die echte Hallentechnik sind noch anzubinden.
-Den aktuellen Stand bei Folgeaufgaben erneut anhand von Code und Dokumentation prüfen.
+
+## Umsetzungsstand nach Stufe 1a-III am 07.10.2026
+
+Gutscheine und Freischaltcodes sind im Hauptsystem implementiert: beide Modelle und
+Steuerzeitpunkte, Kauf über den Kanal, atomare Einlösung, Verwaltung/Serienexport, Storno/Kulanz,
+Reservierungsrücknahme, Ablauf, manuelle Rückgabe und signierter eigener Bestand/offene Käufe.
+Revision `0015` folgt direkt auf `0014`; keine weitere Revision für den Abschluss anlegen.
+Kauf-Snapshots, Belegbasis und die getrennten Nummernkreise sind verbindlich.
+Kostenfreier bestätigter Wertstorno erzeugt genau einmal Einlöserguthaben mit Gegenbeleg und
+erhöht den Gutscheinrest nicht; Einheiten erhalten ihre Nutzung unter ursprünglicher Gültigkeit
+zurück. Reservierungsrücknahmen stellen den ursprünglichen Bestand und reserviertes Guthaben
+wieder her. Vollständig ungenutzte Kaufgutscheine werden dauerhaft gesperrt und manuell an den
+ursprünglichen Käufer erstattet; dabei entsteht kein Guthaben und kein Banktransfer.
+Generische Rechnungsaktionen dürfen diese Fachpfade nicht umgehen. Käufer-PDFs bleiben beim
+Käufer, auch bei fremdem Einlöser oder Inhaber. Offene Kaufcodes bleiben geheim.
+Die vollständige Kundenmenge wird vor Zahlungen, Gutscheinen und weiteren Schreibsperren
+UUID-sortiert vorbereitet; nach Besitz-/Kontowechsel vollständig zurückrollen und neu vorbereiten.
+Tarifdeckung und Buchung verwenden denselben Slotpreisstand. PDF-/Mailnachläufe erfolgen nach
+Commit und isolieren einzelne Fehler, ohne automatische SMTP-Wiederholung zu versprechen.
+Verkaufs- und Codeeingabeoberfläche einschließlich IP-Limit folgen in Stufe 2.
+Der echte Zahlungsanbieter und die echte Hallentechnik sind noch anzubinden; E2E nutzt den
+Fakeanbieter, Hallentests Simulatoren. Der aktuelle Plan vom 05.10.2026 ersetzt den historischen
+Gutscheinplan vom 03.10.2026. Stand bei Folgeaufgaben erneut anhand von Code und Dokumentation prüfen.

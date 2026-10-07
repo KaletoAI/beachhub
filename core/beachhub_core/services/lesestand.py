@@ -2,12 +2,12 @@ import logging
 import os
 import time
 import uuid
-from datetime import timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from beachhub_shared import hallenplan, signatur
 from beachhub_shared import lesestand as schema
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
@@ -18,6 +18,8 @@ from beachhub_core.models import (
     Buchung,
     Dauerbuchung,
     Feld,
+    Gutschein,
+    GutscheinEinloesung,
     Kunde,
     Kundengruppe,
     LesestandVersion,
@@ -28,7 +30,14 @@ from beachhub_core.models import (
     Zahlung,
     utcnow,
 )
-from beachhub_core.services import konfiguration, kunden, kundengruppen, mitgliedschaft, pin
+from beachhub_core.services import (
+    gutschein_codes,
+    konfiguration,
+    kunden,
+    kundengruppen,
+    mitgliedschaft,
+    pin,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +159,23 @@ def baue_tarife(db: Session) -> schema.TarifeInhalt:
             )
             for t in regeln
         ],
+        gutschein_angebot=schema.GutscheinAngebot(
+            modell=konfiguration.hole(db, "gutschein_modell"),
+            steuer=konfiguration.hole(db, "gutschein_steuer"),
+            minuten=(
+                konfiguration.hole(db, "gutschein_minuten")
+                if konfiguration.hole(db, "gutschein_modell") == "einheit"
+                else None
+            ),
+            preis_mitglied=konfiguration.hole(db, "gutschein_preis_mitglied"),
+            preis_nichtmitglied=konfiguration.hole(db, "gutschein_preis_nichtmitglied"),
+            betraege=konfiguration.hole(db, "gutschein_betraege").betraege,
+            nur_mitglieder=(
+                konfiguration.hole(db, "gutschein_steuer") == "beim_kauf"
+                and konfiguration.hole(db, "mitgliedsgutschein_nur_mitglieder")
+            ),
+            gueltig_tage=konfiguration.hole(db, "gutschein_gueltig_tage"),
+        ),
         gruppe_mitglied=kundengruppen.mitglied(db).name,
         gruppe_nichtmitglied=kundengruppen.nicht_mitglied(db).name,
     )
@@ -205,6 +231,21 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
                 stornierbar=b.im_portal_stornierbar,
                 abo=b.dauerbuchung_id is not None,
                 freie_absagen_rest=rest,
+                gutschein_modelle=sorted(
+                    set(
+                        db.scalars(
+                            select(Gutschein.modell)
+                            .join(
+                                GutscheinEinloesung,
+                                GutscheinEinloesung.gutschein_id == Gutschein.id,
+                            )
+                            .where(
+                                GutscheinEinloesung.buchung_id == b.id,
+                                GutscheinEinloesung.status != GutscheinEinloesung.RUECKGAENGIG,
+                            )
+                        )
+                    )
+                ),
             )
         )
     rechnungen = db.scalars(
@@ -225,6 +266,108 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
         mitgliedschaft=mitgliedschaft.status(kunde, heute),
         mitglied_bis=kunde.mitglied_bis,
         antrag_am=kunde.mitglied_antrag_am,
+        gutscheine=_gutscheinbestand(db, kunde, heute),
+        gutschein_kaeufe=_gutscheinkaeufe(db, kunde, jetzt),
+        gutschein_kauf=_darf_gutschein_kaufen(db, kunde, heute),
+    )
+
+
+def _gutscheinbestand(db: Session, kunde: Kunde, heute: date) -> list[schema.KontoGutschein]:
+    from beachhub_core.services import gutschein_kauf
+
+    if kunde.anonymisiert_am is not None or kunde.portal_konto_id is None:
+        return []
+    bestand = []
+    for g in db.scalars(
+        select(Gutschein)
+        .where(
+            Gutschein.inhaber_kunde_id == kunde.id,
+            Gutschein.status.in_((Gutschein.AKTIV, Gutschein.TEILWEISE_EINGELOEST)),
+            Gutschein.gueltig_bis >= heute,
+            Gutschein.zurueckgegeben_am.is_(None),
+        )
+        .order_by(Gutschein.ausgestellt_am, Gutschein.id)
+    ):
+        rest = None
+        if g.modell == "wert":
+            if g.restwert is None or g.restwert <= 0:
+                continue
+        else:
+            verbraucht = (
+                db.scalar(
+                    select(func.count())
+                    .select_from(GutscheinEinloesung)
+                    .where(
+                        GutscheinEinloesung.gutschein_id == g.id,
+                        GutscheinEinloesung.status != GutscheinEinloesung.RUECKGAENGIG,
+                    )
+                )
+                or 0
+            )
+            rest = g.max_einloesungen - verbraucht
+            if rest <= 0:
+                continue
+        assert g.gueltig_bis is not None
+        bestand.append(
+            schema.KontoGutschein(
+                code=gutschein_codes.anzeige(g.code),
+                art=g.art,
+                modell=g.modell,
+                status=g.status,
+                gueltig_bis=g.gueltig_bis,
+                minuten=g.minuten,
+                restwert=g.restwert,
+                verbleibende_einloesungen=rest,
+                gruppenhinweis=gutschein_kauf.gruppenhinweis(db, g),
+            )
+        )
+    return bestand
+
+
+def _gutscheinkaeufe(db: Session, kunde: Kunde, jetzt: datetime) -> list[schema.KontoGutscheinKauf]:
+    if kunde.anonymisiert_am is not None or kunde.portal_konto_id is None:
+        return []
+    kaeufe = []
+    for g in db.scalars(
+        select(Gutschein)
+        .where(
+            Gutschein.art == "kauf",
+            Gutschein.kaeufer_kunde_id == kunde.id,
+            Gutschein.status == Gutschein.OFFEN,
+            Gutschein.kauf_reserviert_bis > jetzt,
+        )
+        .order_by(Gutschein.ausgestellt_am, Gutschein.id)
+    ):
+        z = db.get(Zahlung, g.zahlung_id) if g.zahlung_id else None
+        assert g.kaufpreis_brutto is not None and g.kauf_reserviert_bis is not None
+        kaeufe.append(
+            schema.KontoGutscheinKauf(
+                id=str(g.id),
+                status=g.status,
+                preis=g.kaufpreis_brutto,
+                reserviert_bis=g.kauf_reserviert_bis,
+                checkout_url=z.checkout_url
+                if z and z.kunde_id == kunde.id and z.status == Zahlung.OFFEN
+                else None,
+            )
+        )
+    return kaeufe
+
+
+def _darf_gutschein_kaufen(db: Session, kunde: Kunde, heute: date) -> bool:
+    if kunde.anonymisiert_am is not None or kunde.portal_konto_id is None:
+        return False
+    if kunde.rechnungskunde and not konfiguration.hole(db, "rechnungskunden_gutscheinkauf"):
+        return False
+    if konfiguration.hole(db, "gutschein_modell") == "wert":
+        return bool(konfiguration.hole(db, "gutschein_betraege").betraege)
+    gruppe = kundengruppen.effektive_gruppe(db, kunde, heute)
+    return bool(
+        konfiguration.hole(
+            db,
+            "gutschein_preis_mitglied" if gruppe.ist_mitglied else "gutschein_preis_nichtmitglied",
+        )
+        > 0
     )
 
 

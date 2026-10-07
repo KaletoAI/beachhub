@@ -5,11 +5,32 @@ Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`
 
 Status: Stufe 1 (Hauptsystem) fertig; Stufe 1a-I (feste Kundengruppen mit Steuersatz,
 Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) und 1a-II
-(Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) umgesetzt;
-1a-III (Gutscheine) folgt; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
-Gutscheine und echten Zahlungsanbieter) implementiert; Stufe 3 (Hallendienst) implementiert und
+(Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) und 1a-III
+(Gutscheine und Freischaltcodes im Hauptsystem) umgesetzt; Portal-Kern mit signiertem
+Gutscheinbestand und Kanalverträgen implementiert. Mitgliedschaftsoberfläche, Gutscheinverkauf,
+Codeeingabe und echter Zahlungsanbieter folgen im weiteren Ausbau der Stufe 2.
+Stufe 3 (Hallendienst) ist implementiert und
 gegen simuliertes Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald
 der Hallenhersteller die Schnittstellen festlegt.
+
+Stufe 1a-III umfasst beide Gutscheinmodelle (`einheit`, `wert`) und Steuerzeitpunkte,
+Freischaltcodes mit Serienexport, Kauf über den Hauptsystem-Kanal, atomare Einlösung,
+Storno/Kulanz und manuelle Rückgabe. Revision `0015` folgt direkt auf `0014` und erhält
+die bestehenden Rechnungszähler; steuerfreie Mehrzweck-Kaufbelege erhalten den eigenen
+Nummernkreis `GB-JJJJ-NNNNN`. Kaufbedingungen und Fristen bleiben als Snapshot erhalten.
+Ein kostenfreier bestätigter Einheitenstorno gibt die Nutzung unter ursprünglicher Gültigkeit
+zurück; verbrauchter Wert wird mit Gegenbeleg Guthaben des Einlösers, ohne den Gutscheinrest
+zu erhöhen. Die Rückgabe vollständig ungenutzter Kaufgutscheine sperrt dauerhaft und benennt
+die manuelle Erstattung an den ursprünglichen Käufer; sie erzeugt kein Kundenguthaben.
+Käufer und Einlöser behalten getrennte Belegrechte. Signierter Bestand und offene Käufe
+werden über den bestehenden Kanal verteilt; offene Kaufcodes bleiben geheim.
+Die Verwaltung zeigt Käufer und Inhaber auf filtertreuen Seiten mit je 500 Einträgen.
+Auch Rückgabegegenbelege werden nach Commit als Käufer-PDF erzeugt und versandt.
+Admin-Stornos, Batchaktionen und Verfallsjobs wiederholen geänderte Gutscheinzuordnungen
+bis zu drei Mal als vollständige Transaktion; erschöpfte Versuche bleiben ohne Teilwirkung.
+Details stehen im [Betriebshandbuch](docs/betrieb/hauptsystem.md#5c-gutscheine-und-freischaltcodes)
+und im [aktuellen Umsetzungsplan](docs/superpowers/plans/2026-10-05-stufe-1a-III-gutscheine.md).
+Der historische Plan vom 03.10.2026 bleibt als abgelöster Entwurf erhalten.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`

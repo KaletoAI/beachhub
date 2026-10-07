@@ -430,7 +430,7 @@ def test_migration_0014_uebernimmt_historischen_vollstorno(db: Session, welt) ->
     from alembic.config import Config
     from beachhub_core.database import engine
     from beachhub_core.models import Storno
-    from sqlalchemy import inspect
+    from sqlalchemy import inspect, text
 
     f, k = welt
     (b1, _), r = _rechnung(db, f, k)
@@ -448,6 +448,17 @@ def test_migration_0014_uebernimmt_historischen_vollstorno(db: Session, welt) ->
     command.stamp(cfg, "head")
     command.downgrade(cfg, "0013")
     command.upgrade(cfg, "0014")
+    # Den historischen Migrationsschritt mit SQL prüfen, bevor spätere Revisionen
+    # das Schema wieder an die heutigen ORM-Modelle anpassen.
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT korrigiert_rechnung_id FROM rechnung WHERE id = :id"),
+                {"id": beleg_id},
+            ).scalar_one()
+            == rid
+        )
+    command.upgrade(cfg, "head")
     db.expire_all()
     assert db.get(Rechnung, beleg_id).korrigiert_rechnung_id == rid
     assert not db.get(Storno, sid).freie_absage

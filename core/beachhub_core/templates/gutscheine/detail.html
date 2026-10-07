@@ -1,0 +1,34 @@
+{% extends "base.html" %}{% block title %}Gutschein{% endblock %}
+{% block content %}
+<h1>{{ "Freischaltcode" if g.art == "frei" else "Kaufgutschein" }}</h1>
+<div class="karte">
+<p>Code: <strong>{% if g.status not in ["offen", "abgebrochen"] %}{{ g.code|gutscheincode }}{% else %}Kauf nicht abgeschlossen{% endif %}</strong></p>
+<p>Status: {{ g.status|replace("_", " ") }} · Gültig bis einschließlich {{ g.gueltig_bis|datum if g.gueltig_bis else "–" }}</p>
+<p>{% if g.modell == "einheit" %}{{ g.minuten }} Minuten · Höchstens {{ g.max_einloesungen }} Einlösung(en){% else %}Nennwert {{ g.nennwert_brutto|euro }} · Restwert {{ g.restwert|euro }}{% endif %}</p>
+<p>{% if g.art == "frei" %}Kein Geldwert und kein Steuerbeleg.{% else %}Kaufpreis {{ g.kaufpreis_brutto|euro }} · Steuer {{ "beim Kauf" if g.steuer == "beim_kauf" else "bei Einlösung" }}{% endif %}</p>
+<p>Käufer: {% if kaeufer %}<a href="/admin/kunden/{{ kaeufer.id }}">{{ kaeufer.name }}</a>{% else %}–{% endif %} · Inhaber: {% if inhaber %}<a href="/admin/kunden/{{ inhaber.id }}">{{ inhaber.name }}</a>{% else %}–{% endif %}</p>
+<p>Feld: {{ feld.name if feld else "alle" }} · Buchungszeitraum: {{ g.zeitraum_von|datum if g.zeitraum_von else "offen" }} bis {{ g.zeitraum_bis|datum if g.zeitraum_bis else "offen" }}</p>
+<p>Serie: {{ g.serie or "–" }} · Notiz: {{ g.notiz or "–" }}</p>
+{% if g.rechnung_id %}<p><a href="/admin/rechnungen/{{ g.rechnung_id }}">Kaufbeleg öffnen</a></p>{% endif %}
+{% if g.zurueckgegeben_am %}<p>Zurückgegeben am {{ g.zurueckgegeben_am|lokal }}. Dauerhaft gesperrt; keine Reaktivierung möglich. Manuell auszuführende Erstattung an den ursprünglichen Käufer {{ kaeufer.name if kaeufer else "–" }}: {{ g.rueckgabe_betrag|euro }}. Grund: {{ g.rueckgabe_grund }}.</p>{% endif %}
+</div>
+{% if admin.rolle == "admin" and g.status not in ["offen", "abgebrochen"] %}
+<form method="post" action="/admin/gutscheine/{{ g.id }}/gueltigkeit" class="karte zeile">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}"><label>Gültig bis <input type="date" name="gueltig_bis" value="{{ g.gueltig_bis or '' }}" required></label>
+  {% if g.status in ["gesperrt", "verfallen"] and not g.zurueckgegeben_am %}<label><input type="checkbox" name="reaktivieren" value="1">Reaktivieren mit unverändertem Verbrauch</label>{% endif %}
+  <button>Gültigkeit speichern</button>
+</form>
+{% if g.status != "gesperrt" %}<form method="post" action="/admin/gutscheine/{{ g.id }}/sperren" class="karte"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button>Gutschein sperren</button></form>{% endif %}
+{% endif %}
+{% if admin.rolle == "admin" and g.art == "kauf" and g.status not in ["offen", "abgebrochen"] and not g.zurueckgegeben_am %}
+<form method="post" action="/admin/gutscheine/{{ g.id }}/rueckgabe" class="karte">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <p>Nur vollständig ungenutzte Gutscheine können zurückgegeben werden. Der Betrag ist anschließend an den ursprünglichen Käufer {{ kaeufer.name if kaeufer else "–" }} zu zahlen. Diese Aktion löst keine Zahlung aus und erzeugt kein Kundenguthaben.</p>
+  <label>Grund <input name="grund" maxlength="1000" required></label>
+  <button class="gefahr">Zurückgeben – Betrag anschließend manuell erstatten</button>
+</form>
+{% endif %}
+<h2>Einlösungen</h2><div class="karte"><table><tr><th>Zeitpunkt</th><th>Buchung</th><th>Status</th><th>Tarifwert</th><th>Beleg</th></tr>
+{% for e in einloesungen %}<tr><td>{{ e.zeitpunkt|lokal }}</td><td><a href="/admin/belegung/buchung/{{ e.buchung_id }}">Buchung öffnen</a></td><td>{{ e.status }}</td><td>{{ e.betrag|euro }}</td><td>{% if e.korrektur_rechnung_id %}<a href="/admin/rechnungen/{{ e.korrektur_rechnung_id }}">Korrekturbeleg</a>{% else %}–{% endif %}</td></tr>{% else %}<tr><td colspan="5">Noch keine Einlösung.</td></tr>{% endfor %}</table></div>
+<h2>Änderungsprotokoll</h2><div class="karte"><table><tr><th>Zeitpunkt</th><th>Quelle / Akteur</th><th>Status vorher</th><th>Status danach</th></tr>{% for a in audits %}<tr><td>{{ a.zeitpunkt|lokal }}</td><td>{{ a.quelle }} / {{ a.admin_user_id or "System" }}</td><td>{{ a.vorher_json.get("status", "–") if a.vorher_json else "–" }}</td><td>{{ a.nachher_json.get("status", "–") if a.nachher_json else "–" }}</td></tr>{% endfor %}</table></div>
+{% endblock %}

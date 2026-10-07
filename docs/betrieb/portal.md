@@ -148,3 +148,13 @@ von selbst (spätestens nach einer Stunde, sofort nach einem Neustart des Haupts
 | Kunden sehen „Anfrage gespeichert, Bestätigung folgt per E-Mail“ | Hauptsystem holt nicht ab: WireGuard/Netz, Zertifikat abgelaufen, `KANAL_TOKEN` ungleich. Nach 30 min bekommt der Betreiber eine Mail. |
 | Mail „Lesestand vom Portal abgelehnt“ | `PORTAL_CORE_PUBLIC_KEY` passt nicht zum Schlüssel des Hauptsystems. |
 | Belegung leer mit „wird gerade geladen“ | Noch kein Lesestand angekommen: Admin-UI → System → „Lesestand jetzt erzeugen“ (Häkchen „Belegung und Tarife auch ohne Änderung neu erzeugen“ setzen). |
+
+### Gutscheine und Stornotexte
+
+Gutscheinbestand und offene Kaufwünsche werden vom Hauptsystem signiert übermittelt; offene
+Käufe enthalten keinen Code. Ältere Lesestände aktivieren keinen Gutscheinverkauf. Die Verkaufs-
+und Codeeingabeoberfläche bleibt für Stufe 2 offen. Die vorhandene Stornobestätigung verspricht
+bei Gutscheindeckung kein pauschales Geldguthaben: Einheiten/Freicodes geben die Nutzung unter
+ursprünglicher Gültigkeit zurück, bestätigter Wertverbrauch wird Guthaben mit Korrekturbeleg.
+Eine Reservierungsabsage stellt dagegen ursprünglichen Gutscheinbestand und reserviertes
+Kundenguthaben wieder her. Gesperrte oder abgelaufene Codes werden nicht automatisch reaktiviert.

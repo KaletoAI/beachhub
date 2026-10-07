@@ -1,4 +1,6 @@
 import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 
@@ -9,6 +11,47 @@ from sqlalchemy.orm import Session
 
 from beachhub_core.models import Feld, Tarif
 from beachhub_core.services import slots_db
+
+
+@dataclass(frozen=True)
+class Slotpreisstand:
+    """Interner unveränderlicher Preisstand genau einer Buchungsanfrage."""
+
+    feld_id: uuid.UUID
+    beginn: datetime
+    ende: datetime
+    kundengruppe_id: uuid.UUID | None
+    slotpreise: tuple[tuple[Slot, Decimal], ...]
+
+    @property
+    def summe(self) -> Decimal:
+        return sum((preis for _, preis in self.slotpreise), Decimal("0.00"))
+
+    def passt_zu(
+        self,
+        *,
+        feld_id: uuid.UUID,
+        beginn: datetime,
+        ende: datetime,
+        kundengruppe_id: uuid.UUID | None,
+        preis: Decimal,
+    ) -> bool:
+        return (
+            self.feld_id == feld_id
+            and self.beginn == beginn
+            and self.ende == ende
+            and self.kundengruppe_id == kundengruppe_id
+            and self.summe == preis
+            and bool(self.slotpreise)
+            and self.slotpreise[0][0].beginn == beginn
+            and self.slotpreise[-1][0].ende == ende
+            and all(
+                vorher.ende == nachher.beginn
+                for (vorher, _), (nachher, _) in zip(
+                    self.slotpreise, self.slotpreise[1:], strict=False
+                )
+            )
+        )
 
 
 def _passt(t: Tarif, feld_id: uuid.UUID, slot: Slot, kundengruppe_id: uuid.UUID | None) -> bool:
@@ -41,17 +84,59 @@ def _spezifitaet(t: Tarif) -> int:
     )
 
 
-def regel_fuer_slot(
-    db: Session, *, feld_id: uuid.UUID, slot: Slot, kundengruppe_id: uuid.UUID | None
+def _regel_aus_stand(
+    regeln: Sequence[Tarif],
+    *,
+    feld_id: uuid.UUID,
+    slot: Slot,
+    kundengruppe_id: uuid.UUID | None,
 ) -> Tarif | None:
-    kandidaten = [
-        t
-        for t in db.scalars(select(Tarif).where(Tarif.aktiv.is_(True))).all()
-        if _passt(t, feld_id, slot, kundengruppe_id)
-    ]
+    kandidaten = [t for t in regeln if _passt(t, feld_id, slot, kundengruppe_id)]
     if not kandidaten:
         return None
     return max(kandidaten, key=lambda t: (_spezifitaet(t), t.created_at))
+
+
+def _aktive_regeln(db: Session) -> list[Tarif]:
+    return list(
+        db.scalars(
+            select(Tarif).where(Tarif.aktiv.is_(True)).execution_options(populate_existing=True)
+        )
+    )
+
+
+def regel_fuer_slot(
+    db: Session, *, feld_id: uuid.UUID, slot: Slot, kundengruppe_id: uuid.UUID | None
+) -> Tarif | None:
+    return _regel_aus_stand(
+        _aktive_regeln(db), feld_id=feld_id, slot=slot, kundengruppe_id=kundengruppe_id
+    )
+
+
+def preise_je_slot(
+    db: Session,
+    *,
+    feld_id: uuid.UUID,
+    beginn: datetime,
+    ende: datetime,
+    kundengruppe_id: uuid.UUID | None,
+) -> list[tuple[Slot, Decimal]] | None:
+    feld = db.get(Feld, feld_id)
+    if feld is None:
+        return None
+    tages = slots_db.tages_slots(db, feld, lokales_datum(beginn))
+    if not zeitraum_ist_slotfolge(beginn, ende, tages):
+        return None
+    regeln = _aktive_regeln(db)
+    preise = []
+    for slot in slots_im_zeitraum(beginn, ende, tages):
+        regel = _regel_aus_stand(
+            regeln, feld_id=feld_id, slot=slot, kundengruppe_id=kundengruppe_id
+        )
+        if regel is None:
+            return None
+        preise.append((slot, regel.preis))
+    return preise
 
 
 def ermittle_preis(
@@ -62,16 +147,25 @@ def ermittle_preis(
     ende: datetime,
     kundengruppe_id: uuid.UUID | None,
 ) -> Decimal | None:
-    feld = db.get(Feld, feld_id)
-    if feld is None:
-        return None
-    tages = slots_db.tages_slots(db, feld, lokales_datum(beginn))
-    if not zeitraum_ist_slotfolge(beginn, ende, tages):
-        return None
-    summe = Decimal("0.00")
-    for slot in slots_im_zeitraum(beginn, ende, tages):
-        regel = regel_fuer_slot(db, feld_id=feld_id, slot=slot, kundengruppe_id=kundengruppe_id)
-        if regel is None:
-            return None
-        summe += regel.preis
-    return summe
+    preise = preise_je_slot(
+        db, feld_id=feld_id, beginn=beginn, ende=ende, kundengruppe_id=kundengruppe_id
+    )
+    return None if preise is None else sum((preis for _, preis in preise), Decimal("0.00"))
+
+
+def preisstand_fuer_buchung(
+    db: Session,
+    *,
+    feld_id: uuid.UUID,
+    beginn: datetime,
+    ende: datetime,
+    kundengruppe_id: uuid.UUID | None,
+) -> Slotpreisstand | None:
+    preise = preise_je_slot(
+        db, feld_id=feld_id, beginn=beginn, ende=ende, kundengruppe_id=kundengruppe_id
+    )
+    return (
+        None
+        if preise is None
+        else Slotpreisstand(feld_id, beginn, ende, kundengruppe_id, tuple(preise))
+    )

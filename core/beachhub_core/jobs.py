@@ -11,6 +11,9 @@ from beachhub_core.models import Kunde
 from beachhub_core.services import (
     benachrichtigung,
     guthaben,
+    gutschein_kauf,
+    gutschein_sperren,
+    gutscheine,
     halle,
     lesestand,
     mitgliedschaft,
@@ -23,11 +26,39 @@ _scheduler: BackgroundScheduler | None = None
 
 def verfall_ausfuehren(db: Session) -> int:
     """Reservierungen mit abgelaufener Zahlungsfrist verfallen lassen (A-ZAHL-3)."""
-    verfallen = online_buchung.verfalle_abgelaufene(db)
-    db.commit()
+    verfallen = gutschein_sperren.fuehre_transaktion_aus(
+        db, lambda: online_buchung.verfalle_abgelaufene(db)
+    )
     for b in verfallen:
         benachrichtigung.zahlungsfrist_abgelaufen(db, b)
     return len(verfallen)
+
+
+def gutschein_verfall_ausfuehren(db: Session) -> int:
+    return gutschein_sperren.fuehre_transaktion_aus(db, lambda: gutscheine.verfalle(db))
+
+
+def gutschein_kaufabbruch_ausfuehren(db: Session) -> int:
+    """Eigene Transaktion: keine neuen Kaufkunden nach Buchungs-/Belegsperren entdecken."""
+    return gutschein_sperren.fuehre_transaktion_aus(
+        db, lambda: gutschein_kauf.brich_abgelaufene_ab(db)
+    )
+
+
+def _job_gutschein_kaufabbruch() -> None:
+    with SessionLocal() as db:
+        try:
+            gutschein_kaufabbruch_ausfuehren(db)
+        except Exception:
+            logger.exception("Abbruch abgelaufener Gutscheinkäufe fehlgeschlagen")
+
+
+def _job_gutschein_verfall() -> None:
+    with SessionLocal() as db:
+        try:
+            gutschein_verfall_ausfuehren(db)
+        except Exception:
+            logger.exception("Verfall der Gutscheine fehlgeschlagen")
 
 
 def _job_lesestand() -> None:
@@ -113,6 +144,12 @@ def starte_scheduler() -> BackgroundScheduler:
     s.add_job(_job_lesestand, IntervalTrigger(minutes=5), id="lesestand", replace_existing=True)
     s.add_job(_job_verfall, IntervalTrigger(minutes=1), id="verfall", replace_existing=True)
     s.add_job(
+        _job_gutschein_kaufabbruch,
+        IntervalTrigger(minutes=1),
+        id="gutschein_kaufabbruch",
+        replace_existing=True,
+    )
+    s.add_job(
         _job_mitgliedschaft,
         CronTrigger(hour=7, minute=0),
         id="mitgliedschaft",
@@ -131,6 +168,12 @@ def starte_scheduler() -> BackgroundScheduler:
         _job_hallenplan,
         CronTrigger(hour=0, minute=5),
         id="hallenplan_nachts",
+        replace_existing=True,
+    )
+    s.add_job(
+        _job_gutschein_verfall,
+        CronTrigger(hour=0, minute=20, timezone="Europe/Berlin"),
+        id="gutschein_verfall",
         replace_existing=True,
     )
     s.start()

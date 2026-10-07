@@ -195,3 +195,22 @@ def test_nicht_stornierbar_ohne_link_und_abgewiesen(angemeldet: TestClient, db: 
     )
     assert r.headers["location"] == "/buchungen"
     assert db.scalar(select(Anfrage).where(Anfrage.typ == "buchung_stornieren")) is None
+
+
+@pytest.mark.parametrize(
+    "modell,status", [("einheit", "bestaetigt"), ("wert", "bestaetigt"), ("wert", "reserviert")]
+)
+def test_gutschein_stornoseite_verspricht_den_passenden_ruecklauf(angemeldet, db, modell, status):
+    b = {**_b(UEBERMORGEN, 19, status=status), "gutschein_modelle": [modell]}
+    speichere(db, "belegung", belegung())
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[b]))
+    seite = angemeldet.get(f"/buchungen/{b['id']}/stornieren").text
+    assert "Der Betrag wird deinem Guthaben gutgeschrieben" not in seite
+    if status == "reserviert":
+        assert "ursprüngliche Gutscheinbestand" in seite
+        assert "Wertgutscheinverbrauch wird Guthaben" not in seite
+    elif modell == "einheit":
+        assert "ursprünglichen Gültigkeit" in seite and "kein Geldguthaben" in seite
+    else:
+        assert "Wertgutscheinverbrauch wird Guthaben" in seite
+        assert "Restwert des Gutscheins steigt nicht" in seite

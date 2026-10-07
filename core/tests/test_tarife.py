@@ -103,3 +103,41 @@ def test_gueltigkeit_und_inaktiv(db: Session, basis) -> None:
         ende=kombiniere(MI, time(18)),
         kundengruppe_id=privat.id,
     ) == Decimal("20.00")
+
+
+def test_slotpreise_laden_regeln_nur_einmal_trotz_paralleler_tarifpflege(
+    db: Session, basis, monkeypatch
+):
+    from beachhub_core.database import SessionLocal
+
+    f, privat, _ = basis
+    db.add(Tarif(name="Standard", preis=Decimal("15")))
+    db.commit()
+    echt = tarife._passt
+    geaendert = False
+
+    def passt(regel, feld_id, slot, gruppe_id):
+        nonlocal geaendert
+        if not geaendert:
+            geaendert = True
+            with SessionLocal() as admin_session:
+                admin_session.add(
+                    Tarif(
+                        name="Neuer Abendtarif",
+                        preis=Decimal("30"),
+                        uhrzeit_von=time(19),
+                        uhrzeit_bis=time(22),
+                    )
+                )
+                admin_session.commit()
+        return echt(regel, feld_id, slot, gruppe_id)
+
+    monkeypatch.setattr(tarife, "_passt", passt)
+    preise = tarife.preise_je_slot(
+        db,
+        feld_id=f.id,
+        beginn=kombiniere(MI, time(19)),
+        ende=kombiniere(MI, time(22)),
+        kundengruppe_id=privat.id,
+    )
+    assert [preis for _, preis in preise] == [Decimal("15"), Decimal("15"), Decimal("15")]

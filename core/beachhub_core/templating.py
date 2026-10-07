@@ -14,6 +14,7 @@ from beachhub_core import clock, navigation
 from beachhub_core.config import settings
 from beachhub_core.database import SessionLocal
 from beachhub_core.models import AdminUser
+from beachhub_core.services.gutschein_codes import anzeige
 
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
 # Nur .html/.htm automatisch escapen – die reinen Text-Mailvorlagen (.txt) sollen Sonderzeichen
@@ -66,6 +67,7 @@ def wert(v: Any) -> str:
 templates.env.filters.update(
     {
         "euro": euro,
+        "gutscheincode": anzeige,
         "lokal": f_lokal,
         "datum": f_datum,
         "uhrzeit": f_uhrzeit,

@@ -11,6 +11,7 @@ from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, Sperre,
 from beachhub_core.services import (
     audit,
     buchungen,
+    gutschein_sperren,
     konfiguration,
     kunden,
     kundengruppen,
@@ -119,9 +120,10 @@ def lege_an(
         raise DauerbuchungsFehler("keine_termine")
     # Neue Saisonrechnung und verdrängte Buchungen teilen den Nummernkreis:
     # alle beteiligten Kunden gemeinsam vor der ersten Korrektur sperren.
-    kunden.sperre_mehrere(
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(
         db,
-        {kunde_id} | {k.kunde_id for t in termine for k in t.kollisionen if isinstance(k, Buchung)},
+        {k.id for t in termine for k in t.kollisionen if isinstance(k, Buchung)},
+        kunde_ids=[kunde_id],
     )
     kunde = db.get(Kunde, kunde_id)
     assert kunde is not None  # plane() hat den Kunden geprüft
@@ -164,6 +166,7 @@ def lege_an(
                 durch="betreiber",
                 kostenfrei=True,
                 grund="Dauerbuchung",
+                sperrkontext=sperrkontext,
                 admin_user_id=admin_user_id,
             )
         buchungen.lege_an(
@@ -201,7 +204,20 @@ def beende(
     korrigiert (A-RECH-7). Liefert die Belege für den Versand nach dem Commit."""
     from beachhub_core.services import storno
 
-    kunden.sperre_mehrere(db, [dauer.kunde_id])
+    grenze = kombiniere(ab, time(0, 0))
+    kandidaten_abfrage = select(Buchung.id).where(
+        Buchung.dauerbuchung_id == dauer.id,
+        Buchung.beginn >= grenze,
+        Buchung.status.in_(Buchung.AKTIVE_STATUS),
+    )
+    kandidaten = set(db.scalars(kandidaten_abfrage))
+    sperrkontext = gutschein_sperren.bereite_buchungen_vor(
+        db, kandidaten, kunde_ids=[dauer.kunde_id]
+    )
+    # Nach Warten auf Kunden dürfen frisch hinzugekommene Termine mit anderen
+    # Gutscheinen nicht nach der ersten Dauer-/Belegsperre vorbereitet werden.
+    if not set(db.scalars(kandidaten_abfrage)) <= kandidaten:
+        raise gutschein_sperren.GutscheinVorbereitungWiederholen("Dauertermine inzwischen ergänzt")
     db.execute(
         select(Dauerbuchung)
         .where(Dauerbuchung.id == dauer.id)
@@ -214,7 +230,6 @@ def beende(
         .execution_options(populate_existing=True)
     ).all()
     db.expire(dauer, ["buchungen"])
-    grenze = kombiniere(ab, time(0, 0))
     vorher = audit.als_dict(dauer)
     betroffen = [b for b in dauer.buchungen if b.beginn >= grenze and b.aktiv]
     for b in betroffen:
@@ -226,9 +241,15 @@ def beende(
             grund="Dauerbuchung beendet",
             admin_user_id=admin_user_id,
             korrigieren=False,
+            sperrkontext=sperrkontext,
         )
     belege = storno.gutschreiben_alle(
-        db, betroffen, grund="Dauerbuchung beendet", quelle="admin", admin_user_id=admin_user_id
+        db,
+        betroffen,
+        grund="Dauerbuchung beendet",
+        quelle="admin",
+        admin_user_id=admin_user_id,
+        sperrkontext=sperrkontext,
     )
     dauer.beendet_am = utcnow()
     dauer.beendet_ab = ab

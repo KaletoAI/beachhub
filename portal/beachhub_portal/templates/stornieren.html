@@ -12,7 +12,16 @@
   <p>Bei einer kostenfreien Absage sinkt die offene Forderung; der bereits bezahlte Anteil wird Guthaben. Andernfalls bleibt der Termin berechnet. Der Platz wird in jedem Fall freigegeben.</p>
   {% endif %}
   {% elif kostenfrei %}
-  <p>Die Stornierung ist <strong>kostenfrei</strong>.{% if b.status == "bestaetigt" %} Der Betrag wird deinem Guthaben gutgeschrieben und mit der nächsten Buchung verrechnet.{% endif %}</p>
+  <p>Die Stornierung ist <strong>kostenfrei</strong>.{% if b.status == "bestaetigt" and not b.gutschein_modelle %} Der Betrag wird deinem Guthaben gutgeschrieben und mit der nächsten Buchung verrechnet.{% endif %}</p>
+  {% if b.gutschein_modelle %}
+  {% if b.status == "reserviert" %}
+  <p>Der ursprüngliche Gutscheinbestand und reserviertes Kundenguthaben werden wiederhergestellt. Daraus entsteht kein zusätzliches Gutscheinwertguthaben.</p>
+  {% else %}
+  {% if "einheit" in b.gutschein_modelle %}<p>Die Einlösung von Einheitsgutscheinen und Freischaltcodes wird zurückgenommen. Die Nutzung steht wieder unter der ursprünglichen Gültigkeit zur Verfügung; daraus entsteht kein Geldguthaben. Gesperrte oder abgelaufene Codes werden nicht automatisch reaktiviert.</p>{% endif %}
+  {% if "wert" in b.gutschein_modelle %}<p>Der bestätigte Wertgutscheinverbrauch wird Guthaben mit Korrekturbeleg. Der Restwert des Gutscheins steigt nicht.</p>{% endif %}
+  <p>Ein bereits bezahlter Geld- oder Kundenguthabenanteil wird gesondert gutgeschrieben.</p>
+  {% endif %}
+  {% endif %}
   {% else %}
   <p>Die Stornofrist von {{ frist }} Stunden ist abgelaufen. Der Termin wird freigegeben, <strong>der Betrag bleibt aber fällig</strong>.</p>
   {% endif %}

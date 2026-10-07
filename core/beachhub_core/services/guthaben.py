@@ -6,8 +6,9 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from beachhub_core import clock
-from beachhub_core.models import AppSetting, GuthabenBuchung, Kunde
+from beachhub_core.models import AppSetting, Buchung, GuthabenBuchung, Kunde
 from beachhub_core.services import audit, konfiguration
+from beachhub_core.services.gutschein_typen import GutscheinSperrkontext
 
 # storno_gutschrift entsteht nur über storno.gutschreiben_positionen mit Korrekturbeleg.
 ARTEN = {
@@ -127,3 +128,41 @@ def saisonende_faellig(db: Session) -> tuple[int, Decimal] | None:
         return None
     liste = guthabenliste(db)
     return len(liste), sum((k.guthaben for k in liste), Decimal("0.00"))
+
+
+def _buche_reservierung_zurueck(
+    db: Session,
+    buchung: Buchung,
+    *,
+    quelle: str,
+    sperrkontext: GutscheinSperrkontext,
+    admin_user_id: uuid.UUID | None = None,
+) -> Decimal:
+    """Intern: Reservierungswallet nach vollständiger Vorgangsvorbereitung zurückgeben.
+
+    Der Aufrufer hat die unbezahlte Reservierung geprüft. Bereits erfolgte Rückbuchungen
+    zählen mit; Rückgabe ist ausschließlich der in diesem Aufruf tatsächlich gebuchte Betrag.
+    Kunde/Zahlungen/Gutscheine bleiben im vorhandenen Kontext gesperrt, keine Neu-Vorbereitung.
+    """
+    if buchung.kunde_id not in sperrkontext.kunde_ids:
+        raise ValueError("Reservierungswallet-Kunde nicht vorbereitet")
+    summe = db.scalar(
+        select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0)).where(
+            GuthabenBuchung.bezug_id == buchung.id,
+            GuthabenBuchung.art.in_(("verrechnung", "rueckbuchung")),
+        )
+    )
+    offen = -Decimal(str(summe))
+    if offen <= Decimal("0.00"):
+        return Decimal("0.00")
+    buche(
+        db,
+        kunde=buchung.kunde,
+        betrag=offen,
+        art="rueckbuchung",
+        bezug_id=buchung.id,
+        notiz="Reservierung ohne Zahlung beendet",
+        quelle=quelle,
+        admin_user_id=admin_user_id,
+    )
+    return offen

@@ -20,6 +20,8 @@ from beachhub_core.models import AnfrageVerarbeitet, Kunde, Rechnung
 from beachhub_core.services import (
     audit,
     benachrichtigung,
+    gutschein_kauf,
+    gutschein_sperren,
     kunden,
     lesestand,
     mitgliedschaft,
@@ -124,6 +126,7 @@ def _buchung_anfragen(
         beginn=n.beginn,
         ende=n.ende,
         rueckkehr_url=rueckkehr,
+        gutschein_codes=n.gutschein_codes,
     )
 
 
@@ -131,6 +134,20 @@ def _buchung_stornieren(
     db: Session, kunde: Kunde, anfrage: kanal.Anfrage, n: kanal.BuchungStornieren
 ) -> Ergebnis:
     return online_buchung.storniere_fuer_kunde(db, kunde=kunde, buchung_id=n.buchung_id)
+
+
+def _gutschein_kaufen(
+    db: Session, kunde: Kunde, anfrage: kanal.Anfrage, n: kanal.GutscheinKaufen
+) -> Ergebnis:
+    basis = settings.portal_oeffentliche_url.rstrip("/")
+    return gutschein_kauf.anfragen(
+        db,
+        kunde=kunde,
+        empfaenger_email=n.empfaenger_email,
+        betrag=n.betrag,
+        rueckkehr_url=f"{basis}/zahlung/zurueck?anfrage={anfrage.anfrage_id}",
+        erwartetes_konto_id=anfrage.konto_id,
+    )
 
 
 def _rechnung_anfordern(
@@ -192,6 +209,7 @@ _MIT_KUNDE: dict[str, Verarbeiter] = {
     "buchung_stornieren": _buchung_stornieren,
     "rechnung_anfordern": _rechnung_anfordern,
     "mitgliedschaft_beantragen": _mitgliedschaft_beantragen,
+    "gutschein_kaufen": _gutschein_kaufen,
 }
 
 
@@ -239,23 +257,34 @@ def bearbeite(db: Session, anfrage: kanal.Anfrage) -> tuple[kanal.Antwort, list[
     andere Session dieselbe anfrage_id zuerst (Wettlauf zweier Zustellungen), kollidiert unser
     eigener Commit am Primärschlüssel von anfrage_verarbeitet; dann gilt die zuerst gespeicherte
     Antwort."""
-    ergebnis = _bereits_verarbeitet(db, anfrage)
-    if ergebnis is not None:
-        return ergebnis
-    try:
-        erg = verarbeite(db, anfrage)
-        _speichere(db, anfrage, erg.antwort)
-        db.commit()
-        return erg.antwort, erg.nach_commit
-    except IntegrityError:
-        db.rollback()
+    for versuch in range(3):
         ergebnis = _bereits_verarbeitet(db, anfrage)
         if ergebnis is not None:
             return ergebnis
-        logger.exception("Anfrage %s (%s) fehlgeschlagen", anfrage.anfrage_id, anfrage.typ)
-    except Exception:
-        db.rollback()
-        logger.exception("Anfrage %s (%s) fehlgeschlagen", anfrage.anfrage_id, anfrage.typ)
+        try:
+            erg = verarbeite(db, anfrage)
+            _speichere(db, anfrage, erg.antwort)
+            db.commit()
+            return erg.antwort, erg.nach_commit
+        except gutschein_sperren.GutscheinVorbereitungWiederholen:
+            db.rollback()
+            if versuch < 2:
+                continue
+            logger.exception(
+                "Anfrage %s (%s): Gutscheinvorbereitung nach drei Versuchen fehlgeschlagen",
+                anfrage.anfrage_id,
+                anfrage.typ,
+            )
+        except IntegrityError:
+            db.rollback()
+            ergebnis = _bereits_verarbeitet(db, anfrage)
+            if ergebnis is not None:
+                return ergebnis
+            logger.exception("Anfrage %s (%s) fehlgeschlagen", anfrage.anfrage_id, anfrage.typ)
+        except Exception:
+            db.rollback()
+            logger.exception("Anfrage %s (%s) fehlgeschlagen", anfrage.anfrage_id, anfrage.typ)
+        break
 
     fehler = kanal.Antwort(status="fehler")
     try:

@@ -141,3 +141,74 @@ def test_antwort_und_konto_kennen_freie_absagen() -> None:
     }
     b = KontoBuchung.model_validate(alt)
     assert b.abo is False and b.freie_absagen_rest is None
+
+
+def test_alte_buchungsnutzlast_bleibt_gueltig() -> None:
+    alte_anfrage = kanal.BuchungAnfragen(
+        feld_id=uuid.uuid4(),
+        beginn=datetime(2027, 12, 1, 18, tzinfo=UTC),
+        ende=datetime(2027, 12, 1, 19, tzinfo=UTC),
+    )
+    assert alte_anfrage.gutschein_codes == []
+
+
+@pytest.mark.parametrize("codes", [[""], ["x" * 41], ["CODE"] * 11, [1]])
+def test_gutscheincodes_begrenzt(codes: list) -> None:
+    with pytest.raises(ValidationError):
+        kanal.BuchungAnfragen.model_validate(
+            {
+                "feld_id": str(uuid.uuid4()),
+                "beginn": "2027-12-01T18:00:00Z",
+                "ende": "2027-12-01T19:00:00Z",
+                "gutschein_codes": codes,
+            }
+        )
+
+
+def test_gutscheincodes_und_antwort_roundtrip() -> None:
+    anfrage = kanal.BuchungAnfragen.model_validate(
+        {
+            "feld_id": str(uuid.uuid4()),
+            "beginn": "2027-12-01T18:00:00Z",
+            "ende": "2027-12-01T19:00:00Z",
+            "gutschein_codes": ["x" * 40] * 10,
+        }
+    )
+    assert len(anfrage.gutschein_codes) == 10
+    assert kanal.BuchungAnfragen.model_validate_json(anfrage.model_dump_json()) == anfrage
+    alt = kanal.Antwort(status="ok")
+    assert alt.gutschein_verrechnet is None and alt.gutschein_wieder_gueltig is None
+    assert "gutschein_verrechnet" not in alt.model_dump(exclude_none=True)
+    antwort = kanal.Antwort(
+        status="ok", gutschein_verrechnet=Decimal("30.00"), gutschein_wieder_gueltig=True
+    )
+    assert kanal.Antwort.model_validate_json(antwort.model_dump_json()) == antwort
+
+
+def test_gutschein_kaufen_validiert() -> None:
+    assert kanal.NUTZLAST["gutschein_kaufen"].model_validate({}) == kanal.GutscheinKaufen()
+    anfrage = kanal.GutscheinKaufen(empfaenger_email="bea@x.de", betrag=Decimal("50.00"))
+    assert kanal.GutscheinKaufen.model_validate_json(anfrage.model_dump_json()) == anfrage
+
+
+def test_gutschein_kaufen_bis_zur_geldspeichergrenze() -> None:
+    anfrage = kanal.GutscheinKaufen(betrag=Decimal("99999999.99"))
+    assert anfrage.betrag == Decimal("99999999.99")
+
+
+@pytest.mark.parametrize(
+    "daten",
+    [
+        {"empfaenger_email": "x"},
+        {"empfaenger_email": "x" * 201},
+        {"betrag": "0"},
+        {"betrag": "-1"},
+        {"betrag": "12.345"},
+        {"betrag": "NaN"},
+        {"betrag": "Infinity"},
+        {"betrag": "100000000.00"},
+    ],
+)
+def test_gutschein_kaufen_lehnt_ungueltige_nutzlast_ab(daten: dict) -> None:
+    with pytest.raises(ValidationError):
+        kanal.GutscheinKaufen.model_validate(daten)

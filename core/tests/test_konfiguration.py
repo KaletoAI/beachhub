@@ -1,8 +1,8 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
-from beachhub_core.models import Audit
+from beachhub_core.models import Audit, Kunde, LesestandVersion
 from beachhub_core.services import konfiguration
 from sqlalchemy.orm import Session
 
@@ -105,3 +105,157 @@ def test_decimal_lehnt_nicht_endliche_werte_ab(db: Session, roh: str) -> None:
 def test_event_ust_satz_bereich(db: Session, roh: str) -> None:
     with pytest.raises(ValueError, match="Steuersatz ungültig"):
         konfiguration.setze(db, "event_ust_satz", roh)
+
+
+def test_gutschein_vorgaben(db: Session) -> None:
+    erwartete_werte = {
+        "gutschein_modell": "einheit",
+        "gutschein_minuten": 120,
+        "gutscheine_je_buchung": "volle_einheiten",
+        "gutschein_preis_mitglied": Decimal("0.00"),
+        "gutschein_preis_nichtmitglied": Decimal("0.00"),
+        "gutschein_betraege": "25,00; 50,00; 100,00",
+        "mitgliedsgutschein_nur_mitglieder": True,
+        "gutschein_steuer": "beim_kauf",
+        "gutschein_gueltig_tage": 730,
+        "freicode_gueltig_tage": 90,
+        "rechnungskunden_gutscheinkauf": True,
+        "gutschein_gastkauf": False,
+    }
+    for schluessel, wert in erwartete_werte.items():
+        assert konfiguration.hole(db, schluessel) == wert
+        assert konfiguration.BESCHREIBUNGEN[schluessel].gruppe == "Gutscheine"
+    assert konfiguration.hole(db, "gutscheine_je_buchung").zahl is None
+    assert konfiguration.hole(db, "gutschein_betraege").betraege == [
+        Decimal("25.00"),
+        Decimal("50.00"),
+        Decimal("100.00"),
+    ]
+
+
+@pytest.mark.parametrize("roh,zahl", [(" volle einheiten ", None), ("01", 1), (" 3 ", 3)])
+def test_obergrenze_normalisiert(roh: str, zahl: int | None) -> None:
+    assert konfiguration.Obergrenze(roh).zahl == zahl
+
+
+@pytest.mark.parametrize("roh", ["0", "-1", "1.5", "", "NaN"])
+def test_obergrenze_nur_positive_ganze_zahlen(roh: str) -> None:
+    with pytest.raises(ValueError, match="ganze Zahl ab 1"):
+        konfiguration.Obergrenze(roh)
+
+
+def test_betragsliste_endlich_positiv() -> None:
+    liste = konfiguration.Betragsliste("100; 25,00; 50.00; 25")
+    assert liste.betraege == [Decimal("25.00"), Decimal("50.00"), Decimal("100.00")]
+    assert str(liste) == "25,00; 50,00; 100,00"
+
+
+def test_betragsliste_bis_zur_geldspeichergrenze() -> None:
+    assert konfiguration.Betragsliste("99999999,99").betraege == [Decimal("99999999.99")]
+
+
+@pytest.mark.parametrize("roh", ["100000000", "99999999.999"])
+def test_betragsliste_lehnt_zu_grosse_betraege_ab(roh: str) -> None:
+    with pytest.raises(ValueError):
+        konfiguration.Betragsliste(roh)
+
+
+@pytest.mark.parametrize(
+    "schluessel", ["gutschein_preis_mitglied", "gutschein_preis_nichtmitglied"]
+)
+def test_gutscheinpreise_bis_zur_geldspeichergrenze(db: Session, schluessel: str) -> None:
+    konfiguration.setze(db, schluessel, "99999999.99")
+    assert konfiguration.hole(db, schluessel) == Decimal("99999999.99")
+    konfiguration.setze(db, schluessel, "0")
+    assert konfiguration.hole(db, schluessel) == Decimal("0.00")
+
+
+@pytest.mark.parametrize(
+    "schluessel", ["gutschein_preis_mitglied", "gutschein_preis_nichtmitglied"]
+)
+@pytest.mark.parametrize("roh", ["100000000", "99999999.999", "0.001"])
+def test_gutscheinpreise_lehnen_zu_grosse_und_unrunde_betraege_ab(
+    db: Session, schluessel: str, roh: str
+) -> None:
+    with pytest.raises(ValueError):
+        konfiguration.setze(db, schluessel, roh)
+    assert db.query(Audit).count() == 0
+
+
+@pytest.mark.parametrize("roh", ["NaN", "sNaN", "Infinity", "-Infinity", "0", "-1", "", "0.001"])
+def test_betragsliste_lehnt_ungueltige_betraege_ab(roh: str) -> None:
+    with pytest.raises(ValueError):
+        konfiguration.Betragsliste(roh)
+
+
+@pytest.mark.parametrize(
+    "schluessel,roh",
+    [("gutschein_modell", "gratis"), ("gutschein_steuer", "keine")]
+    + [(k, "0") for k in ("gutschein_minuten", "gutschein_gueltig_tage", "freicode_gueltig_tage")]
+    + [(k, "-1") for k in ("gutschein_minuten", "gutschein_gueltig_tage", "freicode_gueltig_tage")]
+    + [
+        (k, wert)
+        for k in ("gutschein_preis_mitglied", "gutschein_preis_nichtmitglied")
+        for wert in ("-1", "NaN", "Infinity")
+    ],
+)
+def test_gutschein_einstellungen_validieren(db: Session, schluessel: str, roh: str) -> None:
+    with pytest.raises(ValueError):
+        konfiguration.setze(db, schluessel, roh)
+    assert db.query(Audit).count() == 0
+
+
+def test_gutschein_einstellungen_roundtrip_und_darstellung(db: Session) -> None:
+    konfiguration.setze(db, "gutschein_modell", "wert")
+    konfiguration.setze(db, "gutschein_preis_mitglied", "26,00")
+    konfiguration.setze(db, "gutschein_betraege", "100; 50")
+    konfiguration.setze(db, "gutscheine_je_buchung", "2")
+    db.commit()
+    assert konfiguration.hole(db, "gutschein_preis_mitglied") == Decimal("26.00")
+    assert konfiguration.hole(db, "gutschein_betraege").betraege == [
+        Decimal("50.00"),
+        Decimal("100.00"),
+    ]
+    assert konfiguration.hole(db, "gutscheine_je_buchung").zahl == 2
+    werte = {k: konfiguration.hole(db, k) for k in konfiguration.DEFAULTS}
+    darstellung = {
+        k: art for _, eintraege in konfiguration.gruppiert(werte) for k, _, _, art in eintraege
+    }
+    assert darstellung["mitgliedsgutschein_nur_mitglieder"] == "bool"
+    assert darstellung["gutschein_modell"] == "auswahl"
+    assert darstellung["gutscheine_je_buchung"] == "text"
+
+
+@pytest.mark.parametrize(
+    "schluessel,wert",
+    [
+        ("gutschein_preis_mitglied", "26"),
+        ("gutschein_steuer", "bei_einloesung"),
+        ("mitgliedsgutschein_nur_mitglieder", "nein"),
+    ],
+)
+def test_gutscheinangebot_markiert_tarif_und_konten(
+    db: Session, schluessel: str, wert: str
+) -> None:
+    kunde = Kunde(name="A", email="a@x.de")
+    anonym = Kunde(
+        name="Gelöscht",
+        email="geloescht@x.de",
+        anonymisiert_am=datetime.now(UTC),
+    )
+    db.add_all([kunde, anonym])
+    db.flush()
+    konfiguration.setze(db, schluessel, wert)
+    assert db.get(LesestandVersion, "tarife").geaendert
+    assert db.get(LesestandVersion, f"konto:{kunde.id}").geaendert
+    assert db.get(LesestandVersion, f"konto:{anonym.id}") is None
+
+
+def test_rechnungskunden_gutscheinkauf_markiert_nur_rechnungskunden(db: Session) -> None:
+    normal = Kunde(name="A", email="a@x.de")
+    rechnung = Kunde(name="B", email="b@x.de", rechnungskunde=True)
+    db.add_all([normal, rechnung])
+    db.flush()
+    konfiguration.setze(db, "rechnungskunden_gutscheinkauf", "nein")
+    assert db.get(LesestandVersion, f"konto:{rechnung.id}").geaendert
+    assert db.get(LesestandVersion, f"konto:{normal.id}") is None

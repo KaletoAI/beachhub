@@ -4,6 +4,10 @@
 <p><span class="badge">{{ r.status }}</span>
 {% if integritaet %}<span class="badge">PDF unverändert</span>{% else %}<span class="badge">PDF fehlt oder verändert</span>{% endif %}</p>
 
+{% if gutscheinbeleg %}
+<p class="karte">Gutscheinbeleg: Änderungen erfolgen über <a href="/admin/gutscheine">die Gutscheinrückgabe</a> oder den <a href="/admin/belegung">Buchungsstorno</a>. Die zusammengehörenden Belege und Gutscheinbestände werden dort gemeinsam geprüft.</p>
+{% endif %}
+
 <div class="zeile">
 <div class="karte">
   <h2>Adresse</h2>
@@ -41,7 +45,7 @@
 
 <div class="karte">
   <h2>Positionen</h2>
-  {% set auswaehlbar = r.art != "storno" and r.status != "storniert" %}
+  {% set auswaehlbar = not gutscheinbeleg and r.art != "storno" and r.status != "storniert" %}
   <table>
     <tr>{% if auswaehlbar %}<th></th>{% endif %}<th>Text</th><th class="rechts">USt</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
     {% for p in r.positionen %}<tr>
@@ -92,7 +96,7 @@
 {% endif %}
 
 <div class="zeile">
-{% if r.status == "offen" %}
+{% if not gutscheinbeleg and r.status == "offen" %}
 <div class="karte schmal">
   <h2>Als bezahlt markieren</h2>
   <form method="post" action="/admin/rechnungen/{{ r.id }}/bezahlt">
@@ -102,7 +106,7 @@
 </div>
 {% endif %}
 
-{% if r.status != "storniert" and r.art != "storno" %}
+{% if not gutscheinbeleg and r.status != "storniert" and r.art != "storno" %}
 <div class="karte schmal">
   <h2>Stornorechnung erzeugen</h2>
   <form method="post" action="/admin/rechnungen/{{ r.id }}/storno">
