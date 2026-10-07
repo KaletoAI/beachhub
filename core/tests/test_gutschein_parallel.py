@@ -177,6 +177,93 @@ def _warte_auf_lock(pid):
     pytest.fail("Zweite PostgreSQL-Session wartet nicht beobachtbar auf Vorgangslock")
 
 
+def test_admin_storno_neuer_freicode_einloeser_waehrend_kundenlock(db, gwelt, admin, mail_ausgang):
+    from threading import get_ident
+
+    from beachhub_core.models import AdminUser, Buchung, GutscheinEinloesung, Kunde, Storno
+    from beachhub_core.routes.belegung import buchung_storno
+    from beachhub_core.services import gutscheine, online_buchung
+    from beachhub_shared.zeit import kombiniere
+    from starlette.requests import Request
+
+    g = gutscheine.stelle_freicodes_aus(
+        db, anzahl=1, gueltig_bis=None, max_einloesungen=2, admin_user_id=None
+    )[0]
+    code, gid, fid, kid, gast, aid = (
+        g.code,
+        g.id,
+        gwelt.feld.id,
+        gwelt.mitglied.id,
+        gwelt.nichtmitglied.id,
+        admin[0].id,
+    )
+
+    def einloesen(s, kunde_id, tag):
+        erg = online_buchung.anfragen(
+            s,
+            kunde=s.get(Kunde, kunde_id),
+            anfrage_id=uuid.uuid4(),
+            feld_id=fid,
+            beginn=kombiniere(date(2027, 12, tag), uhrzeit(19)),
+            ende=kombiniere(date(2027, 12, tag), uhrzeit(21)),
+            rueckkehr_url="https://example.org/",
+            gutschein_codes=[code],
+        )
+        assert erg.antwort.status == "bestaetigt"
+        return s.scalar(
+            select(GutscheinEinloesung.buchung_id).where(
+                GutscheinEinloesung.gutschein_id == gid, GutscheinEinloesung.kunde_id == kunde_id
+            )
+        )
+
+    bid = einloesen(db, kid, 1)
+    db.commit()
+    db.execute(select(Kunde).where(Kunde.id == kid).with_for_update()).scalar_one()
+    kundenmengen, worker = [], []
+
+    def beobachte(conn, cursor, statement, parameters, context, executemany):
+        if (
+            worker
+            and get_ident() == worker[0]
+            and "FROM kunde" in statement
+            and "FOR UPDATE" in statement
+        ):
+            kundenmengen.append(set(parameters.values()))
+
+    def admin_storno(s):
+        worker.append(get_ident())
+        return buchung_storno(
+            Request({"type": "http"}),
+            bid,
+            grund="Parallel",
+            kostenfrei="ja",
+            admin=s.get(AdminUser, aid),
+            db=s,
+        ).status_code
+
+    event.listen(engine, "before_cursor_execute", beobachte)
+    pid, future, thread = _starte(admin_storno)
+    try:
+        _warte_auf_lock(pid)
+        assert not future.done()
+        # Echte zweite Einlösung erweitert Inhaber UND historische Einlöser, nachdem
+        # der Admin die Menge entdeckt hat und auf dem ersten Kunden wartet.
+        einloesen(db, gast, 2)
+        db.commit()
+        assert future.result(timeout=5) == 303
+    finally:
+        db.rollback()
+        thread.join(timeout=5)
+        event.remove(engine, "before_cursor_execute", beobachte)
+    assert gast not in kundenmengen[0]
+    assert len(kundenmengen) == 2 and {kid, gast} <= kundenmengen[1]
+    db.expire_all()
+    assert db.get(Buchung, bid).status == Buchung.STORNIERT
+    assert db.query(Storno).count() == 1
+    assert db.query(GutscheinEinloesung).filter_by(status="bestaetigt").count() == 1
+    assert len({(m["an"], m["betreff"]) for m in mail_ausgang}) == len(mail_ausgang)
+
+
 def test_zwei_kunden_selber_code_serialisiert_vorbereitung(db: Session, gwelt) -> None:
     g = kaufgutschein(db, gwelt)
     db.commit()

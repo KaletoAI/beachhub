@@ -99,6 +99,9 @@ Der Rechnungskreis behält seine bisherigen Jahreszähler; steuerfreie Kaufbeleg
 eigenen Kreis `gutschein` mit Nummern `GB-JJJJ-NNNNN`. Freischaltcodes haben Steuer `keine`.
 Freischaltcodes lassen sich unter **Gutscheine → Freischaltcodes** ausstellen und als Serie
 exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsänderungen mit Audit.
+`GET /admin/gutscheine` paginiert mit `seite` ab 1 (500 Einträge), sortiert nach
+Ausstellungszeit absteigend und UUID. Art, Status und Serie bleiben in den Seitenlinks
+erhalten. Käufer und Inhaber werden je Seite mit einer gemeinsamen Kundenabfrage geladen.
 Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
 dauerhaft gesperrt. Kauf, atomare Einlösung, getrennte Buchungsbelege, Rückabwicklung und
 signierter Gutscheinbestand mit offenen Käufen sind im Hauptsystem-Kanal implementiert.
@@ -114,6 +117,13 @@ Zahlungen und Gutscheine jeweils UUID-sortiert und lädt deren Beziehungen frisc
 `bereite_buchungen_vor` ermittelt dieselbe Menge für Batch-Stornos vor weiteren Sperren.
 Ein zwischenzeitlicher Besitzer- oder Zahlungswechsel kann einen internen Retry der gesamten
 Transaktion erfordern; zusätzliche Kunden dürfen nicht nachträglich gesperrt werden.
+`gutschein_sperren.fuehre_transaktion_aus(db, vorgang)` wiederholt ausschließlich
+`GutscheinVorbereitungWiederholen` bis zu drei Mal nach vollständigem Rollback und committet
+den erfolgreichen Versuch. Die fünf Adminaktionen Buchungsstorno, Kulanz, Sperranlage,
+verdrängende Daueranlage und Dauerbeendigung laden ihre Modelle und Entscheidungen je
+Versuch neu. Reservierungsverfall, Gutscheinverfall und Kaufabbruch entdecken ihre ganze
+Batchmenge erneut. Erschöpfte Adminversuche ergeben einen deutschen Formularfehler;
+Jobs geben nach Rollback den Fehler an ihre bestehende Protokollierung weiter.
 Die Online-Kundensperre liegt bereits außerhalb des Buchungs-Savepoints. Das Limit zählt zehn
 Fehlversuche je Konto in 60 Minuten mit der Fachuhr; eine `anfrage_id` dedupliziert Wiederholungen.
 Codehaltige Buchungen prüfen das Limit außerhalb ihres Savepoints. Abgelehnte Anfragen
@@ -193,7 +203,10 @@ Kein Banktransfer und kein Kundenguthaben. Wiederholung liefert null Euro ohne w
 Reaktivierung ist dauerhaft verboten. Schon vollständig korrigierte Kaufbasis erzeugt keinen
 weiteren Gegenbeleg und keine weitere Erstattungsanweisung; Teilkorrekturen verhindern Rückgabe.
 Die steuerfreie Mehrzweck-Kaufbasis wird ohne zweiten Umsatzsteuerausweis storniert.
-Die Adminaktion erfordert Rolle und CSRF. Öffentliche Rechnungsdienste prüfen zentral
+Die Adminaktion erfordert Rolle und CSRF. Der optionale neue Rückgabegegenbeleg wird nach
+Commit über `belege_versenden` als PDF archiviert und ausschließlich an den ursprünglichen
+Käufer versandt. Wiederholungen ohne neuen Gegenbeleg starten keinen Nachlauf;
+Nachlauffehler lassen die Rückgabe bestehen. Öffentliche Rechnungsdienste prüfen zentral
 `pruefe_allgemeinen_rechnungsvorgang`; ausschließlich koordinierte Fachpfade nutzen die
 privaten Korrekturhilfen. Keine Ausnahme aus HTTP-Daten. Freicode-Einlösungslimits liegen
 zwischen 1 und 2147483647; größere Werte ergeben einen deutschen Formularfehler.

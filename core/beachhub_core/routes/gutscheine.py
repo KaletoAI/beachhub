@@ -2,9 +2,9 @@ import uuid
 from datetime import timedelta
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,7 @@ from beachhub_core import auth, clock
 from beachhub_core.database import get_db
 from beachhub_core.models import AdminUser, Audit, Feld, Gutschein, GutscheinEinloesung, Kunde
 from beachhub_core.routes._form import fehlertext, pflicht, t_datum, t_int, t_uuid
-from beachhub_core.services import gutschein_sperren, gutscheine, konfiguration
+from beachhub_core.services import benachrichtigung, gutschein_sperren, gutscheine, konfiguration
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
@@ -31,6 +31,7 @@ def liste(
     status: str = "",
     art: str = "",
     serie: str = "",
+    seite: int = Query(1, ge=1),
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
@@ -42,11 +43,31 @@ def liste(
     ):
         if wert:
             stmt = stmt.where(spalte == wert)
+    anzahl = db.scalar(select(func.count()).select_from(stmt.order_by(None).subquery())) or 0
+    seiten = max(1, (anzahl + 499) // 500)
+    seite = min(seite, seiten)
+    bestand = db.scalars(stmt.offset((seite - 1) * 500).limit(500)).all()
+    kunde_ids = {
+        kid for g in bestand for kid in (g.kaeufer_kunde_id, g.inhaber_kunde_id) if kid is not None
+    }
+    kunden = {k.id: k for k in db.scalars(select(Kunde).where(Kunde.id.in_(kunde_ids)))}
+
+    def seiten_url(n: int) -> str:
+        return "/admin/gutscheine?" + urlencode(
+            {"status": status, "art": art, "serie": serie, "seite": n}
+        )
+
     return render(
         request,
         "gutscheine/liste.html",
         admin=admin,
-        gutscheine=db.scalars(stmt.limit(500)).all(),
+        gutscheine=bestand,
+        kunden=kunden,
+        anzahl=anzahl,
+        seite=seite,
+        seiten=seiten,
+        vorher=seiten_url(seite - 1) if seite > 1 else None,
+        weiter=seiten_url(seite + 1) if seite < seiten else None,
         status=status,
         art=art,
         serie=serie,
@@ -232,10 +253,13 @@ def rueckgabe(
         assert kaeufer is not None
         betrag = ergebnis.manuell_zu_erstatten
         name = kaeufer.name
+        beleg_id = ergebnis.korrekturbeleg.id if ergebnis.korrekturbeleg is not None else None
         db.commit()
     except FEHLER as e:
         db.rollback()
         return mit_flash(RedirectResponse(ziel, status_code=303), _fehler(e), "fehler")
+    if beleg_id is not None:
+        benachrichtigung.belege_versenden(db, [beleg_id])
     betrag_text = f"{betrag:.2f}".replace(".", ",")
     hinweis = (
         f"Gutschein zurückgegeben. {betrag_text} € anschließend manuell "

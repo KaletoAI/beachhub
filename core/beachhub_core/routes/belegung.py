@@ -22,6 +22,7 @@ from beachhub_core.models import (
     Rechnung,
     RechnungPosition,
     Sperre,
+    Storno,
 )
 from beachhub_core.routes._form import fehlertext, pflicht, t_betrag, t_datum, t_zeit
 from beachhub_core.services import (
@@ -29,6 +30,7 @@ from beachhub_core.services import (
     benachrichtigung,
     buchungen,
     dauerbuchungen,
+    gutschein_sperren,
     konfiguration,
     kundengruppen,
     pin,
@@ -87,6 +89,7 @@ FORM_FEHLER = (
     ValueError,
     KeyError,
     IntegrityError,
+    gutschein_sperren.GutscheinVorbereitungWiederholen,
 )
 
 
@@ -311,16 +314,22 @@ def buchung_storno(
         return mit_flash(
             RedirectResponse("/admin/belegung", status_code=303), "Buchung nicht gefunden", "fehler"
         )
-    try:
-        s = storno.storniere(
+
+    def vorgang() -> Storno:
+        frisch = db.get(Buchung, buchung_id)
+        if frisch is None:
+            raise ValueError("Buchung nicht gefunden")
+        return storno.storniere(
             db,
-            b,
+            frisch,
             durch="betreiber",
             admin_user_id=admin.id,
             grund=grund,
             kostenfrei={"ja": True, "nein": False}.get(kostenfrei),
         )
-        db.commit()
+
+    try:
+        s = gutschein_sperren.fuehre_transaktion_aus(db, vorgang)
     except FORM_FEHLER as e:
         db.rollback()
         return render(
@@ -349,18 +358,19 @@ def buchung_kulanz(
         return mit_flash(
             RedirectResponse("/admin/belegung", status_code=303), "Buchung nicht gefunden", "fehler"
         )
-    if b.storno is None:
-        return render(
-            request,
-            "belegung/buchung.html",
-            admin=admin,
-            fehler="Kein Storno vorhanden",
-            **_buchung_ctx(db, b),
-        )
-    war_kostenfrei = b.storno.kostenfrei
+
+    def vorgang() -> bool:
+        frisch = db.get(Buchung, buchung_id)
+        if frisch is None:
+            raise ValueError("Buchung nicht gefunden")
+        if frisch.storno is None:
+            raise ValueError("Kein Storno vorhanden")
+        war_kostenfrei = frisch.storno.kostenfrei
+        storno.kulanz(db, frisch.storno, admin_user_id=admin.id, grund=grund)
+        return war_kostenfrei
+
     try:
-        storno.kulanz(db, b.storno, admin_user_id=admin.id, grund=grund)
-        db.commit()
+        war_kostenfrei = gutschein_sperren.fuehre_transaktion_aus(db, vorgang)
     except FORM_FEHLER as e:
         db.rollback()
         return render(
@@ -417,16 +427,18 @@ async def sperre_anlegen(
             for k, v in form.items()
             if k.startswith("entscheidung_")
         }
-        sperren.lege_an(
+        gutschein_sperren.fuehre_transaktion_aus(
             db,
-            feld_ids=feld_ids,
-            beginn=beginn,
-            ende=ende,
-            grund=grund,
-            admin_user_id=admin.id,
-            entscheidungen=entscheidungen,
+            lambda: sperren.lege_an(
+                db,
+                feld_ids=feld_ids,
+                beginn=beginn,
+                ende=ende,
+                grund=grund,
+                admin_user_id=admin.id,
+                entscheidungen=entscheidungen,
+            ),
         )
-        db.commit()
     except FORM_FEHLER as e:
         db.rollback()
         betroffen = (
@@ -601,15 +613,17 @@ async def dauer_anlegen(
             for k, v in form.items()
             if k.startswith("entscheidung_")
         }
-        d = dauerbuchungen.lege_an(
+        d = gutschein_sperren.fuehre_transaktion_aus(
             db,
-            **args,
-            admin_user_id=admin.id,
-            auslassen=auslassen,
-            entscheidungen=entscheidungen,
-            rechnungskunde_setzen=form.get("rechnungskunde_setzen") == "1",
+            lambda: dauerbuchungen.lege_an(
+                db,
+                **args,
+                admin_user_id=admin.id,
+                auslassen=auslassen,
+                entscheidungen=entscheidungen,
+                rechnungskunde_setzen=form.get("rechnungskunde_setzen") == "1",
+            ),
         )
-        db.commit()
     except FORM_FEHLER as e:
         db.rollback()
         try:
@@ -738,14 +752,20 @@ def dauer_beenden(
         return mit_flash(
             RedirectResponse("/admin/belegung", status_code=303), "Nicht gefunden", "fehler"
         )
-    try:
+
+    def vorgang() -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        frisch = db.get(Dauerbuchung, dauer_id)
+        if frisch is None:
+            raise ValueError("Dauerbuchung nicht gefunden")
         ab_datum = date.fromisoformat(ab)
         kandidaten = [
-            b.id for b in d.buchungen if b.aktiv and b.beginn >= kombiniere(ab_datum, time(0))
+            b.id for b in frisch.buchungen if b.aktiv and b.beginn >= kombiniere(ab_datum, time(0))
         ]
-        belege = dauerbuchungen.beende(db, d, ab=ab_datum, admin_user_id=admin.id)
-        beleg_ids = [b.id for b in belege]
-        db.commit()
+        belege = dauerbuchungen.beende(db, frisch, ab=ab_datum, admin_user_id=admin.id)
+        return kandidaten, [b.id for b in belege]
+
+    try:
+        kandidaten, beleg_ids = gutschein_sperren.fuehre_transaktion_aus(db, vorgang)
     except FORM_FEHLER as e:
         db.rollback()
         return mit_flash(

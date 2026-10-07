@@ -24,6 +24,10 @@ zu erhöhen. Die Rückgabe vollständig ungenutzter Kaufgutscheine sperrt dauerh
 die manuelle Erstattung an den ursprünglichen Käufer; sie erzeugt kein Kundenguthaben.
 Käufer und Einlöser behalten getrennte Belegrechte. Signierter Bestand und offene Käufe
 werden über den bestehenden Kanal verteilt; offene Kaufcodes bleiben geheim.
+Die Verwaltung zeigt Käufer und Inhaber auf filtertreuen Seiten mit je 500 Einträgen.
+Auch Rückgabegegenbelege werden nach Commit als Käufer-PDF erzeugt und versandt.
+Admin-Stornos, Batchaktionen und Verfallsjobs wiederholen geänderte Gutscheinzuordnungen
+bis zu drei Mal als vollständige Transaktion; erschöpfte Versuche bleiben ohne Teilwirkung.
 Details stehen im [Betriebshandbuch](docs/betrieb/hauptsystem.md#5c-gutscheine-und-freischaltcodes)
 und im [aktuellen Umsetzungsplan](docs/superpowers/plans/2026-10-05-stufe-1a-III-gutscheine.md).
 Der historische Plan vom 03.10.2026 bleibt als abgelöster Entwurf erhalten.

@@ -332,7 +332,10 @@ Das Einlösungslimit ist zwischen 1 und 2147483647 wählbar; größere Werte wer
 Formularfehler abgewiesen.
 Freischaltcodes bleiben auch im Wertgutscheinmodell Buchungseinheiten ohne Geldwert und Steuerbeleg.
 Feld und Buchungszeitraum sind optional. Eine benannte Serie lässt sich über die Übersicht
-als CSV exportieren; der Export enthält alle Freischaltcodes der Serie, unabhängig vom Listenlimit.
+als CSV exportieren; der Export enthält alle Freischaltcodes der Serie.
+Die Übersicht zeigt Käufer und Inhaber und lässt sich mit **Weiter** und **Zurück** in
+Seiten mit je 500 Einträgen durchblättern. Art, Status und Serie bleiben dabei erhalten;
+auch alle Codes einer 1000er-Serie sind so erreichbar. Unzugeordnete Freicodes zeigen „–“.
 
 Die Detailseite zeigt Käufer, Inhaber, Einlösungen und Änderungen. **Sperren** verhindert weitere
 Nutzungen. **Gültigkeit speichern** ändert allein das Ablaufdatum; die optionale Reaktivierung
@@ -349,6 +352,10 @@ Kostenfrei zurückgenommene Einheiten und abgebrochene Gutscheinreservierungen s
 ungenutzt. Das System prüft Bestand und Kaufbasis gemeinsam, erzeugt den Kaufgegenbeleg und
 sperrt den Gutschein dauerhaft. Bei Mehrzweckgutscheinen wird nur der steuerfreie Kaufbeleg
 storniert. Betrag und Grund erscheinen am Gutschein und im Änderungsprotokoll.
+Nach erfolgreichem Speichern wird der neue Gegenbeleg als PDF archiviert und dem
+ursprünglichen Käufer über den vorhandenen Belegversand zugestellt. Ein anderer Inhaber
+oder Geschenkempfänger erhält dieses PDF nicht. PDF-/Versandfehler ändern die Rückgabe
+nicht; die vorhandenen Betreiberhinweise und Logs nennen fehlgeschlagene Nachläufe.
 
 Den angezeigten Betrag anschließend **manuell an den ursprünglichen Käufer** erstatten,
 auch wenn inzwischen jemand anderes Inhaber ist. Diese Aktion führt keinen Banktransfer aus
@@ -396,6 +403,12 @@ Kauf, Einlösung, Storno und Rückgabe sperren zuerst sämtliche beteiligten Kun
 Zahlungen und Gutscheine, jeweils nach UUID sortiert. Erst danach folgen weitere Buchungs-,
 Feld- und Belegsperren. Ändert sich eine Zuordnung während des Wartens, wird der Vorgang
 vollständig zurückgerollt und neu vorbereitet; es gibt keine teilweise Erstattung.
+Bei Buchungsstorno, Kulanz, Sperranlage, verdrängender Aboanlage und Abobeendigung geschieht
+dies automatisch bis zu drei Mal. Anhaltende Änderungen ergeben eine verständliche
+Aufforderung zum erneuten Ausführen ohne Teilwirkung. Reservierungsverfall, Gutscheinverfall
+und Kaufabbruch versuchen ihren gesamten Batch ebenfalls bis zu drei Mal unmittelbar neu;
+nach erschöpften Versuchen wird der Fehler protokolliert. Mails und PDFs entstehen erst
+nach dem erfolgreichen Speichern.
 
 Ein Kaufwunsch speichert Preis, Käufergruppe/Steuersatz, Modell, Minuten/Wert,
 Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsfrist. Spätere Einstellungs- oder

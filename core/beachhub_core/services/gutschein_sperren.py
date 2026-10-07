@@ -1,8 +1,9 @@
 """Vollständige Vorgangslocks vor Buchungs-Savepoints und Finanzmutationen."""
 
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import timedelta
+from typing import TypeVar
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -25,6 +26,32 @@ class GutscheinVorbereitungWiederholen(Exception):  # noqa: N818
     Kein fachlicher Ablehnungsgrund und niemals nachträglich Kunden nachsperren.
     Aufrufer dürfen vor erfolgreicher Vorbereitung keine externen Effekte auslösen.
     """
+
+
+T = TypeVar("T")
+
+
+def fuehre_transaktion_aus(db: Session, vorgang: Callable[[], T]) -> T:
+    """Bis zu drei vollständige Versuche, ausschließlich bei neuer Gutscheinzuordnung.
+
+    Der Aufrufer lädt Modelle, Entscheidungen und die gesamte Batchmenge in `vorgang`
+    frisch. Jeder Fehlversuch gibt alle Locks und Mutationen per äußerem Rollback frei.
+    Externe Nachläufe gehören erst hinter die erfolgreiche Rückgabe dieser Funktion.
+    Andere Ausnahmen bleiben unverändert beim bisherigen Aufrufer.
+    """
+    for versuch in range(3):
+        try:
+            ergebnis = vorgang()
+            db.commit()
+            return ergebnis
+        except GutscheinVorbereitungWiederholen as exc:
+            db.rollback()
+            if versuch == 2:
+                raise GutscheinVorbereitungWiederholen(
+                    "Die Gutscheinzuordnung hat sich mehrfach geändert. "
+                    "Bitte die Aktion erneut ausführen."
+                ) from exc
+    raise AssertionError("Transaktionsversuche erschöpft")
 
 
 class GutscheinRateLimitFehler(Exception):  # noqa: N818

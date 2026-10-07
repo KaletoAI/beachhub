@@ -12,6 +12,7 @@ from beachhub_core.services import (
     benachrichtigung,
     guthaben,
     gutschein_kauf,
+    gutschein_sperren,
     gutscheine,
     halle,
     lesestand,
@@ -25,24 +26,23 @@ _scheduler: BackgroundScheduler | None = None
 
 def verfall_ausfuehren(db: Session) -> int:
     """Reservierungen mit abgelaufener Zahlungsfrist verfallen lassen (A-ZAHL-3)."""
-    verfallen = online_buchung.verfalle_abgelaufene(db)
-    db.commit()
+    verfallen = gutschein_sperren.fuehre_transaktion_aus(
+        db, lambda: online_buchung.verfalle_abgelaufene(db)
+    )
     for b in verfallen:
         benachrichtigung.zahlungsfrist_abgelaufen(db, b)
     return len(verfallen)
 
 
 def gutschein_verfall_ausfuehren(db: Session) -> int:
-    anzahl = gutscheine.verfalle(db)
-    db.commit()
-    return anzahl
+    return gutschein_sperren.fuehre_transaktion_aus(db, lambda: gutscheine.verfalle(db))
 
 
 def gutschein_kaufabbruch_ausfuehren(db: Session) -> int:
     """Eigene Transaktion: keine neuen Kaufkunden nach Buchungs-/Belegsperren entdecken."""
-    anzahl = gutschein_kauf.brich_abgelaufene_ab(db)
-    db.commit()
-    return anzahl
+    return gutschein_sperren.fuehre_transaktion_aus(
+        db, lambda: gutschein_kauf.brich_abgelaufene_ab(db)
+    )
 
 
 def _job_gutschein_kaufabbruch() -> None:
