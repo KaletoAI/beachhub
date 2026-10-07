@@ -128,13 +128,17 @@ Nummerierung `A-<Bereich>-<Nr>` zur Referenz in Tickets und Tests.
 
 ### 3.9a Gutscheine und Freischaltcodes
 
-**Umsetzungsstand 05.10.2026 (Verwaltung):** Ausgabe von 1–1000 Freischaltcodes,
+**Umsetzungsstand 07.10.2026 (Stufe 1a-III):** Ausgabe von 1–1000 Freischaltcodes,
 Serien-CSV, Verwaltungsübersicht, Sperren, Gültigkeitsänderung und der Nachtjob um 00:20
 Europe/Berlin sind vorhanden. Freicodes speichern die Ausgabedauer und bleiben Einheiten
 auch beim globalen Wertmodell. Das Ablaufdatum gilt einschließlich; Reaktivierung erhält
 Verbrauch und Restwert. Ein Rückgabemarker verbietet jede Reaktivierung dauerhaft.
 Kauf, Einlösung, Rückabwicklung, manuelle Rückgabe und signierter Gutscheinbestand sind
-inzwischen im Hauptsystem implementiert; die Verkaufs- und Codeeingabeoberfläche bleibt Stufe 2.
+im Hauptsystem und seinen Kanalverträgen implementiert. Verkaufs- und Codeeingabeoberfläche
+einschließlich IP-Limit sowie der echte Zahlungsanbieter bleiben für Stufe 2 offen.
+Die E2E-Prüfung verbindet Portal-Briefkasten, Hauptsystem-Kanal, verifizierte Fakezahlung und
+signierten Bestand mit beiden Modellen/Steuerzeitpunkten und getrennten Käufer-/Einlöserrechten.
+Sie ersetzt keine produktive Zahlungs- oder Hallenhardwareanbindung.
 
 Zwei Vorgänge, die der Betreiber unterscheidet: Jemand **kauft** einen Slot in der Zukunft ohne Datum und Zeit, und jemand **löst** einen Code bei der Platzbuchung ein – wobei der Code entweder gekauft oder vom Betreiber ausgestellt sein kann.
 
@@ -154,7 +158,7 @@ Der Betreiber hat sich am 23.09.2026 für einen Gutschein entschieden, der eine 
 
   **Vom Steuerberater bestätigt** (Ⓞ-8, Betreiber 03.10.2026): Einzweckgutschein mit dem Satz des Käufers, Gratis-Codes ohne Steuer. Ein Wechsel der Einstellung gilt nur für danach verkaufte Gutscheine; jeder Gutschein speichert, nach welcher Variante er verkauft wurde.
 - **A-GUT-6** **Storno einer mit Gutschein gedeckten Buchung.** Bei kostenfreiem bestätigtem Storno oder nachträglicher Kulanz im Modell `einheit` werden Einlösungen rückgängig gemacht und der Einlöser wird Inhaber. Die ursprüngliche Gültigkeit bleibt bestehen; gesperrte, verfallene oder zurückgegebene Codes werden nicht automatisch reaktiviert. Freischaltcodes und Einheiten erzeugen kein Gutscheinwertguthaben. Bei `beim_kauf` bleibt der Kaufbeleg bestehen; bei `bei_einloesung` wird der Einlösungssteuerbeleg korrigiert. Modell `wert`: Der verbrauchte Wert wird genau einmal dem **Einlöser** mit Korrekturbeleg als Guthaben gutgeschrieben; der Gutscheinrest steigt nicht. Der Gegenbeleg gehört zum Kunden des Ursprungsbelegs, bei Steuer beim Kauf dem Käufer, und sein PDF wird nur diesem zugestellt. Teilwertkorrekturen verwenden kumulativ bereits korrigierte Brutto-/Nettobeträge; erst vollständig korrigierte Ursprungpositionen erhalten einen Korrekturmarker. Der separate Geld-/Guthabenrest folgt dem bisherigen bezahlten-Anteil-Algorithmus, frühere Korrekturen werden nicht erneut erstattet. Ein Einheitsgutschein über 26 € mit 15 € Geldrest erzeugt somit genau 15 € Guthaben. Kostenpflichtige Absagen verändern den Gutscheinverbrauch nicht. Eine noch **reservierte**, nicht bestätigte Einlösung wird bei Abbruch oder Zahlungsfristverfall lediglich aufgehoben: ursprünglichen Bestand einschließlich Wertgutscheinrest zurückgeben, kein Wertgutschein-Guthaben. Das dabei reservierte Kundenguthaben wird zentral ebenfalls genau einmal zurückgebucht, einschließlich kostenfreier Betreiber- und Batch-Stornos ohne bereits vorhandene Geldrechnung. Der Buchungszahlungs-Callback prüft die gespeicherte Frist selbst und bestätigt nach deren Ablauf nichts mehr; Bestandsrücknahme und Spätzahlungsguthaben sind atomar. Auf der Frist gilt wie im Verfallsjob noch kein Verfall. Alle Vorgänge bereiten Kunden, Zahlungen und Gutscheine vor Buchungs-/Rechnungs-/Nummernkreissperren vollständig vor, auch im Batch. Versand aller Gegenbelege und zutreffender Rückgabe-/Guthabenhinweise erfolgt nach Commit, mit Fehlerisolierung je Beleg. Freischaltcodes: A-STORNO-7.
-- **A-GUT-7** **Missbrauchsschutz:** Codes mit mindestens 60 Bit Entropie aus einem Alphabet ohne verwechselbare Zeichen (kein 0/O, 1/I); Rate-Limit auf Einlöseversuche je Konto und IP. Das Hauptsystem erzeugt 13 Zufallszeichen aus `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` und zeigt sie in Gruppen `4-4-5` an. Groß-/Kleinschreibung, Leerzeichen und Bindestriche werden normalisiert; eine danach leere Eingabe bleibt ungültig. Je Konto sind zehn codehaltige abgelehnte neue Buchungsanfragen in 60 Minuten erlaubt; danach gilt `zu_viele_versuche`. Eine Anfrage zählt einmal, auch bei mehreren ungültigen Codes. Erneute Zustellung derselben Anfrage zählt nicht erneut. Der Fehlversuch bleibt nach dem Zurückrollen des Buchungs-Savepoints gespeichert; die Kundensperre wird vorher erworben. Das IP-Limit liegt im Portal. Diese Regeln sind in codehaltigen Buchungen des Hauptsystem-Kanals implementiert. Besitzer-/Zahlungswechsel führen vor externen Effekten zum Rollback und erneuter vollständiger Vorbereitung der Transaktion, höchstens dreimal.
+- **A-GUT-7** **Missbrauchsschutz:** Codes mit mindestens 60 Bit Entropie aus einem Alphabet ohne verwechselbare Zeichen (kein 0/O, 1/I); Rate-Limit auf Einlöseversuche je Konto und IP. Das Hauptsystem erzeugt 13 Zufallszeichen aus `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` und zeigt sie in Gruppen `4-4-5` an. Groß-/Kleinschreibung, Leerzeichen und Bindestriche werden normalisiert; eine danach leere Eingabe bleibt ungültig. Je Konto sind zehn codehaltige abgelehnte neue Buchungsanfragen in 60 Minuten erlaubt; danach gilt `zu_viele_versuche`. Eine Anfrage zählt einmal, auch bei mehreren ungültigen Codes. Erneute Zustellung derselben Anfrage zählt nicht erneut. Der Fehlversuch bleibt nach dem Zurückrollen des Buchungs-Savepoints gespeichert; die Kundensperre wird vorher erworben. Das IP-Limit ist mit der künftigen Codeeingabe im Portal noch umzusetzen. Codeerzeugung, Normalisierung und Kontolimit sind im Hauptsystem-Kanal implementiert. Besitzer-/Zahlungswechsel führen vor externen Effekten zum Rollback und erneuter vollständiger Vorbereitung der Transaktion, höchstens dreimal.
 - **A-GUT-8** Der Kauf setzt ein Portalkonto voraus (Betreiber 23.09.2026). Einstellung `gutschein_gastkauf` (Vorgabe nein) ist für einen späteren Kauf ohne Anmeldung vorgesehen, aber nicht Teil von Stufe 2.
   Der Kauf über `gutschein_kaufen` ist im Hauptsystem-Kanal implementiert. Der Wunsch speichert Käufergruppe/Steuersatz, Preis, Modell, Minuten/Wert, Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsdeadline; spätere Änderungen verschieben sie nicht. Guthaben wird beim Kauf nicht verrechnet. Das tatsächliche Abschlussdatum startet die Gültigkeit; `ausgestellt_am` bleibt Zeitpunkt des Wunsches. Verifizierter Anbieter, passende Providerzuordnung und bezahlter Providerstatus mit endlichem positivem Betrag sind Voraussetzung. Auf `now >= kauf_reserviert_bis` gilt der Kauf bereits als abgelaufen, auch ohne den eigenständigen minütlichen Kaufabbruchjob. Unterzahlung beendet den Kauf terminal als `abgebrochen` und schreibt den tatsächlichen Eingang einmal als Käuferguthaben gut; Überzahlung aktiviert genau einen Gutschein und schreibt nur den Überschuss einmal gut. Zahlungen nach Abbruch/Fristablauf erzeugen einmal Käuferguthaben und einen Betreiberhinweis, keine Aktivierung. Doppelte Rückmeldungen erzeugen keinen zusätzlichen Beleg oder Guthabeneintrag. Kunden, Zahlungen und Kaufgutscheine werden vollständig vor weiteren Schreibsperren vorbereitet und frisch revalidiert. Offene und abgebrochene Codes bleiben in Antworten, Oberfläche, CSV, Code-Mails und Audit-Snapshots geheim. Beleg-PDF und Käufer-/Geschenk-Code-Mails laufen nach Commit; das Käufer-PDF geht ausschließlich an den Käufer. Der Mehrzweckkaufbeleg im GB-Kreis zeigt keine Umsatzsteuer und nennt den Steuerzeitpunkt. Käufergruppe und Einlösbarkeit werden getrennt genannt; bei Mehrzweckgutscheinen bleibt die Käufergruppe informativ. PDF-/Versandfehler isolieren den betroffenen Nachlauf, begründen jedoch keine automatische erneute SMTP-Zustellung. Signierter Gutscheinbestand ist implementiert; die Verkaufsoberfläche folgt in Stufe 2.
   Der Kaufhandler übergibt die vertrauenswürdige Konto-ID an den Kaufdienst. Nach dem Erwerb der Kundensperre wird diese mit der frisch geladenen Portalbindung exakt verglichen. Eine während des Wartens geänderte Bindung lehnt den Kauf des alten Kontos vor Wunsch-, Zahlungs- oder Provider-Sitzungsanlage ab; die behauptete Portal-Kunden-ID begründet keine Berechtigung.
@@ -276,6 +280,11 @@ Dazu kommen die schon bisher konfigurierbaren Fristen, Vorläufe, Temperaturen u
 
 PostgreSQL. Alle Tabellen mit `id` (UUID), `created_at`, `updated_at`.
 
+Stufe 1a-III ergänzt die Gutschein- und Belegbasis mit Revision `0015` direkt nach `0014`.
+Vorhandene Jahreszähler werden in den Kreis `rechnung` übernommen; der zusätzliche Kreis
+`gutschein` erhält eigene GB-Kaufbelegnummern. Der Downgrade verweigert vorhandenen
+Gutscheinbestand, Gutscheinbelege oder verbrauchte Gutscheinzähler ausdrücklich.
+
 | Tabelle | Wesentliche Felder |
 |---|---|
 | `feld` | name, aktiv, reihenfolge (keine Gerätezuordnung, siehe A-FELD-4) |
@@ -368,7 +377,7 @@ Der Plan wird bei jedem Abruf als Ganzes ersetzt (Version steigt monoton). Ein A
 | `buchung_anfragen` | feld_id, beginn, ende, **gutschein_codes?** (Liste) | `reserviert` (buchung_id, preis, guthaben_verrechnet, gutschein_verrechnet, checkout_url?, reserviert_bis) oder `bestaetigt` (voll aus Guthaben und/oder Gutschein) oder `abgelehnt` (grund: belegt, außerhalb_fenster, außerhalb_betriebszeit, kein_tarif, konto_gesperrt, rechnungskunde, gutschein_ungueltig, gutschein_nur_mitglieder, zu_viele_gutscheine) |
 | `buchung_stornieren` | buchung_id | ok (kostenfrei ja/nein, freie_absage ja/nein, verbleibende_freie_absagen?, gutschein_wieder_gueltig?) oder abgelehnt |
 | `mitgliedschaft_beantragen` | hinweis_text | ok (Antrag vermerkt, Betreiber entscheidet) |
-| `gutschein_kaufen` | empfaenger_email?, betrag? (nur Modell `wert`) | `reserviert` (checkout_url, preis) oder abgelehnt (rechnungskunde – nur bei `rechnungskunden_gutscheinkauf = nein`, kein_gutscheinpreis) |
+| `gutschein_kaufen` | empfaenger_email?, betrag? (nur Modell `wert`) | `reserviert` (checkout_url, preis, zu_zahlen, reserviert_bis) oder abgelehnt (u. a. rechnungskunde bei `rechnungskunden_gutscheinkauf = nein`, kein_angebot, konto_unbekannt) |
 | `zahlung_eingegangen` | provider, rohdaten, signatur_header? | ok / ignoriert |
 | `rechnung_anfordern` | rechnung_nr | pdf_base64 oder abgelehnt |
 
@@ -383,8 +392,15 @@ Das Hauptsystem behandelt jede Nutzlast als nicht vertrauenswürdig: Konto muss 
 | Dokument | Inhalt | Wann |
 |---|---|---|
 | `belegung` | je Feld: Liste belegter Zeiträume im Buchungsfenster (nur beginn/ende, ohne Kunde), Betriebszeiten, Raster, Fenster-Parameter | nach jeder Änderung (debounced 2 s), nächtlich voll |
-| `tarife` | Preisregeln je Kundengruppe (nur die für Kunden sichtbaren) | bei Änderung, nächtlich |
-| `konto:<id>` | Kundengruppe, **Mitgliedsstatus (`mitglied_bis`, Antrag offen ja/nein)**, **rechnungskunde**, Guthaben, **eigene Gutscheine (Code, gültig bis, nur_mitglieder, Restwert bei Modell `wert`)**, Gutscheinpreis der eigenen Gruppe, **je Abo die verbleibenden freien Absagen**, eigene Buchungen (id, feld, beginn, ende, status, preis, pin_klar, storno-Info), Rechnungsliste (nummer, datum, brutto, status), offene Reservierungen mit checkout_url | nach jeder Antwort auf eine Anfrage des Kontos, bei Statusänderungen (Anwesenheit, Rechnung, Freischaltung), nächtlich |
+| `tarife` | Preisregeln je Kundengruppe (nur die für Kunden sichtbaren), optionales Gutscheinangebot mit Modell, Steuerzeitpunkt, Minuten, Gruppenpreisen, Beträgen, Mitgliedsvoraussetzung und Gültigkeit | bei Änderung, nächtlich |
+| `konto:<id>` | Kundengruppe, Mitgliedschaft/mitglied_bis/Antrag, rechnungskunde/online_buchen, Guthaben, eigene aktuell einlösbare Gutscheine (Code, Art, Modell, Status, Gültigkeit, Minuten/Restwert/verbleibende Einlösungen, Gruppenhinweis), offene Käufe des Käufers (ID, Preis, gespeicherte Frist, Checkout-URL; ohne Code), ausdrückliche gutschein_kauf-Berechtigung, je Abo die verbleibenden freien Absagen, eigene Buchungen (id, feld, beginn, ende, status, preis, pin, storno-Info, gutschein_modelle), Rechnungsliste (nummer, datum, brutto, status), offene Reservierungen mit checkout_url | nach Antworten und fachlichen Änderungen, bei Besitzwechsel für Käufer sowie alten und neuen Inhaber, bei Angebotsänderung, nächtlich |
+
+Bestand und offene Käufe werden beim Erzeugen mit der Fachuhr geprüft, unabhängig vom
+Ablaufjob. Checkout-Links gehören nur dem Käufer; eigene Gutscheine begründen keinen Zugriff
+auf fremde Kauf- oder Gegenbeleg-PDFs. Alte Kontodokumente erhalten leere Gutscheinlisten und
+`gutschein_kauf = false`; alte Tarifdokumente haben kein Gutscheinangebot. Diese sicheren
+Vorgaben aktivieren keine Verkaufsoberfläche. Die Hauptsystementscheidung über einen Kauf
+bleibt unabhängig vom angezeigten Lesestand.
 
 **Fehlerfälle.** Hauptsystem nicht erreichbar → Portal zeigt „Anfrage gesendet, Bestätigung folgt per E-Mail“; nach `antwort_hinweis_sekunden` (Start: 120) ein Hinweis. Reservierungen mit Zahlungsfrist werden vom Hauptsystem beim Verfall bereinigt, auch wenn der Kunde nie zurückkam. Signaturfehler oder Versionsrückschritt im Lesestand → Dokument verwerfen, Alarm an Betreiber.
 

@@ -310,7 +310,20 @@ Mail an `EMAIL_FROM`; nachgelieferte Alarme nach einem Ausfall gesammelt in eine
 
 Einrichtung des Hallenrechners und von Home Assistant: `docs/betrieb/hallendienst.md`.
 
-### Freischaltcodes und Gutscheinverwaltung
+## 5c. Gutscheine und Freischaltcodes
+
+Stufe 1a-III ist im Hauptsystem und den Kanalverträgen implementiert. Der Verkauf und die
+Codeeingabe im Kundenportal folgen in Stufe 2; bis dahin gibt es dafür keine Kundenformulare.
+Die E2E-Prüfung verwendet den Fakeanbieter. Eine echte Zahlungsanbindung und die Anbindung
+an echte Hallenhardware stehen weiterhin aus.
+
+Die Schemaänderung liegt ausschließlich in Revision `0015`, direkt nach `0014`. Bei einem
+späteren Betreiberupgrade zuerst Backup und aktuelle Revisionskette prüfen und die regulären
+Migrationen ausführen (Abschnitt 7). Bestehende Jahreszähler und archivierte Rechnungen bleiben
+erhalten. Ein Downgrade mit Gutscheinbestand, Gutscheinbelegen oder verbrauchten
+Gutschein-Nummernkreisen wird abgewiesen, statt diese Daten zu löschen.
+
+### Freischaltcodes und Verwaltung
 
 Unter **Gutscheine → Freischaltcodes** stellt die Admin-Rolle 1 bis 1000 Einzelcodes aus.
 Die lesende Rolle kann Übersicht, Details und CSV ansehen. Die Vorgaben sind eine Einlösung
@@ -372,6 +385,17 @@ Wird der Kunde während des Wartens auf ein anderes Konto umgehängt, erhält da
 keinen Kauf oder Checkout; es entsteht auch keine Bezahlsitzung beim Anbieter.
 Einheitspreis **0** deaktiviert den Verkauf für die betreffende Käufergruppe. Wertgutscheine
 sind nur zu den angebotenen Beträgen erhältlich. Vorhandenes Guthaben bezahlt keinen Gutscheinkauf.
+In **Einstellungen → Gutscheine** sind Modell (`einheit`/`wert`), Steuerzeitpunkt
+(`beim_kauf`/`bei_einloesung`), Minuten, Preise/Beträge, Mitgliedsvoraussetzung und Gültigkeit
+zu prüfen. Einstellungen ändern nur neue Kaufwünsche; vorhandene Gutscheine behalten ihre
+Snapshots. Die Vorgaben sind 120 Minuten, 730 Tage und Steuer beim Kauf; Einheitspreise sind
+zunächst 0. Freischaltcodes bleiben davon unabhängig Einheiten ohne Geldwert und Steuer.
+
+Kauf, Einlösung, Storno und Rückgabe sperren zuerst sämtliche beteiligten Kunden
+(Akteur, Käufer, bisheriger Inhaber, Einlöser/Guthabenempfänger), anschließend vorhandene
+Zahlungen und Gutscheine, jeweils nach UUID sortiert. Erst danach folgen weitere Buchungs-,
+Feld- und Belegsperren. Ändert sich eine Zuordnung während des Wartens, wird der Vorgang
+vollständig zurückgerollt und neu vorbereitet; es gibt keine teilweise Erstattung.
 
 Ein Kaufwunsch speichert Preis, Käufergruppe/Steuersatz, Modell, Minuten/Wert,
 Mitgliedsvoraussetzung, Gültigkeitsdauer und Zahlungsfrist. Spätere Einstellungs- oder
@@ -385,6 +409,11 @@ als Käuferguthaben gebucht. Bei Überzahlung wird ein Gutschein aktiviert und n
 gutgeschrieben. Geld nach Abbruch/Fristablauf wird einmal Käuferguthaben, niemals ein Gutschein.
 Diese Fälle melden dem Betreiber nach Commit den tatsächlichen Eingang und das Guthaben.
 Ein erneuter Kauf benötigt eine neue Anfrage; eine doppelte Zahlungsrückmeldung ändert nichts.
+Der signierte Lesestand zeigt offene Käufe ausschließlich dem Käufer, mit Zahlungslink und
+gespeicherter Frist, ohne Code. Nach Fristablauf verschwinden sie auch vor dem nächsten Job.
+Eigener Bestand enthält ausschließlich aktuell einlösbare Gutscheine des Inhabers und wird
+nach Besitzwechsel auch für bisherigen Inhaber und Käufer aktualisiert. Kaufbelegrechte
+bleiben beim Käufer, selbst wenn ein anderer Kunde den Gutschein einlöst.
 
 Bei Steuer **beim Kauf** erhält der Käufer die normale Kaufrechnung mit seinem eingefrorenen
 Steuersatz. Bei Steuer **bei Einlösung** erhält er einen **Kaufbeleg GB-JJJJ-NNNNN** ohne

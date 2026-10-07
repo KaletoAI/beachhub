@@ -90,19 +90,21 @@ Bei Buchungsanlagen gilt die Sperrreihenfolge Kunde vor Feld, auch für Portal-E
 Daueranlagen sperren vorher die vollständige Menge beteiligter Kunden nach UUID; die
 Fremdschlüsselprüfungen von PostgreSQL sind bei weiteren Änderungen mitzuberücksichtigen.
 
-## Gutschein-Datenbasis (Stufe 1a-III, in Arbeit)
+## Gutscheine und Freischaltcodes (Stufe 1a-III)
 
-Revision `0015` bereitet Kauf-Snapshots, Einlösungszustände und die genaue Belegbasis vor.
+Revision `0015` folgt direkt auf `0014` und ergänzt Kauf-Snapshots, Einlösungszustände und die
+genaue Belegbasis. Die bestehenden Rechnungszähler werden unverändert übernommen.
 Offene Käufe haben noch kein Ablaufdatum; Gültigkeitsdauer und Zahlungsfrist bleiben gespeichert.
 Der Rechnungskreis behält seine bisherigen Jahreszähler; steuerfreie Kaufbelege erhalten einen
 eigenen Kreis `gutschein` mit Nummern `GB-JJJJ-NNNNN`. Freischaltcodes haben Steuer `keine`.
 Freischaltcodes lassen sich unter **Gutscheine → Freischaltcodes** ausstellen und als Serie
 exportieren. Die Übersicht und Detailseite erlauben Sperren und Gültigkeitsänderungen mit Audit.
 Reaktivierung erhält verbrauchte Einlösungen und Restwerte; zurückgegebene Kaufgutscheine bleiben
-dauerhaft gesperrt. Die Einlösung und getrennte Buchungsbelege sind im Hauptsystem-Kanal implementiert;
-Die Rückabwicklung und der Kauf über den Hauptsystem-Kanal sind implementiert;
-signierter Gutscheinbestand und offene Käufe sind implementiert; Verkaufs- und Codeeingabeoberfläche
-folgen in Stufe 2.
+dauerhaft gesperrt. Kauf, atomare Einlösung, getrennte Buchungsbelege, Rückabwicklung und
+signierter Gutscheinbestand mit offenen Käufen sind im Hauptsystem-Kanal implementiert.
+Verkaufs- und Codeeingabeoberfläche sowie der echte Zahlungsanbieter folgen in Stufe 2;
+die E2E-Prüfung nutzt den verifizierten Fakeanbieter und zwei PostgreSQL-Testdatenbanken.
+Für Betreiberabläufe siehe [Gutscheine im Betriebshandbuch](../docs/betrieb/hauptsystem.md#5c-gutscheine-und-freischaltcodes).
 Der Gutschein-Nachtjob läuft täglich um 00:20 Europe/Berlin; das Ablaufdatum gilt einschließlich.
 Die internen Dienste für Codes, Vorgangsvorbereitung und Fehlversuchslimit sind vorhanden:
 `gutschein_codes` normalisiert 13 Zeichen, zeigt sie als `4-4-5` an und fügt neue Codes

@@ -62,12 +62,24 @@ händisch erstellt werden (Befehl s. o.).
 
 Ende-zu-Ende mit dem Hauptsystem (aus der Repo-Wurzel): `pytest -q e2e`
 
+Core-, Portal- und E2E-Datenbanktests getrennt und seriell ausführen: Die Fixtures setzen die
+Testschemata zurück; E2E verwendet beide Datenbanken. In einem Worktree `PYTHONPATH` ausdrücklich
+auf dessen `shared`, `core`, `portal` und `hall` setzen. `e2e/test_gutscheine.py` prüft echte
+Kontoanmeldung, Portal-Briefkasten/Kanal, HTTP-Fakezahlung, signierten Bestand und Storno
+für beide Modelle und Steuerzeitpunkte sowie getrennte Käufer-/Einlöser-Belegrechte.
+
 ## Gutscheinverträge
 
 Der signierte Kontolesestand unterstützt eigenen Gutscheinbestand und offene Kaufwünsche ohne
 Code sowie eine ausdrücklich vom Hauptsystem gesetzte Kaufberechtigung. Alte Dokumente zeigen
 leere Listen und aktivieren keinen Verkauf. Verkaufs- und Codeeingabeoberfläche bleiben Stufe 2.
+Kauf- und Codebuchungswünsche werden bereits im Kanal verarbeitet; dafür gibt es derzeit keine
+Kundenformulare. Checkout-Links offener Käufe erhält ausschließlich der Käufer, nur bis zur
+gespeicherten Frist. Eigener Bestand enthält aktuell einlösbare Gutscheine des Inhabers;
+Besitzwechsel aktualisieren auch den bisherigen Inhaber und Käufer.
 Die bestehende Stornoseite unterscheidet Gutscheinmodelle und Reservierungen: bestätigte Einheiten
 geben die Nutzung unter ursprünglicher Gültigkeit zurück, bestätigter Wertverbrauch wird Guthaben
 mit Gegenbeleg, Reservierungen stellen den ursprünglichen Bestand wieder her. Kauf-PDFs bleiben
 beim Käufer; der Bestand erweitert keine Rechnungsrechte.
+Der echte Zahlungsanbieter und ein IP-Limit für die künftige Codeeingabe bleiben mit der
+Verkaufsoberfläche offen. Die gegenwärtige Testzahlung ersetzt keine produktive Zahlungsanbindung.

@@ -5,26 +5,28 @@ Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`
 
 Status: Stufe 1 (Hauptsystem) fertig; Stufe 1a-I (feste Kundengruppen mit Steuersatz,
 Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) und 1a-II
-(Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) umgesetzt;
-1a-III (Gutscheine) in Umsetzung; Portal-Kern (Stufe 2 ohne Mitgliedschaft,
-Gutscheine und echten Zahlungsanbieter) implementiert; Stufe 3 (Hallendienst) implementiert und
+(Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) und 1a-III
+(Gutscheine und Freischaltcodes im Hauptsystem) umgesetzt; Portal-Kern mit signiertem
+Gutscheinbestand und Kanalverträgen implementiert. Mitgliedschaftsoberfläche, Gutscheinverkauf,
+Codeeingabe und echter Zahlungsanbieter folgen im weiteren Ausbau der Stufe 2.
+Stufe 3 (Hallendienst) ist implementiert und
 gegen simuliertes Home Assistant getestet, die Anbindung an die echte Hallentechnik folgt, sobald
 der Hallenhersteller die Schnittstellen festlegt.
 
-Für Stufe 1a-III ist die Gutschein-Datenbasis mit Revision `0015` vorbereitet:
-Kauf-Snapshots, Einlösungsbelegbasis und ein eigener Kaufbelegnummernkreis.
-Freischaltcodes, Verwaltung und die atomare Einlösung im Hauptsystem-Kanal sind implementiert;
-Die Rückabwicklung einschließlich Kulanz und Reservierungsverfall ist implementiert;
-Der Kauf über den Hauptsystem-Kanal mit Zahlung, Kaufabbruch und Beleg-/Codeversand ist
-implementiert; signierter Gutscheinbestand und offene Käufe sind im Lesestand enthalten.
-Die Verkaufs- und Codeeingabeoberfläche im Portal folgt in Stufe 2.
-Codevergabe, vollständige Vorgangssperren und ein internes Fehlversuchslimit sind vorbereitet;
-die Sperrvorbereitung ist bereits in den Buchungs- und Batch-Einstiegen eingebunden.
-Buchungen trennen Gutschein-Einlösungsbelege vom Geld-/Guthabenrest; Mehrzweck-Einheiten
-werden mit dem Kaufpreis abgerechnet. Kaufbedingungen und Zahlungsfrist bleiben als Snapshot
-erhalten. Die manuelle Rückgabe vollständig ungenutzter Kaufgutscheine mit dauerhafter Sperre
-und zentralem Schutz der allgemeinen Rechnungsaktionen ist implementiert; dabei entsteht
-kein Kundenguthaben. Signierter Bestand ist implementiert; die Verkaufs- und Codeeingabeoberfläche bleibt für Stufe 2 offen.
+Stufe 1a-III umfasst beide Gutscheinmodelle (`einheit`, `wert`) und Steuerzeitpunkte,
+Freischaltcodes mit Serienexport, Kauf über den Hauptsystem-Kanal, atomare Einlösung,
+Storno/Kulanz und manuelle Rückgabe. Revision `0015` folgt direkt auf `0014` und erhält
+die bestehenden Rechnungszähler; steuerfreie Mehrzweck-Kaufbelege erhalten den eigenen
+Nummernkreis `GB-JJJJ-NNNNN`. Kaufbedingungen und Fristen bleiben als Snapshot erhalten.
+Ein kostenfreier bestätigter Einheitenstorno gibt die Nutzung unter ursprünglicher Gültigkeit
+zurück; verbrauchter Wert wird mit Gegenbeleg Guthaben des Einlösers, ohne den Gutscheinrest
+zu erhöhen. Die Rückgabe vollständig ungenutzter Kaufgutscheine sperrt dauerhaft und benennt
+die manuelle Erstattung an den ursprünglichen Käufer; sie erzeugt kein Kundenguthaben.
+Käufer und Einlöser behalten getrennte Belegrechte. Signierter Bestand und offene Käufe
+werden über den bestehenden Kanal verteilt; offene Kaufcodes bleiben geheim.
+Details stehen im [Betriebshandbuch](docs/betrieb/hauptsystem.md#5c-gutscheine-und-freischaltcodes)
+und im [aktuellen Umsetzungsplan](docs/superpowers/plans/2026-10-05-stufe-1a-III-gutscheine.md).
+Der historische Plan vom 03.10.2026 bleibt als abgelöster Entwurf erhalten.
 
 - Technische Spezifikation: `docs/superpowers/specs/2026-09-05-beachhub-design.md`
 - Dokument für den Betreiber (nicht technisch), Version 0.4: `docs/betreiber/Beachhub-Anforderungen-und-Loesungskonzept.pdf`
