@@ -44,6 +44,10 @@ FEHLERTEXT = {
     "kein_mitglied": "Der Kunde ist kein Mitglied",
     "kein_antrag": "Es liegt kein Antrag vor",
     "kunde_anonymisiert": "Der Kunde ist anonymisiert",
+    "stand_geaendert": (
+        "Das Guthaben hat sich inzwischen geändert (etwa durch einen doppelten Klick). "
+        "Bitte prüfen Sie den aktuellen Stand."
+    ),
 }
 
 # Alle vom Admin-Formular her erwartbaren Fehler: Domänenvalidierung (KundenFehler/GuthabenFehler),
@@ -248,10 +252,12 @@ def guthaben_auszahlen(
     kunde_id: uuid.UUID,
     betrag: str = Form(""),
     notiz: str = Form(""),
+    stand: str = Form(""),
     admin: AdminUser = Depends(auth.nur_admin_rolle),
     db: Session = Depends(get_db),
 ) -> RedirectResponse:
-    """Hakt eine Auszahlung ab, die der Betreiber selbst überwiesen hat (A-ZAHL-6)."""
+    """Hakt eine Auszahlung ab, die der Betreiber selbst überwiesen hat (A-ZAHL-6). Der
+    angezeigte Guthabenstand muss noch gelten; so bucht ein doppelter Klick nicht zweimal."""
     zurueck = RedirectResponse("/admin/kunden/guthabenliste", status_code=303)
     k = db.scalar(
         select(Kunde)
@@ -265,6 +271,9 @@ def guthaben_auszahlen(
         wert = pflicht(t_betrag(betrag), "Betrag")
         if not wert.is_finite() or wert <= 0:
             raise ValueError("Betrag muss größer als 0 sein")
+        angezeigt = t_betrag(stand)
+        if angezeigt is not None and angezeigt != k.guthaben:
+            raise GuthabenFehler("stand_geaendert")
         guthaben.buche(
             db, kunde=k, betrag=-wert, art="auszahlung", notiz=notiz, admin_user_id=admin.id
         )

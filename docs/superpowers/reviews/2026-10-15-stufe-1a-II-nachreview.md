@@ -5,7 +5,7 @@
 - **Vorheriges Review:** [2026-10-05-stufe-1a-II-review.md](2026-10-05-stufe-1a-II-review.md); dessen Befunde 1 bis 10 und 7a sind nachgerechnet und behoben.
 - **Teststand vor den Korrekturen:** shared 41, hall 158, core 555, portal 168, e2e 8 Tests grün; mypy und Ruff ohne Befund.
 
-Die Befunde 1 und 2 sind in diesem Branch mit zuvor roten Tests behoben (Teststand danach: core 564, e2e 8 Tests grün; mypy und Ruff ohne Befund). Die übrigen Befunde sind offen.
+Alle Befunde sind in diesem Branch mit zuvor roten Tests behoben; die Befunde 1 und 2 in `bde6581`, 3 bis 10 im Folgecommit. Den Teststand nennt der Abschnitt „Nachprüfung“.
 
 ## Behoben
 
@@ -29,7 +29,22 @@ Vor 0014 schrieb ein kostenfreies Storno einer Onlinebuchung Guthaben ohne Korre
 
 **Tests:** `test_review2_2_altgutschrift_wird_beim_nachgeholten_beleg_angerechnet`.
 
-## Offen
+## Behoben im Folgecommit
+
+| Befund | Korrektur | Tests |
+|---|---|---|
+| 3 Kontodokumente nach dem Upgrade | Datenmigration `0016_upgrade_1a_ii` markiert alle veröffentlichten Konto-Dokumente und die aller Abo-Kunden | `test_review2_3_5_migration_0016_*` |
+| 4 Ausrollreihenfolge | Betriebshandbuch Abschnitt 7: Portal vor Hauptsystem; neues Portal toleriert altes Hauptsystem | Dokumentation |
+| 5 Saisonende-Mail nach Upgrade | `0016` setzt den Marker für das laufende Jahr, wenn der Stichtag vorbei ist (Datum mit Admin-Override) | `test_review2_3_5_migration_0016_*` |
+| 6 Stornobestätigung | `sperren.lege_an`, `dauerbuchungen.lege_an` und `beende` sammeln die erzeugten Stornos; `benachrichtigung.stornos_versenden` schickt je Kunde eine Bestätigung und danach nur deren Belege. `_belege_der_buchungen` entfällt | `test_review2_6_*` |
+| 7 Gutgeschriebener Abo-Termin | Bereits gutgeschriebene Termine sind bei der Kundenabsage immer kostenfrei, ohne Kontingent und auch nach der Frist | `test_review2_7_*` |
+| 8 Portalhinweise | Kanalfeld `korrekturbeleg`; Portalmeldungen „bereits gutgeschrieben“ und „nicht berechnet“; Stornoseite nennt das Fristende des Abo-Termins | `test_review2_8_*` (core, portal) |
+| 9 Audit | `admin_user_id` für Saisonrechnung, Verrechnung und Neuausstellung; `korrigiert_rechnung_id` im Anlage-Audit des Belegs; Audit der Buchungsfreigabe beim Vollstorno; Verknüpfung Storno–Beleg als Änderungsaudit | `test_review2_9_*` |
+| 10 Auszahlung | Formular sendet den angezeigten Stand; weicht er ab, wird nichts gebucht | `test_review2_10_*` |
+
+Beim Rebase auf `main` (Stufe 1a-III bereits umgesetzt) wurde die Datenmigration als `0016_upgrade_1a_ii` hinter `0015_gutscheine` eingereiht; der umgesetzte Gutscheinplan bleibt unverändert.
+
+## Ursprüngliche Beschreibung der Befunde 3 bis 10
 
 ### 3. Kontodokumente nach dem Upgrade veraltet (mittel)
 
@@ -62,3 +77,7 @@ Saisonrechnung und Guthabenverrechnung ohne Admin-Zuordnung; `korrigiert_rechnun
 ### 10. „Auszahlung abhaken“ nicht idempotent (niedrig)
 
 Ein Doppelklick mit Teilbetrag bucht zweimal ab.
+
+## Nachprüfung
+
+**Teststand nach allen Korrekturen:** shared 41, hall 158, core 575, portal 173, e2e 8 Tests grün; mypy und Ruff ohne Befund. Die neuen Tests zu den Befunden 6, 7, 9 und 10 waren vor der Korrektur rot. `test_ui_beenden_versendet_einen_korrekturbeleg` erwartet jetzt zusätzlich die Stornobestätigung vor der Stornorechnung.

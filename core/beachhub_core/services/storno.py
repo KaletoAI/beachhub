@@ -173,7 +173,17 @@ def gutschreiben_alle(
         for b, _ in paare:
             s = db.scalar(select(Storno).where(Storno.buchung_id == b.id))
             if s is not None:
+                vorher = audit.als_dict(s)
                 s.korrektur_rechnung_id = beleg.id
+                audit.protokolliere(
+                    db,
+                    quelle=quelle,
+                    objekt_typ="storno",
+                    objekt_id=s.id,
+                    vorher=vorher,
+                    nachher=audit.als_dict(s),
+                    admin_user_id=admin_user_id,
+                )
         belege.append(beleg)
     db.flush()
     return belege
@@ -249,16 +259,18 @@ def storniere(
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-            kostenfrei = bool(kostenfrei and dauer and freie_absagen_rest(db, dauer) > 0)
-            # Ein bereits gutgeschriebener Termin verbraucht kein Kontingent. Ein unberechneter
-            # schon: Er wird nach der Absage nie mehr berechnet (`saison_abrechenbar`).
-            freie_absage = bool(
-                kostenfrei
-                and (
-                    buchung.rechnung_position_id is None
-                    or _offene_position(db, buchung) is not None
-                )
+            # Ein bereits gutgeschriebener Termin bleibt kostenfrei und verbraucht kein
+            # Kontingent (A-DAUER-3); es gibt nichts mehr zu berechnen. Ein unberechneter
+            # verbraucht Kontingent: Er wird nach der Absage nie mehr berechnet
+            # (`saison_abrechenbar`).
+            gutgeschrieben = (
+                buchung.rechnung_position_id is not None and _offene_position(db, buchung) is None
             )
+            if gutgeschrieben:
+                kostenfrei = True
+            elif kostenfrei:
+                kostenfrei = bool(dauer and freie_absagen_rest(db, dauer) > 0)
+                freie_absage = kostenfrei
     s = Storno(
         buchung_id=buchung.id,
         durch=durch,
@@ -272,15 +284,6 @@ def storniere(
         db, buchung, Buchung.STORNIERT, quelle=quelle, admin_user_id=admin_user_id
     )
     db.flush()
-    if kostenfrei and korrigieren:
-        gutschreiben(
-            db,
-            buchung,
-            sperrkontext=sperrkontext,
-            grund=f"Storno: {grund}" if grund else "Storno",
-            quelle=quelle,
-            admin_user_id=admin_user_id,
-        )
     audit.protokolliere(
         db,
         quelle=quelle,
@@ -290,6 +293,16 @@ def storniere(
         nachher=audit.als_dict(s),
         admin_user_id=admin_user_id,
     )
+    # Die Verknüpfung mit dem Korrekturbeleg protokolliert `gutschreiben_alle`.
+    if kostenfrei and korrigieren:
+        gutschreiben(
+            db,
+            buchung,
+            sperrkontext=sperrkontext,
+            grund=f"Storno: {grund}" if grund else "Storno",
+            quelle=quelle,
+            admin_user_id=admin_user_id,
+        )
     return s
 
 

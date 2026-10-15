@@ -292,3 +292,21 @@ def test_auszahlung_prueft_anonymisierung_frisch_unter_sperre(
     assert kunde.anonymisiert_am is not None and kunde.guthaben == Decimal("30.00")
     assert db.scalar(select(GuthabenBuchung.id).where(GuthabenBuchung.art == "auszahlung")) is None
     assert db.query(Audit).filter(Audit.objekt_typ == "guthaben").count() == 1
+
+
+def test_review2_10_doppelklick_bucht_teilauszahlung_nur_einmal(
+    eingeloggt: TestClient, db: Session
+) -> None:
+    a, _ = _kunden(db)
+    seite = eingeloggt.get("/admin/kunden/guthabenliste")
+    assert 'name="stand" value="30.00"' in seite.text
+    daten = {"csrf_token": eingeloggt.csrf, "betrag": "10,00", "notiz": "", "stand": "30.00"}
+    for _ in range(2):
+        r = eingeloggt.post(
+            f"/admin/kunden/guthabenliste/{a.id}/auszahlung", data=daten, follow_redirects=False
+        )
+        assert r.status_code == 303
+    db.refresh(a)
+    assert a.guthaben == Decimal("20.00")
+    auszahlungen = db.scalars(select(GuthabenBuchung).where(GuthabenBuchung.art == "auszahlung"))
+    assert len(auszahlungen.all()) == 1

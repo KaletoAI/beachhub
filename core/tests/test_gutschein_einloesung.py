@@ -977,6 +977,30 @@ def test_dauerbeenden_wiederholt_keine_alten_rueckgabehinweise(db, gwelt, eingel
             assert mail_ausgang == []
 
 
+def test_sperre_bestaetigt_storno_mit_gutscheinhinweis(db, gwelt, eingeloggt, mail_ausgang):
+    g = gutscheine.stelle_freicodes_aus(db, anzahl=1, gueltig_bis=None, admin_user_id=None)[0]
+    db.commit()
+    erg = buchen(db, gwelt, [g.code], stunden=2)
+    db.commit()
+    b = db.get(Buchung, erg.antwort.buchung_id)
+    mail_ausgang.clear()
+    r = eingeloggt.post(
+        "/admin/belegung/sperre",
+        data={
+            "csrf_token": eingeloggt.csrf,
+            "alle_felder": "1",
+            "beginn": f"{TERMIN.isoformat()}T18:00",
+            "ende": f"{TERMIN.isoformat()}T22:00",
+            "grund": "Turnier",
+            f"entscheidung_{b.id}": "stornieren",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    betreffe = [m["betreff"] for m in mail_ausgang]
+    assert betreffe[:2] == ["Stornierung Ihrer Buchung", "Gutschein-Rückabwicklung"]
+
+
 @pytest.mark.parametrize("pfad", ["betreiber", "sperrbatch", "daueranlage", "beenden"])
 def test_pending_gutscheinstorno_gibt_reservierungswallet_zurueck(db, gwelt, pfad):
     from beachhub_core.models import Dauerbuchung, GuthabenBuchung

@@ -235,6 +235,54 @@ def gutschein_gekauft(db: Session, gutschein_id: uuid.UUID) -> None:
                 db.rollback()
 
 
+def stornos_versenden(
+    db: Session,
+    storno_ids: Iterable[uuid.UUID],
+    *,
+    belege: Iterable[uuid.UUID | None] = (),
+) -> None:
+    """Nach dem Commit: Stornobestätigung je Kunde (A-MAIL-2), danach die Korrekturbelege.
+    Mehrere Stornos eines Kunden aus einem Vorgang (Sperre, Daueranlage, Abo-Ende) kommen in
+    einer Mail; Fehler werden je Kunde isoliert. Gutschein-Rückabwicklungen erhalten wie bei
+    `storno_nachlauf` ihren Hinweis. `belege` ergänzt weitere Korrekturbelege."""
+    je_kunde: dict[uuid.UUID, list[uuid.UUID]] = {}
+    buchung_ids: list[uuid.UUID] = []
+    for sid in dict.fromkeys(storno_ids):
+        s = db.get(Storno, sid)
+        if s is not None:
+            je_kunde.setdefault(s.buchung.kunde_id, []).append(s.id)
+            buchung_ids.append(s.buchung_id)
+    beleg_ids: list[uuid.UUID | None] = [*belege, *belege_der_buchungen(db, buchung_ids)]
+    for kunde_id, ids in je_kunde.items():
+        try:
+            stornos = sorted(
+                (s for i in ids if (s := db.get(Storno, i)) is not None),
+                key=lambda s: s.buchung.beginn,
+            )
+            if len(stornos) == 1:
+                storno(db, stornos[0])
+            else:
+                kunde = stornos[0].buchung.kunde
+                mail.sende(
+                    kunde.email,
+                    "Stornierung Ihrer Buchungen",
+                    _text("stornos", kunde=kunde, stornos=stornos),
+                )
+        except Exception:
+            logger.exception("Stornobestätigung an Kunde %s fehlgeschlagen", kunde_id)
+            db.rollback()
+            try:
+                betreiber_alarm(
+                    "Stornobestätigung nicht versandt",
+                    f"Die Stornobestätigung an Kunde {kunde_id} konnte nicht versandt werden. "
+                    "Details im Log des Hauptsystems.",
+                )
+            except Exception:
+                logger.exception("Betreiber-Alarm für Kunde %s fehlgeschlagen", kunde_id)
+    rueckabwicklung_hinweise(db, buchung_ids)
+    belege_versenden(db, beleg_ids)
+
+
 def betreiber_alarm(betreff: str, text: str) -> None:
     mail.sende(settings.email_from, f"[Beachhub] {betreff}", text)
 

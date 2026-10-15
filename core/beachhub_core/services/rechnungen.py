@@ -424,7 +424,12 @@ def _neue_rechnung(
 
 
 def erzeuge_einzelrechnung(
-    db: Session, buchung: Buchung, *, quelle: str = "system", status: str = "bezahlt"
+    db: Session,
+    buchung: Buchung,
+    *,
+    quelle: str = "system",
+    status: str = "bezahlt",
+    admin_user_id: uuid.UUID | None = None,
 ) -> Rechnung:
     """Online bezahlte Buchungen bekommen eine bezahlte Rechnung (A-RECH-2), Betreiberbuchungen
     eine offene mit Zahlungsziel (A-ZAHL-1)."""
@@ -441,11 +446,17 @@ def erzeuge_einzelrechnung(
         d,
         status,
         quelle=quelle,
+        admin_user_id=admin_user_id,
     )
 
 
 def verrechne_guthaben(
-    db: Session, r: Rechnung, *, quelle: str, hoechstens: Decimal | None = None
+    db: Session,
+    r: Rechnung,
+    *,
+    quelle: str,
+    hoechstens: Decimal | None = None,
+    admin_user_id: uuid.UUID | None = None,
 ) -> Decimal:
     """Verrechnet Guthaben des Kunden mit dem offenen Betrag – als Zahlung, nicht als
     Preisminderung (A-ZAHL-4). Deckt es alles, ist die Rechnung bezahlt. Einmal je Rechnung
@@ -467,6 +478,7 @@ def verrechne_guthaben(
         art="verrechnung",
         bezug_id=r.id,
         notiz=f"Verrechnung mit Rechnung {r.nummer}",
+        admin_user_id=admin_user_id,
         quelle=quelle,
     )
     db.add(
@@ -491,6 +503,7 @@ def verrechne_guthaben(
             objekt_id=r.id,
             vorher=vorher,
             nachher={**audit.als_dict(r), "bezahlt_durch": "guthaben"},
+            admin_user_id=admin_user_id,
         )
     return betrag
 
@@ -508,7 +521,13 @@ def saison_abrechenbar(buchung: Buchung) -> bool:
     )
 
 
-def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "admin") -> Rechnung:
+def erzeuge_saisonrechnung(
+    db: Session,
+    dauer: Dauerbuchung,
+    *,
+    quelle: str = "admin",
+    admin_user_id: uuid.UUID | None = None,
+) -> Rechnung:
     """Vorausrechnung über die abrechenbaren unberechneten Termine einer Dauerbuchung
     (A-RECH-3): Leistungszeitraum erster bis letzter Termin, Zahlungsziel
     `saison_zahlungsziel_tage`. Ist es eingestellt, wird Guthaben sofort verrechnet (A-ZAHL-4).
@@ -562,9 +581,10 @@ def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "a
         quelle=quelle,
         zahlungsziel_tage=konfiguration.hole(db, "saison_zahlungsziel_tage"),
         dauerbuchung_id=dauer.id,
+        admin_user_id=admin_user_id,
     )
     if konfiguration.hole(db, "guthaben_auf_saisonrechnung"):
-        verrechne_guthaben(db, r, quelle=quelle)
+        verrechne_guthaben(db, r, quelle=quelle, admin_user_id=admin_user_id)
     return r
 
 
@@ -623,7 +643,17 @@ def storniere(
         if p.buchung_id:
             b = db.get(Buchung, p.buchung_id)
             if b is not None and b.rechnung_position_id == p.id:
+                vorher = audit.als_dict(b)
                 b.rechnung_position_id = None
+                audit.protokolliere(
+                    db,
+                    quelle="admin",
+                    objekt_typ="buchung",
+                    objekt_id=b.id,
+                    vorher=vorher,
+                    nachher={**audit.als_dict(b), "grund": f"Vollstorno: {grund}"},
+                    admin_user_id=admin_user_id,
+                )
                 frei.append(b)
             p.buchung_id = None
     db.flush()
@@ -643,8 +673,12 @@ def storniere(
             db.refresh(b)
             if not saison_abrechenbar(b):
                 continue
-            r = erzeuge_einzelrechnung(db, b, quelle="admin", status="offen")
-            erstattet -= verrechne_guthaben(db, r, quelle="admin", hoechstens=erstattet)
+            r = erzeuge_einzelrechnung(
+                db, b, quelle="admin", status="offen", admin_user_id=admin_user_id
+            )
+            erstattet -= verrechne_guthaben(
+                db, r, quelle="admin", hoechstens=erstattet, admin_user_id=admin_user_id
+            )
             neu.append(r)
     from beachhub_core.services import lesestand
 

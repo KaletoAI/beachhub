@@ -806,3 +806,44 @@ def test_review2_2_altgutschrift_wird_beim_nachgeholten_beleg_angerechnet(
     assert beleg.brutto == Decimal("-30.00") and r.status == "storniert"
     assert k.guthaben == Decimal("30.00") and neu == []
     assert db.scalar(select(GuthabenBuchung).where(GuthabenBuchung.bezug_id == beleg.id)) is None
+
+
+def _anlage(db: Session, objekt_id):
+    """Anlage-Audit eines Objekts (vorher ist JSON-null, nicht SQL-NULL)."""
+    from beachhub_core.models import Audit
+
+    (eintrag,) = [
+        a
+        for a in db.scalars(select(Audit).where(Audit.objekt_id == objekt_id))
+        if a.vorher_json is None
+    ]
+    return eintrag
+
+
+def test_review2_9_vollstorno_auditiert_beleg_und_freigabe(db: Session, welt) -> None:
+    import uuid
+
+    from beachhub_core.models import Audit
+
+    f, k = welt
+    admin = uuid.uuid4()
+    b, r = _einzel(db, f, k, online=True)
+    alt = b.rechnung_position_id
+    erg = rechnungen.storniere(db, r, admin_user_id=admin, grund="Adresse")
+    db.commit()
+    anlage = _anlage(db, erg.beleg.id)
+    assert anlage.nachher_json["korrigiert_rechnung_id"] == str(r.id)
+    assert anlage.admin_user_id == admin
+    freigabe = db.scalars(
+        select(Audit).where(Audit.objekt_typ == "buchung", Audit.objekt_id == b.id)
+    ).all()
+    assert any(
+        a.vorher_json
+        and a.vorher_json["rechnung_position_id"] == str(alt)
+        and a.nachher_json["rechnung_position_id"] is None
+        and a.admin_user_id == admin
+        for a in freigabe
+    )
+    (neu,) = erg.neu
+    neu_anlage = _anlage(db, neu.id)
+    assert neu_anlage.admin_user_id == admin

@@ -406,6 +406,9 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
         kostenfrei=s.kostenfrei,
         freie_absage=s.freie_absage if b.dauerbuchung_id is not None else None,
         verbleibende_freie_absagen=rest,
+        korrekturbeleg=(
+            s.korrektur_rechnung_id is not None if b.dauerbuchung_id is not None else None
+        ),
     )
     return Ergebnis(antwort, [_storno_mail(s.id)])
 

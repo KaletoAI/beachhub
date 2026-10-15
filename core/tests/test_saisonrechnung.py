@@ -540,7 +540,10 @@ def test_ui_beenden_versendet_einen_korrekturbeleg(
     db.expire_all()
     r = db.scalars(select(Rechnung).where(Rechnung.art == "storno")).one()
     assert r.brutto == Decimal("-60.00") and r.pdf_sha256
-    assert [m["betreff"] for m in mail.TEST_AUSGANG] == [f"Stornorechnung {r.nummer}"]
+    assert [m["betreff"] for m in mail.TEST_AUSGANG] == [
+        "Stornierung Ihrer Buchungen",
+        f"Stornorechnung {r.nummer}",
+    ]
 
 
 def test_fehlende_saisonrechnung_rollt_gesamte_anlage_zurueck(
