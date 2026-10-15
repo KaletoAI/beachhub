@@ -26,12 +26,14 @@ def html(rechnung: Rechnung) -> str:
     """Das HTML der Rechnung, aus dem `erzeuge` das PDF macht."""
     db = object_session(rechnung)
     verrechnet = rechnungen.verrechnet(db, rechnung) if db is not None else Decimal("0.00")
+    guthaben = rechnungen.verrechnetes_guthaben(db, rechnung) if db is not None else Decimal("0.00")
     korrekturen = rechnungen.korrektursumme(db, rechnung) if db is not None else Decimal("0.00")
     offen = rechnungen.offener_betrag(db, rechnung) if db is not None else rechnung.brutto
     return templates.env.get_template("rechnung_pdf.html").render(
         r=rechnung,
         steuer=rechnungen.steuer_je_satz(rechnung),
-        verrechnet=verrechnet,
+        guthaben=guthaben,
+        online=verrechnet - guthaben,
         korrekturen=korrekturen,
         offen=offen,
         betreiber=_betreiber(),

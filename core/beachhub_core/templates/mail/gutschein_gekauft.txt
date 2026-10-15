@@ -11,5 +11,5 @@ Der Gutschein geht zusätzlich an {{ g.empfaenger_email }}. Ihr Kaufbeleg wird n
 {% else %}
 Ihr Kaufbeleg wird Ihnen separat geschickt.
 {% endif %}
-
+Viele Grüße
 {{ betreiber }}

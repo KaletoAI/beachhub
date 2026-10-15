@@ -133,3 +133,55 @@ def test_review_5_pdf_forderung_zeigt_korrekturen_separat(
     assert f"Offener Betrag{offen} €" in zeilen
     if Decimal(zahlung):
         assert "abzüglich verrechnetes Guthaben-30,00 €" in zeilen
+
+
+def test_online_zahlung_heisst_nicht_guthaben_in_pdf_mail_und_verwaltung(
+    db: Session, rechnung, eingeloggt
+) -> None:
+    """Online bezahlte Beträge erscheinen als „online bezahlt“, nur Guthaben als Guthaben."""
+    import re
+
+    from beachhub_core import mail
+    from beachhub_core.models import Zahlung
+    from beachhub_core.services import benachrichtigung, guthaben
+
+    k = rechnung.kunde
+    tag = date(2027, 12, 1)
+    r = rechnungen._neue_rechnung(
+        db,
+        k,
+        "einzel",
+        [rechnungen.Posten(None, "Termin", Decimal("40"), Decimal("19"))],
+        tag,
+        tag,
+        "offen",
+        quelle="admin",
+    )
+    guthaben.buche(db, kunde=k, betrag=Decimal("10"), art="manuell")
+    rechnungen.verrechne_guthaben(db, r, quelle="admin")
+    db.add(
+        Zahlung(
+            kunde_id=k.id,
+            rechnung_id=r.id,
+            provider="fake",
+            provider_ref="fake:test",
+            betrag=Decimal("30.00"),
+            status=Zahlung.BEZAHLT,
+        )
+    )
+    db.commit()
+    assert rechnungen.verrechnetes_guthaben(db, r) == Decimal("10.00")
+    zeilen = {
+        re.sub("<[^>]+>", "", z).strip()
+        for z in re.findall(r"<tr[^>]*>(.*?)</tr>", rechnung_pdf.html(r), re.S)
+    }
+    assert "abzüglich online bezahlt-30,00 €" in zeilen
+    assert "abzüglich verrechnetes Guthaben-10,00 €" in zeilen
+    mail.TEST_AUSGANG.clear()  # type: ignore[union-attr]
+    benachrichtigung.belege_versenden(db, [r.id])
+    [m] = mail.TEST_AUSGANG  # type: ignore[misc]
+    assert "30,00 € haben Sie bereits online bezahlt.\n" in m["text"]
+    assert "10,00 € haben wir mit Ihrem Guthaben verrechnet.\n" in m["text"]
+    assert "\n\n\n" not in m["text"]
+    seite = eingeloggt.get(f"/admin/rechnungen/{r.id}").text
+    assert "Online bezahlt: 30,00 €" in seite and "Verrechnetes Guthaben: 10,00 €" in seite

@@ -7,7 +7,6 @@ Tarifwert: {{ b.preis|euro }}
 Geld-/Guthabenanteil: {{ (b.preis - gutschein_verrechnet)|euro }}
 Die Gutschein-Einlösung weist in dieser Bestätigung keine Umsatzsteuer aus.
 {% endif %}
-
 Ihr Zahlencode für die Tür: {{ pin }}
 Er gilt ab {{ vorlauf }} Minuten vor Beginn bis zum Ende Ihrer Buchung.
 

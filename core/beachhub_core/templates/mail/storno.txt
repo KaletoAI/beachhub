@@ -8,9 +8,10 @@ Die Stornierung ist für Sie kostenfrei.{% if s.freie_absage %} Das war eine der
 {%- else -%}
 Der Termin bleibt berechnet: {{ kostenpflichtiger_grund }} Der Platz ist trotzdem wieder frei.
 {%- endif %}
-{% if b.dauerbuchung_id and not s.freie_absage %}
+{%- if b.dauerbuchung_id and not s.freie_absage %}
+
 Kostenfreie Absagen im Abo übrig: {{ rest }}.
-{% endif %}
+{%- endif %}
 
 Viele Grüße
 {{ betreiber }}

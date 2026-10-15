@@ -33,7 +33,8 @@
     Leistungszeitraum: {{ r.leistung_von|datum }} – {{ r.leistung_bis|datum }}<br>
     Fällig am: {{ r.faellig_am|datum }}<br>
     {% if r.art != "storno" %}Offener Betrag: <strong>{{ offen|euro }}</strong><br>{% endif %}
-    {% if verrechnet > 0 %}Verrechnetes Guthaben: {{ verrechnet|euro }}<br>{% endif %}
+    {% if online > 0 %}Online bezahlt: {{ online|euro }}<br>{% endif %}
+    {% if guthaben > 0 %}Verrechnetes Guthaben: {{ guthaben|euro }}<br>{% endif %}
     {% if r.korrigiert %}Korrigiert: <a href="/admin/rechnungen/{{ r.korrigiert_rechnung_id }}">Rechnung {{ r.korrigiert.nummer }}</a><br>{% endif %}
     {% if r.dauerbuchung_id %}Abo: <a href="/admin/belegung/dauer/{{ r.dauerbuchung_id }}">Dauerbuchung anzeigen</a><br>{% endif %}
     Kunde: <a href="/admin/kunden/{{ r.kunde_id }}">{{ r.kunde.name }}</a><br>

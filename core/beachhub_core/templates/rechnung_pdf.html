@@ -36,9 +36,10 @@ td.r, th.r { text-align: right; }
   {% endfor %}{% endif %}
   <tr class="gesamt"><td></td><td class="r">Gesamtbetrag</td><td class="r">{{ r.brutto|euro }}</td></tr>
 </table>
-{% if verrechnet > 0 or korrekturen != 0 %}
+{% if guthaben > 0 or online > 0 or korrekturen != 0 %}
 <table class="summe">
-  {% if verrechnet > 0 %}<tr><td></td><td class="r">{% if r.status == "offen" %}abzüglich verrechnetes Guthaben{% else %}Ursprünglich verrechnetes Guthaben{% endif %}</td><td class="r">{{ (-verrechnet)|euro }}</td></tr>{% endif %}
+  {% if online > 0 %}<tr><td></td><td class="r">{% if r.status == "offen" %}abzüglich online bezahlt{% else %}Online bezahlt{% endif %}</td><td class="r">{{ (-online)|euro }}</td></tr>{% endif %}
+  {% if guthaben > 0 %}<tr><td></td><td class="r">{% if r.status == "offen" %}abzüglich verrechnetes Guthaben{% else %}Ursprünglich verrechnetes Guthaben{% endif %}</td><td class="r">{{ (-guthaben)|euro }}</td></tr>{% endif %}
   {% if korrekturen != 0 %}<tr><td></td><td class="r">{% if r.status == "offen" %}abzüglich Korrekturen{% else %}Korrekturbelege{% endif %}</td><td class="r">{{ korrekturen|euro }}</td></tr>{% endif %}
   {% if r.status == "offen" %}<tr class="gesamt"><td></td><td class="r">Offener Betrag</td><td class="r">{{ offen|euro }}</td></tr>{% endif %}
 </table>

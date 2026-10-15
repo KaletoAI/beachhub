@@ -112,7 +112,8 @@ def detail(
         r=r,
         steuer=rechnungen.steuer_je_satz(r),
         offen=rechnungen.offener_betrag(db, r),
-        verrechnet=rechnungen.verrechnet(db, r),
+        guthaben=(guthaben := rechnungen.verrechnetes_guthaben(db, r)),
+        online=rechnungen.verrechnet(db, r) - guthaben,
         korrekturen=db.scalars(
             select(Rechnung)
             .where(Rechnung.korrigiert_rechnung_id == r.id)

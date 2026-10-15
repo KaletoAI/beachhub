@@ -125,6 +125,19 @@ def verrechnet(db: Session, r: Rechnung) -> Decimal:
     return Decimal(str(summe)).quantize(CENT)
 
 
+def verrechnetes_guthaben(db: Session, r: Rechnung) -> Decimal:
+    """Der Teil von `verrechnet`, der aus Guthaben stammt; der Rest ist online bezahlt. Mail,
+    PDF und Verwaltung dürfen eine Online-Zahlung nicht als Guthaben ausweisen."""
+    summe = db.scalar(
+        select(func.coalesce(func.sum(Zahlung.betrag), 0)).where(
+            Zahlung.rechnung_id == r.id,
+            Zahlung.status == Zahlung.BEZAHLT,
+            Zahlung.provider == "guthaben",
+        )
+    )
+    return Decimal(str(summe)).quantize(CENT)
+
+
 def korrektursumme(db: Session, r: Rechnung) -> Decimal:
     """Negative Bruttosumme der zur Rechnung gehörenden Korrekturbelege."""
     summe = db.scalar(
