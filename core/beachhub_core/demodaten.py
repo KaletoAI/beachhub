@@ -1,9 +1,9 @@
 """Demodaten für den manuellen Test in der Entwicklung (`beachhub-core demodaten`).
 
-Ergänzt fehlende Stammdaten im Stand der Entwicklungsdatenbank (Felder 1–3, Raster von Feld 3,
-Betriebszeit montags, Tarif) und legt über die Fachdienste Kunden, Buchungen, ein Abo und
-Guthaben an. Vorhandene Stammdaten bleiben unverändert. Läuft nur außerhalb von `production`
-und nur, solange es noch keine Kunden gibt.
+Ergänzt fehlende Stammdaten (Felder 1–3 mit Raster, Tarif), stellt die Halle auf täglich
+15–23 Uhr mit Sonderschließung an Weihnachten und Silvester und legt über die Fachdienste
+Kunden, Buchungen, ein Abo und Guthaben an. Läuft nur außerhalb von `production` und nur,
+solange es noch keine Kunden gibt.
 """
 
 import json
@@ -21,6 +21,7 @@ from sqlalchemy.orm import Session
 from beachhub_core import clock
 from beachhub_core.config import settings
 from beachhub_core.models import (
+    Ausnahmetag,
     Betriebszeit,
     Buchung,
     Feld,
@@ -49,6 +50,15 @@ FELDER = ("Feld 1", "Feld 2", "Feld 3")
 WOCHENTAGE = ("Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag")
 ABO_WOCHEN = 8
 DOMAIN = "example.org"
+OEFFNUNG = (time(15, 0), time(23, 0))
+# Raster für Felder ohne eigenes: Feld 3 behält den bisherigen Entwicklungsstand (120 Minuten).
+RASTER_MINUTEN = {"Feld 1": 60, "Feld 2": 60, "Feld 3": 120}
+SCHLIESSTAGE = (
+    (12, 24, "Heiligabend"),
+    (12, 25, "1. Weihnachtstag"),
+    (12, 26, "2. Weihnachtstag"),
+    (12, 31, "Silvester"),
+)
 
 
 class DemodatenFehler(Exception):  # noqa: N818
@@ -73,37 +83,96 @@ def _stammdaten(db: Session, bericht: Bericht) -> Feld:
                 db, admin_user_id=None, name=name, reihenfolge=i
             )
             bericht(f"Stammdaten: {name} angelegt")
-    feld = vorhanden["Feld 3"]
-    if not feld.raster:
-        stammdaten.raster_setzen(
-            db,
-            feld,
-            admin_user_id=None,
-            wochentag=None,
-            modus="dauer",
-            slot_minuten=120,
-            fenster=[],
-        )
-        bericht("Stammdaten: Raster für Feld 3 (120 Minuten) angelegt")
-    if db.scalar(select(func.count(Betriebszeit.id))) == 0:
-        stammdaten.betriebszeit_anlegen(
-            db,
-            admin_user_id=None,
-            wochentag=0,
-            oeffnet=time(14, 45),
-            schliesst=time(21, 30),
-            gueltig_von=None,
-            gueltig_bis=None,
-        )
-        bericht("Stammdaten: Betriebszeit montags 14:45–21:30 angelegt")
+    for name, minuten in RASTER_MINUTEN.items():
+        if not vorhanden[name].raster:
+            stammdaten.raster_setzen(
+                db,
+                vorhanden[name],
+                admin_user_id=None,
+                wochentag=None,
+                modus="dauer",
+                slot_minuten=minuten,
+                fenster=[],
+            )
+            bericht(f"Stammdaten: Raster für {name} ({minuten} Minuten) angelegt")
+    _oeffnungszeiten(db, bericht)
     if db.scalar(select(func.count(Tarif.id)).where(Tarif.aktiv.is_(True))) == 0:
         stammdaten.tarif_anlegen(
             db, admin_user_id=None, name="Demo je Slot", preis=Decimal("40.00")
         )
         bericht("Stammdaten: Tarif „Demo je Slot“ 40,00 € angelegt")
     db.flush()
+    feld = vorhanden["Feld 3"]
     db.refresh(feld)
     return feld
+
+
+def _oeffnungszeiten(db: Session, bericht: Bericht) -> None:
+    """Täglich 15–23 Uhr ohne Befristung. Abweichende Betriebszeiten werden ersetzt, weil bei
+    mehreren Einträgen für einen Wochentag nicht feststeht, welcher gilt."""
+    oeffnet, schliesst = OEFFNUNG
+    passend: set[int] = set()
+    ersetzt = 0
+    for bz in db.scalars(select(Betriebszeit)).all():
+        if (bz.oeffnet, bz.schliesst, bz.gueltig_von, bz.gueltig_bis) == (
+            oeffnet,
+            schliesst,
+            None,
+            None,
+        ) and bz.wochentag not in passend:
+            passend.add(bz.wochentag)
+            continue
+        stammdaten.betriebszeit_loeschen(db, bz, admin_user_id=None)
+        ersetzt += 1
+    for wt in sorted(set(range(7)) - passend):
+        stammdaten.betriebszeit_anlegen(
+            db,
+            admin_user_id=None,
+            wochentag=wt,
+            oeffnet=oeffnet,
+            schliesst=schliesst,
+            gueltig_von=None,
+            gueltig_bis=None,
+        )
+    if len(passend) < 7:
+        bericht(
+            f"Stammdaten: Betriebszeit täglich {oeffnet:%H:%M}–{schliesst:%H:%M}"
+            + (f" (ersetzt {ersetzt} abweichende)" if ersetzt else "")
+        )
+    jahr = clock.today(db).year
+    neu = []
+    for monat, tag, grund in SCHLIESSTAGE:
+        d = date(jahr, monat, tag)
+        if db.scalar(select(Ausnahmetag.id).where(Ausnahmetag.datum == d)) is None:
+            stammdaten.ausnahmetag_anlegen(
+                db,
+                admin_user_id=None,
+                datum=d,
+                geschlossen=True,
+                oeffnet=None,
+                schliesst=None,
+                grund=grund,
+            )
+            neu.append(f"{d:%d.%m.}")
+    if neu:
+        bericht(f"Stammdaten: Sonderschließung {jahr} am {', '.join(neu)}")
+
+
+def _abo_beginn(db: Session, feld: Feld, ab: date) -> tuple[date, Slot]:
+    """Erster Tag ab `ab`, an dem der erste Slot in allen Abo-Wochen buchbar ist."""
+    d = ab
+    for _ in range(366):
+        slots = slots_db.tages_slots(db, feld, d)
+        if len(slots) >= 3 and all(
+            any(
+                s.beginn.astimezone(BERLIN).time() == slots[0].beginn.astimezone(BERLIN).time()
+                for s in slots_db.tages_slots(db, feld, d + timedelta(weeks=w))
+            )
+            for w in range(1, ABO_WOCHEN)
+        ):
+            return d, slots[0]
+        d += timedelta(days=1)
+    raise DemodatenFehler("Kein Abo-Zeitraum ohne Schließtage gefunden")
 
 
 def _termintage(db: Session, feld: Feld, anzahl: int) -> list[tuple[date, list[Slot]]]:
@@ -194,19 +263,20 @@ def lege_an(db: Session) -> Bericht:
     bericht.belege += [r_ben1.id, r_ben2.id]
     bericht(f"Betreiberbuchungen Ben: {_uhr(slots1[2])} und {_uhr(slots2[1])}, je offene Rechnung")
 
-    abo_start = slots1[0].beginn.astimezone(BERLIN)
-    abo_ende = slots1[0].ende.astimezone(BERLIN)
-    bis = tag1 + timedelta(weeks=ABO_WOCHEN - 1)
+    abo_tag, abo_slot = _abo_beginn(db, feld, tag1)
+    abo_start = abo_slot.beginn.astimezone(BERLIN)
+    abo_ende = abo_slot.ende.astimezone(BERLIN)
+    bis = abo_tag + timedelta(weeks=ABO_WOCHEN - 1)
 
     def abo_vorgang() -> uuid.UUID:
         d = dauerbuchungen.lege_an(
             db,
             kunde_id=carla.id,
             feld_id=feld.id,
-            wochentag=tag1.weekday(),
+            wochentag=abo_tag.weekday(),
             start=abo_start.time(),
             ende=abo_ende.time(),
-            gueltig_von=tag1,
+            gueltig_von=abo_tag,
             gueltig_bis=bis,
             admin_user_id=None,
             auslassen=set(),
@@ -218,8 +288,8 @@ def lege_an(db: Session) -> Bericht:
     saison = db.scalars(select(Rechnung.id).where(Rechnung.dauerbuchung_id == dauer_id)).all()
     bericht.belege += list(saison)
     bericht(
-        f"Abo Carla: {WOCHENTAGE[tag1.weekday()]}s {abo_start:%H:%M}–{abo_ende:%H:%M}, "
-        f"{tag1:%d.%m.%Y} bis {bis:%d.%m.%Y}, Saisonrechnung offen"
+        f"Abo Carla: {WOCHENTAGE[abo_tag.weekday()]}s {abo_start:%H:%M}–{abo_ende:%H:%M}, "
+        f"{abo_tag:%d.%m.%Y} bis {bis:%d.%m.%Y}, Saisonrechnung offen"
     )
 
     # Die Online-Buchung schreibt selbst fest und versendet ihre Rechnung im Nachlauf.

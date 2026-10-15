@@ -73,13 +73,14 @@ ruff check . && ruff format --check .
 - `beachhub-core keygen` – erzeugt das Ed25519-Schlüsselpaar für die Signatur des Lesestands.
 - `beachhub-core create-admin --name <name> [--rolle admin|lesend]` – legt einen Admin-Benutzer an.
 - `beachhub-core demodaten` – füllt eine Entwicklungsdatenbank ohne Kunden für den manuellen
-  Test. Fehlende Stammdaten werden im bisherigen Entwicklungsstand ergänzt: Feld 1–3, Raster
-  120 Minuten für Feld 3, Betriebszeit montags 14:45–21:30 und ein Tarif mit 40,00 € je Slot.
-  Vorhandene Stammdaten bleiben unverändert. An den nächsten beiden Tagen mit drei Slots auf
-  Feld 3 entstehen:
+  Test. Fehlende Stammdaten werden ergänzt: Feld 1–3, Raster 60 Minuten für Feld 1 und 2 sowie
+  120 Minuten für Feld 3 und ein Tarif mit 40,00 € je Slot. Die Halle öffnet täglich 15–23 Uhr;
+  abweichende Betriebszeiten werden dafür ersetzt. Am 24., 25., 26. und 31.12. des laufenden
+  Jahres ist geschlossen. Vorhandene Felder, Raster und Tarife bleiben unverändert. Auf Feld 3
+  entstehen ab morgen:
   - Anna: Online-Buchung, über den Fakeanbieter bezahlt.
   - Ben: zwei Betreiberbuchungen mit offener Rechnung.
-  - Carla: Mitglied und Rechnungskunde, Abo über acht Wochen mit Saisonrechnung.
+  - Carla: Mitglied und Rechnungskunde, Abo über acht Wochen ohne Schließtag mit Saisonrechnung.
   - Dora: 50,00 € Guthaben.
 
   Alle Demokunden haben Adressen `…@example.org`. Wer sich im Portal mit einer davon anmeldet,
