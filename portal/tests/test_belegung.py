@@ -158,3 +158,19 @@ def test_angemeldet_mit_preisen_und_tagwahl(angemeldet: TestClient, db: Session)
     assert 'href="/?tag=2027-11-26" aria-current="page"' in seite
     assert angemeldet.get("/?tag=quatsch").status_code == 200
     assert angemeldet.get("/?tag=2030-01-01").status_code == 200
+
+
+def test_tagwahl_als_kalender_ohne_scrollleiste(angemeldet: TestClient, db: Session) -> None:
+    speichere(db, "belegung", belegung())
+    speichere(db, "tarife", tarife())
+    speichere(db, f"konto:{KUNDE_ID}", konto())
+    seite = angemeldet.get("/?tag=2027-11-26").text
+    assert 'class="tage"' not in seite and 'class="monat"' in seite
+    # Vortag und Folgetag als Pfeile; am ersten Tag gibt es keinen Vortag.
+    assert 'href="/?tag=2027-11-25" rel="prev"' in seite
+    assert 'href="/?tag=2027-11-27" rel="next"' in seite
+    assert 'rel="prev"' not in angemeldet.get("/?tag=2027-11-25").text
+    # Der Kalender beginnt am Montag der ersten Woche: Lücken vor Donnerstag, 25.11.2027.
+    monat = seite.split('class="monat"', 1)[1].split("</nav>", 1)[0]
+    assert monat.count("<span></span>") >= 3
+    assert monat.count('href="/?tag=') == 15 and 'class="frei"' in monat

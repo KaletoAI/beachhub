@@ -4,8 +4,19 @@
 {% if belegung is none %}
 <div class="karte"><p>Die Belegung wird gerade geladen. Bitte versuche es in einer Minute noch einmal.</p></div>
 {% else %}
-<nav class="tage" aria-label="Tag wählen">
-  {% for t in tage %}<a href="/?tag={{ t.isoformat() }}"{% if t == datum %} aria-current="page"{% endif %}>{{ t|tag }}</a>{% endfor %}
+<nav class="tagwahl karte" aria-label="Tag wählen">
+  <div class="tagwahl-kopf">
+    {% if vortag %}<a href="/?tag={{ vortag.isoformat() }}" rel="prev" aria-label="Vortag {{ vortag|tag }}">‹</a>{% else %}<span aria-hidden="true">‹</span>{% endif %}
+    <strong>{{ datum|tag }}</strong>
+    {% if folgetag %}<a href="/?tag={{ folgetag.isoformat() }}" rel="next" aria-label="Folgetag {{ folgetag|tag }}">›</a>{% else %}<span aria-hidden="true">›</span>{% endif %}
+  </div>
+  <div class="monat">
+    {% for k in ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"] %}<span class="wt">{{ k }}</span>{% endfor %}
+    {% for woche in wochen %}{% for eintrag in woche %}
+    {% if eintrag %}{% set t, frei = eintrag %}<a href="/?tag={{ t.isoformat() }}"{% if t == datum %} aria-current="page"{% endif %} class="{{ 'frei' if frei else 'voll' }}" aria-label="{{ t|tag }}{% if not frei %}, nichts frei{% endif %}">{{ t.day }}{% if t.day == 1 or t == erster %}<small>{{ ["Jan", "Feb", "Mär", "Apr", "Mai", "Jun", "Jul", "Aug", "Sep", "Okt", "Nov", "Dez"][t.month - 1] }}</small>{% endif %}</a>
+    {% else %}<span></span>{% endif %}
+    {% endfor %}{% endfor %}
+  </div>
 </nav>
 {% if not konto %}<p class="hinweis"><a href="/anmelden">Melde dich an</a>, um Preise zu sehen und zu buchen.</p>{% endif %}
 {% for feld, liste in ansicht %}

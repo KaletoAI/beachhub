@@ -51,10 +51,22 @@ form.inline { display:inline; }
 .flash.warn { background:var(--warn-bg); color:var(--warn); border-color:var(--warn); }
 .fehler { color:var(--fehler); }
 
-/* Tagesauswahl als waagrecht scrollbare Leiste */
-.tage { display:flex; gap:.4rem; overflow-x:auto; padding-bottom:.4rem; margin-bottom:1rem; }
-.tage a { flex:0 0 auto; padding:.45rem .7rem; border:1px solid var(--rand-stark); border-radius:999px; text-decoration:none; color:var(--fg); background:var(--karte); }
-.tage a[aria-current] { background:var(--akzent); color:#fff; border-color:var(--akzent); }
+/* Tagesauswahl als kleiner Kalender Mo–So: alle buchbaren Tage auf einen Blick, ohne
+   waagrechtes Scrollen. Tage ohne freien Slot sind gedämpft, bleiben aber wählbar. */
+.tagwahl { max-width:26rem; padding:.75rem; }
+.tagwahl-kopf { display:flex; align-items:center; justify-content:space-between; margin-bottom:.5rem; }
+.tagwahl-kopf a, .tagwahl-kopf span { display:inline-flex; align-items:center; justify-content:center; width:2.5rem; height:2.5rem; border-radius:999px; font-size:1.4rem; text-decoration:none; color:var(--akzent-text); }
+.tagwahl-kopf a:hover { background:var(--akzent-hell); }
+.tagwahl-kopf span { color:var(--rand-stark); }
+.monat { display:grid; grid-template-columns:repeat(7, 1fr); gap:.25rem; text-align:center; }
+.monat .wt { font-size:.75rem; color:var(--gedaempft); }
+.monat a { display:flex; flex-direction:column; justify-content:center; min-height:2.5rem; border-radius:8px; text-decoration:none; border:1px solid var(--rand); background:var(--karte); color:var(--fg); line-height:1.1; }
+.monat a small { font-size:.65rem; color:var(--gedaempft); }
+.monat a.frei { background:var(--akzent-hell); border-color:var(--akzent); color:var(--akzent-text); }
+.monat a.voll { color:var(--gedaempft); background:var(--bg); }
+.monat a[aria-current] { background:var(--akzent); border-color:var(--akzent); color:#fff; font-weight:700; }
+.monat a[aria-current] small { color:inherit; }
+@media (prefers-color-scheme: dark) { .monat a[aria-current] { color:#0b1a22; } }
 
 .slots { display:grid; grid-template-columns:repeat(auto-fill, minmax(96px, 1fr)); gap:.4rem; }
 .slot { display:block; padding:.55rem .4rem; border-radius:8px; text-align:center; font-size:.95rem; border:1px solid var(--rand); text-decoration:none; }
