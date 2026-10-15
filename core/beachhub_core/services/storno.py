@@ -10,6 +10,7 @@ from beachhub_core import clock
 from beachhub_core.models import (
     Buchung,
     Dauerbuchung,
+    GuthabenBuchung,
     GutscheinEinloesung,
     Rechnung,
     RechnungPosition,
@@ -32,6 +33,24 @@ NULL = Decimal("0.00")
 
 class StornoFehler(Exception):  # noqa: N818
     pass
+
+
+def _altgutschriften(db: Session, positionen: Sequence[RechnungPosition]) -> Decimal:
+    """Vor 0014 schrieb ein kostenfreies Storno einer Onlinebuchung Guthaben ohne
+    Korrekturbeleg gut; die Guthabenbuchung verweist dort auf das Storno statt auf einen Beleg.
+    Holt der Betreiber den Beleg nach, ist dieser Betrag bereits erstattet."""
+    buchung_ids = [p.buchung_id for p in positionen if p.buchung_id is not None]
+    if not buchung_ids:
+        return NULL
+    summe = db.scalar(
+        select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0))
+        .join(Storno, GuthabenBuchung.bezug_id == Storno.id)
+        .where(
+            GuthabenBuchung.art == "storno_gutschrift",
+            Storno.buchung_id.in_(buchung_ids),
+        )
+    )
+    return Decimal(str(summe))
 
 
 def gutschreiben_positionen(
@@ -68,6 +87,7 @@ def _gutschreiben_positionen(
     gut. Ohne
     Korrekturbeleg bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG).
     Bei offener Rechnung sinkt zuerst die Forderung (A-RECH-7, Abweichung B-3).
+    Gutschriften ohne Beleg aus der Zeit vor 0014 werden angerechnet (`_altgutschriften`).
     Interner Finanzweg für vollständig vorbereitete koordinierte Gutschein-Stornos.
     Öffentliche Aktionsguards gehören an die aufrufenden allgemeinen Dienste."""
     if not positionen:
@@ -76,11 +96,12 @@ def _gutschreiben_positionen(
     rechnung = positionen[0].rechnung
     rechnungen.sperre(db, rechnung)
     offen_vorher = rechnungen.offener_betrag(db, rechnung)
+    bereits_erstattet = _altgutschriften(db, positionen)
     beleg = rechnungen._korrigiere_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )
     betrag = sum((p.brutto for p in positionen), NULL)
-    gutschrift = max(NULL, betrag - offen_vorher)
+    gutschrift = max(NULL, betrag - offen_vorher - bereits_erstattet)
     if gutschrift > NULL:
         guthaben.buche(
             db,

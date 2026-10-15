@@ -63,7 +63,7 @@ def test_review_1_vollstorno_erhaelt_nur_verbleibenden_bezahlten_anteil(
         storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Teil", quelle="admin")
     db.commit()
     vorher = k.guthaben
-    beleg = rechnungen.storniere(db, r, admin_user_id=None, grund="Neuausstellung")
+    beleg = rechnungen.storniere(db, r, admin_user_id=None, grund="Neuausstellung").beleg
     db.commit()
     assert k.guthaben - vorher == Decimal(gutschrift)
     assert k.guthaben == Decimal(gesamt)
@@ -123,7 +123,12 @@ def welt(db: Session) -> tuple[Feld, Kunde]:
 
 
 def _rechnung(
-    db: Session, f: Feld, k: Kunde, stunden: tuple[int, ...] = (19, 20), status: str = "offen"
+    db: Session,
+    f: Feld,
+    k: Kunde,
+    stunden: tuple[int, ...] = (19, 20),
+    status: str = "offen",
+    art: str = "einzel",
 ) -> tuple[list[Buchung], Rechnung]:
     """Eine Rechnung mit einer Position je Stunde – gebaut wie die Saisonrechnung."""
     gebucht = [
@@ -139,7 +144,7 @@ def _rechnung(
     r = rechnungen._neue_rechnung(
         db,
         k,
-        "einzel",
+        art,
         [rechnungen.Posten(b, f"Termin {b.beginn:%H} Uhr", b.preis, b.ust_satz) for b in gebucht],
         D,
         D,
@@ -259,17 +264,26 @@ def test_gutschreiben_ohne_rechnung_ist_folgenlos(db: Session, welt) -> None:
     assert k.guthaben == Decimal("0.00") and db.query(Rechnung).count() == 0
 
 
-def test_storno_nach_vollstorno_der_rechnung_ohne_zweite_gutschrift(db: Session, welt) -> None:
+@pytest.mark.parametrize("art", ["saison", "einzel"])
+def test_storno_nach_vollstorno_der_rechnung_ohne_zweite_gutschrift(
+    db: Session, welt, art: str
+) -> None:
     f, k = welt
-    (b1, _), r = _rechnung(db, f, k)
+    (b1, _), r = _rechnung(db, f, k, art=art)
     rechnungen.setze_bezahlt(db, r, admin_user_id=None)
     rechnungen.storniere(db, r, admin_user_id=None, grund="falsch berechnet")
     db.commit()
     s = storno.storniere(db, b1, durch="betreiber", kostenfrei=True)
     db.commit()
-    assert s.korrektur_rechnung_id is None
     db.refresh(k)
-    assert k.guthaben == Decimal("60.00") and db.query(Rechnung).count() == 2
+    if art == "saison":
+        # Freigegeben bis zur ausdrücklichen Neuausstellung: kein zweiter Beleg.
+        assert s.korrektur_rechnung_id is None
+        assert k.guthaben == Decimal("60.00") and db.query(Rechnung).count() == 2
+    else:
+        # Neu ausgestellt und verrechnet; das Storno korrigiert die neue Rechnung einmal.
+        assert db.get(Rechnung, s.korrektur_rechnung_id).korrigiert.id != r.id
+        assert k.guthaben == Decimal("30.00") and db.query(Rechnung).count() == 5
 
 
 def test_gutschreiben_alle_ein_beleg_je_rechnung(db: Session, welt) -> None:
@@ -436,7 +450,7 @@ def test_migration_0014_uebernimmt_historischen_vollstorno(db: Session, welt) ->
     (b1, _), r = _rechnung(db, f, k)
     s = Storno(buchung_id=b1.id, durch="betreiber", kostenfrei=False, grund="alt")
     db.add(s)
-    beleg = rechnungen.storniere(db, r, admin_user_id=None, grund="alt")
+    beleg = rechnungen.storniere(db, r, admin_user_id=None, grund="alt").beleg
     db.commit()
     rid, sid, beleg_id = r.id, s.id, beleg.id
     db.commit()
@@ -538,8 +552,9 @@ def test_portalstorno_und_vollstorno_sperren_kunden_vor_buchung(db: Session, wel
         assert future.result(timeout=5) == "ok"
     db.expire_all()
     assert db.get(Buchung, bid).status == "storniert"
-    assert db.get(Kunde, kid).guthaben == Decimal("60.00")
-    assert db.query(Rechnung).count() == 2
+    # Vollstorno stellt beide Termine neu aus; das Portalstorno korrigiert danach nur b1.
+    assert db.get(Kunde, kid).guthaben == Decimal("30.00")
+    assert db.query(Rechnung).count() == 5
 
 
 @pytest.mark.parametrize("batch", ["sperre", "dauer", "gutschriften"])
@@ -688,3 +703,106 @@ def test_umgekehrte_gutschriftbatches_sperren_in_gleicher_reihenfolge(db: Sessio
     db.expire_all()
     assert [db.get(Kunde, kid).guthaben for kid in kids] == [Decimal("30.00"), Decimal("30.00")]
     assert db.query(Rechnung).count() == 4
+
+
+def _einzel(db: Session, f: Feld, k: Kunde, *, online: bool) -> tuple[Buchung, Rechnung]:
+    """Einzelbuchung mit Rechnung wie im Betrieb: online bezahlt oder Betreiberbuchung offen."""
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=k.id,
+        beginn=kombiniere(D, time(19)),
+        ende=kombiniere(D, time(20)),
+        zahlungsart="online" if online else "manuell",
+    )
+    r = rechnungen.erzeuge_einzelrechnung(
+        db, b, quelle="admin", status="bezahlt" if online else "offen"
+    )
+    db.commit()
+    return b, r
+
+
+@pytest.mark.parametrize(
+    "online,storniert,vorhanden",
+    [(True, False, "0"), (False, False, "0"), (False, False, "50"), (True, True, "0")],
+)
+def test_review2_1_vollstorno_einzelrechnung_stellt_neu_aus(
+    db: Session, welt, online: bool, storniert: bool, vorhanden: str
+) -> None:
+    """Ein Vollstorno korrigiert den Beleg; die weiter abrechenbare Leistung wird in derselben
+    Transaktion neu berechnet. Nur der eben erstattete Anteil wird darauf verrechnet."""
+    f, k = welt
+    b, r = _einzel(db, f, k, online=online)
+    if Decimal(vorhanden):
+        guthaben.buche(db, kunde=k, betrag=Decimal(vorhanden), art="manuell")
+    if storniert:
+        storno.storniere(db, b, durch="betreiber", kostenfrei=False, grund="spät")
+    k.adresse_strasse = "Neue Straße 2"
+    db.commit()
+    erg = rechnungen.storniere(db, r, admin_user_id=None, grund="Adresse")
+    db.commit()
+    assert r.status == "storniert" and erg.beleg.korrigiert_rechnung_id == r.id
+    assert k.guthaben == Decimal(vorhanden)
+    (neu,) = erg.neu
+    assert neu.art == "einzel" and neu.brutto == Decimal("30.00")
+    assert neu.adresse_snapshot["strasse"] == "Neue Straße 2"
+    assert b.rechnung_position_id == neu.positionen[0].id
+    assert neu.status == ("bezahlt" if online else "offen")
+    assert rechnungen.verrechnet(db, neu) == (Decimal("30.00") if online else Decimal("0.00"))
+    assert rechnungen.offener_betrag(db, neu) == (Decimal("0.00") if online else Decimal("30.00"))
+    if storniert:
+        assert "kostenpflichtig storniert" in neu.positionen[0].text
+
+
+def test_review2_1_vollstorno_einzelrechnung_ohne_abrechenbare_leistung(db: Session, welt) -> None:
+    f, k = welt
+    b, r = _einzel(db, f, k, online=True)
+    storno.storniere(db, b, durch="betreiber", kostenfrei=True, grund="Ausfall")
+    db.commit()
+    assert k.guthaben == Decimal("30.00") and r.status == "storniert"
+    with pytest.raises(rechnungen.RechnungsFehler, match="nicht_stornierbar"):
+        rechnungen.storniere(db, r, admin_user_id=None, grund="erneut")
+    db.rollback()
+
+
+def _altgutschrift(db: Session, b: Buchung) -> None:
+    """Stand vor 0014: kostenfreies Storno einer Onlinebuchung mit Guthaben, aber ohne Beleg;
+    die Guthabenbuchung verweist auf das Storno."""
+    from beachhub_core.models import Storno
+
+    s = Storno(buchung_id=b.id, durch="kunde", kostenfrei=True, freie_absage=False, grund="")
+    db.add(s)
+    b.status = Buchung.STORNIERT
+    db.flush()
+    guthaben.buche(
+        db,
+        kunde=b.kunde,
+        betrag=b.preis,
+        art="storno_gutschrift",
+        bezug_id=s.id,
+        notiz="Storno kostenfrei",
+        quelle="portal",
+    )
+    db.commit()
+
+
+@pytest.mark.parametrize("voll", [False, True])
+def test_review2_2_altgutschrift_wird_beim_nachgeholten_beleg_angerechnet(
+    db: Session, welt, voll: bool
+) -> None:
+    f, k = welt
+    b, r = _einzel(db, f, k, online=True)
+    _altgutschrift(db, b)
+    assert k.guthaben == Decimal("30.00")
+    if voll:
+        erg = rechnungen.storniere(db, r, admin_user_id=None, grund="Beleg nachholen")
+        beleg, neu = erg.beleg, erg.neu
+    else:
+        beleg = storno.gutschreiben_positionen(
+            db, r.positionen, grund="Beleg nachholen", quelle="admin"
+        )
+        neu = []
+    db.commit()
+    assert beleg.brutto == Decimal("-30.00") and r.status == "storniert"
+    assert k.guthaben == Decimal("30.00") and neu == []
+    assert db.scalar(select(GuthabenBuchung).where(GuthabenBuchung.bezug_id == beleg.id)) is None

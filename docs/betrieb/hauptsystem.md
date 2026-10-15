@@ -169,6 +169,16 @@ in der Rechnungsliste berücksichtigt Zahlungen und Korrekturen. Beim vollständ
 zur Neuausstellung wird der verbleibende bereits bezahlte Anteil ebenfalls als Guthaben
 zurückgegeben. Frühere Teilgutschriften werden nicht nochmals
 erstattet; bereits korrigierte aktive Termine bleiben von einer Neuausstellung ausgeschlossen.
+Bei einer **Einzelrechnung** gibt es keine eigene Aktion zur Neuausstellung: Das Vollstorno
+stellt für jede weiter abrechenbare Buchung (aktiv oder kostenpflichtig abgesagt) sofort eine neue
+Einzelrechnung mit den aktuellen Kundendaten aus und verrechnet den eben erstatteten Anteil darauf.
+Eine online bezahlte Buchung bleibt so bezahlt, ohne dass Guthaben übrig bleibt; Stornorechnung und
+neue Rechnung gehen beide per Mail an den Kunden. Ändern Sie deshalb zuerst die Kundendaten und
+stornieren Sie danach. Soll eine Leistung gar nicht mehr berechnet werden, nutzen Sie die
+Teil-Stornorechnung oder stornieren Sie die Buchung selbst.
+Vor dem Upgrade auf 0014 entstand bei kostenfreien Stornos von Onlinebuchungen Guthaben ohne
+Korrekturbeleg. Holen Sie den Beleg für einen solchen Fall per Teil- oder Vollstorno nach, rechnet
+das System die damalige Gutschrift an und erstattet nicht ein zweites Mal.
 Die neuen Belege verrechnen Guthaben entsprechend Ihrer Einstellung; historische Zahlungen
 bleiben an der alten Rechnung. Stornoguthaben entsteht immer zusammen mit einem Korrekturbeleg;
 PDF und Mail werden erst nach erfolgreichem Commit versandt.

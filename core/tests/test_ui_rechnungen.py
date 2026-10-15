@@ -361,3 +361,33 @@ def test_historischer_gegenbeleg_ui_verweist_auf_gutschein(db, gwelt, eingeloggt
     db.commit()
     seite = eingeloggt.get(f"/admin/rechnungen/{gegen.id}")
     assert "Gutscheinbeleg" in seite.text and "Gutscheinrückgabe" in seite.text
+
+
+def test_vollstorno_einzelrechnung_versendet_beleg_und_neue_rechnung(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, v1 = welt
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=v1.id,
+        beginn=kombiniere(date(2027, 12, 1), time(19)),
+        ende=kombiniere(date(2027, 12, 1), time(20)),
+    )
+    r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
+    db.commit()
+    mail.TEST_AUSGANG.clear()
+    antwort = eingeloggt.post(
+        f"/admin/rechnungen/{r.id}/storno",
+        data={"csrf_token": eingeloggt.csrf, "grund": "Adresse"},
+        follow_redirects=False,
+    )
+    assert antwort.status_code == 303
+    db.expire_all()
+    beleg = db.scalars(select(Rechnung).where(Rechnung.art == "storno")).one()
+    neu = db.scalars(select(Rechnung).where(Rechnung.art == "einzel", Rechnung.id != r.id)).one()
+    assert antwort.headers["location"] == f"/admin/rechnungen/{beleg.id}"
+    assert beleg.pdf_sha256 and neu.pdf_sha256 and neu.status == "offen"
+    assert db.get(Buchung, b.id).rechnung_position_id == neu.positionen[0].id
+    betreffe = {m["betreff"] for m in mail.TEST_AUSGANG}
+    assert {f"Stornorechnung {beleg.nummer}", f"Rechnung {neu.nummer}"} <= betreffe
