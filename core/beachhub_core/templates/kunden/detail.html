@@ -72,6 +72,21 @@
   {% endif %}
 </div>
 
+{% if abos %}
+<div class="karte">
+  <h2>Dauerbuchungen</h2>
+  <table>
+    <tr><th>Feld</th><th>Termin</th><th>Gültig</th><th></th></tr>
+    {% for d in abos %}<tr>
+      <td>{{ d.feld.name }}</td>
+      <td>{{ wochentage[d.wochentag] }} {{ d.start|uhrzeit }} – {{ d.ende|uhrzeit }} Uhr</td>
+      <td>{{ d.gueltig_von|datum }} – {{ d.gueltig_bis|datum }}{% if d.beendet_ab %} · beendet ab {{ d.beendet_ab|datum }}{% endif %}</td>
+      <td><a class="aktion" href="/admin/belegung/dauer/{{ d.id }}">anzeigen</a></td>
+    </tr>{% endfor %}
+  </table>
+</div>
+{% endif %}
+
 <div class="karte">
   <h2>Buchungen</h2>
   <table>
@@ -91,7 +106,7 @@
   <table>
     <tr><th>Nummer</th><th>Datum</th><th>Brutto</th><th>Status</th><th></th></tr>
     {% for r in rechnungen %}<tr>
-      <td>{{ r.nummer }}</td>
+      <td><a href="/admin/rechnungen/{{ r.id }}">{{ r.nummer }}</a></td>
       <td>{{ r.datum|datum }}</td>
       <td>{{ r.brutto|euro }}</td>
       <td>{{ r.status }}</td>

@@ -391,3 +391,52 @@ def test_vollstorno_einzelrechnung_versendet_beleg_und_neue_rechnung(
     assert db.get(Buchung, b.id).rechnung_position_id == neu.positionen[0].id
     betreffe = {m["betreff"] for m in mail.TEST_AUSGANG}
     assert {f"Stornorechnung {beleg.nummer}", f"Rechnung {neu.nummer}"} <= betreffe
+
+
+def test_abo_ist_von_kunde_rechnung_buchung_und_liste_aus_erreichbar(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    from beachhub_core.models import Dauerbuchung
+
+    c = eingeloggt
+    _abo(c, *welt)
+    d = db.scalars(select(Dauerbuchung)).one()
+    r = db.scalars(select(Rechnung)).one()
+    link = f'href="/admin/belegung/dauer/{d.id}"'
+    liste = c.get("/admin/belegung/dauer")
+    assert liste.status_code == 200 and link in liste.text and "Laufend" in liste.text
+    kunde = c.get(f"/admin/kunden/{welt[1].id}")
+    assert link in kunde.text and f'href="/admin/rechnungen/{r.id}"' in kunde.text
+    rechnung = c.get(f"/admin/rechnungen/{r.id}")
+    assert link in rechnung.text
+    assert f'href="/admin/belegung/buchung/{d.buchungen[0].id}"' in rechnung.text
+    assert link in c.get(f"/admin/belegung/buchung/{d.buchungen[0].id}").text
+    seite = c.get(f"/admin/belegung/dauer/{d.id}")
+    assert 'href="/admin/belegung/dauer"' in seite.text and "einschließlich" in seite.text
+
+
+def test_rechnungsseite_erklaert_teilstorno_vollstorno_und_buchungsstorno(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, v1 = welt
+    b = buchungen.lege_an(
+        db,
+        feld_id=f.id,
+        kunde_id=v1.id,
+        beginn=kombiniere(date(2027, 12, 1), time(19)),
+        ende=kombiniere(date(2027, 12, 1), time(20)),
+    )
+    r = rechnungen.erzeuge_einzelrechnung(db, b, status="bezahlt")
+    db.commit()
+    seite = eingeloggt.get(f"/admin/rechnungen/{r.id}").text
+    assert "Gutschrift für einzelne Positionen (Teil-Storno)" in seite
+    assert "keine neue Rechnung" in seite
+    assert "Stornieren und neu ausstellen" in seite and "neue Einzelrechnung" in seite
+    assert "Termin fällt aus?" in seite
+    erg = rechnungen.storniere(db, r, admin_user_id=None, grund="Adresse")
+    db.commit()
+    beleg = eingeloggt.get(f"/admin/rechnungen/{erg.beleg.id}").text
+    assert "Korrekturbeleg" in beleg and "Erstellung erledigt" in beleg
+    alt = eingeloggt.get(f"/admin/rechnungen/{r.id}").text
+    assert "Alle Positionen dieser Rechnung sind durch Stornorechnungen korrigiert" in alt
+    assert "Stornieren und neu ausstellen" not in alt

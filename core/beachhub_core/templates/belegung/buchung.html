@@ -12,6 +12,7 @@
   <p>Status: {{ b.status }}</p>
   <p>Zahlungsart: {{ b.zahlungsart }}</p>
   {% if pin %}<p>PIN: <strong class="pin-gross">{{ pin }}</strong></p>{% endif %}
+  {% if b.dauerbuchung_id %}<p>Abo: <a href="/admin/belegung/dauer/{{ b.dauerbuchung_id }}">Dauerbuchung anzeigen</a></p>{% endif %}
   {% if position %}<p>Rechnung: <a href="/admin/rechnungen/{{ position.rechnung_id }}">{{ position.rechnung.nummer }}</a></p>{% endif %}
 </div>
 

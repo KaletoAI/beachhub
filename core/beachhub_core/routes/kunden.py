@@ -14,6 +14,7 @@ from beachhub_core.models import (
     AdminUser,
     Audit,
     Buchung,
+    Dauerbuchung,
     GuthabenBuchung,
     Kunde,
     Rechnung,
@@ -212,6 +213,11 @@ def _detail_ctx(db: Session, k: Kunde) -> dict:  # type: ignore[type-arg]
             select(Buchung)
             .where(Buchung.kunde_id == k.id, Buchung.beginn >= seit)
             .order_by(Buchung.beginn.desc())
+        ).all(),
+        "abos": db.scalars(
+            select(Dauerbuchung)
+            .where(Dauerbuchung.kunde_id == k.id)
+            .order_by(Dauerbuchung.gueltig_von.desc())
         ).all(),
         "rechnungen": db.scalars(
             select(Rechnung).where(Rechnung.kunde_id == k.id).order_by(Rechnung.datum.desc())

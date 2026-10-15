@@ -541,6 +541,27 @@ def _dauer_formular_ctx(
     return ctx
 
 
+@router.get("/belegung/dauer", response_class=HTMLResponse)
+def dauer_liste(
+    request: Request,
+    admin: AdminUser = Depends(auth.aktueller_admin),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """Alle Dauerbuchungen: laufende zuerst, damit Beenden und Saisonrechnung auffindbar sind."""
+    heute = clock.today(db)
+    alle = db.scalars(
+        select(Dauerbuchung).join(Kunde, Kunde.id == Dauerbuchung.kunde_id).order_by(Kunde.name)
+    ).all()
+    laufend = [d for d in alle if d.beendet_am is None and d.gueltig_bis >= heute]
+    return render(
+        request,
+        "belegung/dauer_liste.html",
+        admin=admin,
+        laufend=laufend,
+        vergangen=[d for d in alle if d not in laufend],
+    )
+
+
 @router.get("/belegung/dauer/neu", response_class=HTMLResponse)
 def dauer_neu(
     request: Request,

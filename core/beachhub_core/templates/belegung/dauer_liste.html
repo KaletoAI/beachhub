@@ -1,0 +1,24 @@
+{% extends "base.html" %}{% block title %}Dauerbuchungen{% endblock %}
+{% block content %}
+<h1>Dauerbuchungen</h1>
+<p class="small">Auf der Seite eines Abos beenden Sie es, sehen die Termine und erstellen bei Bedarf die Saisonrechnung.</p>
+{% for titel, liste in [("Laufend", laufend), ("Beendet oder abgelaufen", vergangen)] %}
+<div class="karte">
+  <h2>{{ titel }}</h2>
+  {% if liste %}
+  <table>
+    <tr><th>Kunde</th><th>Feld</th><th>Termin</th><th>Gültig</th><th></th></tr>
+    {% for d in liste %}<tr>
+      <td><a href="/admin/kunden/{{ d.kunde_id }}">{{ d.kunde.name }}</a></td>
+      <td>{{ d.feld.name }}</td>
+      <td>{{ wochentage[d.wochentag] }} {{ d.start|uhrzeit }} – {{ d.ende|uhrzeit }} Uhr</td>
+      <td>{{ d.gueltig_von|datum }} – {{ d.gueltig_bis|datum }}{% if d.beendet_ab %} · beendet ab {{ d.beendet_ab|datum }}{% endif %}</td>
+      <td><a class="aktion" href="/admin/belegung/dauer/{{ d.id }}">anzeigen</a></td>
+    </tr>{% endfor %}
+  </table>
+  {% else %}
+  <p class="small">Keine.</p>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

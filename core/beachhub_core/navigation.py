@@ -29,6 +29,7 @@ NAVIGATION: list[Bereich] = [
             Punkt("Wochenplan", "/admin/belegung"),
             # Eine Einzelbuchung entsteht immer aus einem gewählten Slot heraus, also mit
             # einem Klick in den Wochenplan. Ein Menüpunkt dafür hätte kein Ziel.
+            Punkt("Dauerbuchungen", "/admin/belegung/dauer"),
             Punkt("Dauerbuchung anlegen", "/admin/belegung/dauer/neu"),
             Punkt("Sperre anlegen", "/admin/belegung/sperre/neu"),
         ],

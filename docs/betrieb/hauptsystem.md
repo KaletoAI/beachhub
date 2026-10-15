@@ -149,7 +149,8 @@ bekommen sofort eine offene Rechnung, bestätigte Onlinebuchungen eine bezahlte.
 **Bestandsabos und Neuausstellung.** Beim Upgrade müssen Sie vorhandene Abos auf aktive oder
 kostenpflichtig abgesagte, unberechnete Termine prüfen. Die Migration erstellt keine Rechnungen
 automatisch. Auf der
-Abo-Detailseite erzeugt **Saisonrechnung erstellen** auf Ihren ausdrücklichen Aufruf eine Rechnung
+Abo-Detailseite (Belegung → Dauerbuchungen, verlinkt auch von Kunden-, Buchungs- und
+Saisonrechnungsseite) erzeugt **Saisonrechnung erstellen** auf Ihren ausdrücklichen Aufruf eine Rechnung
 nur über diese Termine. Bereits berechnete oder korrigierte Termine sowie kostenfreie Absagen
 bleiben ausgeschlossen; historische Belege bleiben unverändert. Es kann nur eine nicht stornierte
 Saisonrechnung je Abo geben. Nach vollständigem Storno ist über dieselbe Aktion eine Neuausstellung
@@ -182,6 +183,19 @@ das System die damalige Gutschrift an und erstattet nicht ein zweites Mal.
 Die neuen Belege verrechnen Guthaben entsprechend Ihrer Einstellung; historische Zahlungen
 bleiben an der alten Rechnung. Stornoguthaben entsteht immer zusammen mit einem Korrekturbeleg;
 PDF und Mail werden erst nach erfolgreichem Commit versandt.
+
+**Welche Korrektur wofür.** Die Rechnungsseite erklärt die Wege jeweils am Formular:
+- *Termin fällt aus oder wird abgesagt:* Buchung stornieren (Positionstext oder Belegungsplan),
+  Sperre anlegen oder das Abo auf der Abo-Seite ab einem Datum **beenden**. Der Platz wird frei,
+  die Stornorechnung entsteht automatisch.
+- *Kulanz oder falscher Betrag, Termin bleibt:* **Teil-Stornorechnung** für ausgewählte
+  Positionen. Auch mit allen Positionen entsteht keine neue Rechnung; die Rechnung steht danach
+  auf „storniert“, die Buchungen bleiben bestehen.
+- *Rechnung falsch ausgestellt (etwa Adresse):* **Stornieren und neu ausstellen**
+  (Schaltfläche „Stornorechnung erzeugen“), siehe oben.
+
+Eine Stornorechnung steht mit ihrer Erstellung auf „bezahlt“: Sie ist ein erledigter
+Korrekturbeleg, ihr Betrag ist bereits als Guthaben oder als Minderung der Forderung gebucht.
 
 **Abo-Absagen.** Kunden sagen Abo-Termine im Portal bis zum Beginn ab. Bis zu `abo_freie_absagen`
 (Vorgabe 3) Absagen je Abo innerhalb der Stornofrist sind kostenfrei; weitere Absagen und Absagen

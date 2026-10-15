@@ -4,6 +4,12 @@
 <p><span class="badge">{{ r.status }}</span>
 {% if integritaet %}<span class="badge">PDF unverändert</span>{% else %}<span class="badge">PDF fehlt oder verändert</span>{% endif %}</p>
 
+{% if r.art == "storno" %}
+<p class="karte">Stornorechnung (Korrekturbeleg) zu Rechnung {% if r.korrigiert %}<a href="/admin/rechnungen/{{ r.korrigiert_rechnung_id }}">{{ r.korrigiert.nummer }}</a>{% endif %}. Sie ist mit der Erstellung erledigt und steht deshalb auf „bezahlt“: Ein bereits bezahlter Betrag wurde dem Kunden als Guthaben gutgeschrieben, ein offener Betrag mindert die Forderung der korrigierten Rechnung.</p>
+{% elif r.status == "storniert" %}
+<p class="karte">Alle Positionen dieser Rechnung sind durch Stornorechnungen korrigiert (siehe Korrekturen). Ob die Buchungen weiter bestehen und neu berechnet wurden, sehen Sie an der jeweiligen Buchung.</p>
+{% endif %}
+
 {% if gutscheinbeleg %}
 <p class="karte">Gutscheinbeleg: Änderungen erfolgen über <a href="/admin/gutscheine">die Gutscheinrückgabe</a> oder den <a href="/admin/belegung">Buchungsstorno</a>. Die zusammengehörenden Belege und Gutscheinbestände werden dort gemeinsam geprüft.</p>
 {% endif %}
@@ -29,6 +35,8 @@
     {% if r.art != "storno" %}Offener Betrag: <strong>{{ offen|euro }}</strong><br>{% endif %}
     {% if verrechnet > 0 %}Verrechnetes Guthaben: {{ verrechnet|euro }}<br>{% endif %}
     {% if r.korrigiert %}Korrigiert: <a href="/admin/rechnungen/{{ r.korrigiert_rechnung_id }}">Rechnung {{ r.korrigiert.nummer }}</a><br>{% endif %}
+    {% if r.dauerbuchung_id %}Abo: <a href="/admin/belegung/dauer/{{ r.dauerbuchung_id }}">Dauerbuchung anzeigen</a><br>{% endif %}
+    Kunde: <a href="/admin/kunden/{{ r.kunde_id }}">{{ r.kunde.name }}</a><br>
 
     {% if r.bezahlt_am %}Bezahlt am: {{ r.bezahlt_am|lokal }}<br>{% endif %}
   </p>
@@ -50,19 +58,20 @@
     <tr>{% if auswaehlbar %}<th></th>{% endif %}<th>Text</th><th class="rechts">USt</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
     {% for p in r.positionen %}<tr>
       {% if auswaehlbar %}<td>{% if p.korrigiert_durch_id is none %}<input type="checkbox" form="teilstorno" name="positionen" value="{{ p.id }}" aria-label="Position {{ p.reihenfolge }} auswählen">{% else %}<span class="badge">korrigiert</span>{% endif %}</td>{% endif %}
-      <td>{{ p.text }}</td>
+      <td>{% if p.buchung_id %}<a href="/admin/belegung/buchung/{{ p.buchung_id }}">{{ p.text }}</a>{% else %}{{ p.text }}{% endif %}</td>
       <td class="rechts">{{ p.ust_satz|prozent }}</td>
       <td class="rechts">{{ p.menge }}</td>
       <td class="rechts">{{ p.brutto|euro }}</td>
     </tr>{% endfor %}
   </table>
   {% if auswaehlbar %}
+  <h3>Gutschrift für einzelne Positionen (Teil-Storno)</h3>
+  <p class="small">Für Kulanz oder einen falsch berechneten Betrag. Die Buchungen bleiben bestehen, der Kunde behält die Termine, und sie werden nicht neu berechnet. Bereits bezahlte Beträge werden Guthaben; bei offener Rechnung sinkt die Forderung. Auch wenn Sie alle Positionen auswählen, gibt es keine neue Rechnung. Die Rechnung steht dann auf „storniert“.</p>
   <form id="teilstorno" method="post" action="/admin/rechnungen/{{ r.id }}/teilstorno" class="zeile">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <label>Grund <input name="grund" placeholder="z. B. Halle gesperrt"></label>
+    <label>Grund <input name="grund" placeholder="z. B. Kulanz, falscher Preis"></label>
     <button class="gefahr">Teil-Stornorechnung für ausgewählte Positionen</button>
   </form>
-  <p class="small">Bereits bezahlte Beträge werden dem Kunden als Guthaben gutgeschrieben; bei offener Rechnung sinkt die Forderung.</p>
   {% endif %}
   <table>
     <tr><th>Steuersatz</th><th class="rechts">Netto</th><th class="rechts">USt</th><th class="rechts">Brutto</th></tr>
@@ -108,12 +117,22 @@
 
 {% if not gutscheinbeleg and r.status != "storniert" and r.art != "storno" %}
 <div class="karte schmal">
-  <h2>Stornorechnung erzeugen</h2>
+  <h2>Stornieren und neu ausstellen</h2>
+  {% if r.art == "einzel" %}
+  <p class="small">Für eine fehlerhaft ausgestellte Rechnung, etwa mit falscher Adresse: Kundendaten zuerst ändern. Alle noch nicht korrigierten Positionen werden storniert; jede weiter berechnete Buchung bekommt sofort eine neue Einzelrechnung, auf die das bereits Bezahlte verrechnet wird. Die Buchungen bleiben bestehen.</p>
+  {% else %}
+  <p class="small">Für eine fehlerhaft ausgestellte Rechnung: Kundendaten zuerst ändern. Alle noch nicht korrigierten Positionen werden storniert, bereits Bezahltes wird Guthaben. Die Termine bleiben bestehen und werden wieder abrechenbar. Die neue Saisonrechnung erstellen Sie danach auf der {% if r.dauerbuchung_id %}<a href="/admin/belegung/dauer/{{ r.dauerbuchung_id }}">Abo-Seite</a>{% else %}Abo-Seite{% endif %} mit „Saisonrechnung erstellen“.</p>
+  {% endif %}
   <form method="post" action="/admin/rechnungen/{{ r.id }}/storno">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Grund <input name="grund" required></label>
     <button class="gefahr">Stornorechnung erzeugen</button>
   </form>
+</div>
+
+<div class="karte schmal">
+  <h2>Termin fällt aus?</h2>
+  <p class="small">Sagt der Kunde ab oder fällt die Halle aus, korrigieren Sie nicht hier: Stornieren Sie die Buchung (über den Positionstext oder den Belegungsplan) oder legen Sie eine Sperre an. Ein Abo beenden Sie auf der Abo-Seite. Die Stornorechnung entsteht dabei automatisch, und der Platz wird frei.</p>
 </div>
 {% endif %}
 </div>
