@@ -1,0 +1,21 @@
+{% extends "base.html" %}{% block title %}Mail: {{ e.betreff }}{% endblock %}
+{% block content %}
+<p><a class="aktion" href="/admin/system/postausgang">« Postausgang</a></p>
+<div class="karte mail">
+  <h1>{{ e.betreff }}</h1>
+  <table class="mail-kopf">
+    <tr><th>Von</th><td>{{ von }}</td></tr>
+    <tr><th>An</th><td>{{ e.an }}</td></tr>
+    <tr><th>Datum</th><td>{{ e.zeitpunkt|lokal }}</td></tr>
+    <tr><th>Status</th><td><span class="badge{% if e.status == 'gesendet' %} ja{% endif %}">{{ e.statustext }}</span></td></tr>
+  </table>
+  <div class="mail-text">{{ text }}</div>
+  {% if e.anhaenge %}
+  <h2>Anhänge</h2>
+  <ul class="mail-anhaenge">
+    {% for name in e.anhaenge %}<li><a href="/admin/system/postausgang/{{ e.id }}/anhang/{{ loop.index0 }}" target="_blank" rel="noopener">{{ name }}</a></li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p class="small"><a href="/admin/system/postausgang/{{ e.id }}/mail.eml">Original herunterladen (.eml)</a> – öffnet sich im Mailprogramm genau wie beim Empfänger.</p>
+</div>
+{% endblock %}

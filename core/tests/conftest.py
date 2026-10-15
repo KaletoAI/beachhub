@@ -49,7 +49,11 @@ def frisches_schema() -> Iterator[None]:
     # Test neu aufgesetzt. Ohne das hier würde eine frühere Rechnung mit derselben Nummer
     # (gleiches Jahr, Nummernkreis bei 1) der exklusiven Dateierstellung in rechnung_pdf.erzeuge
     # in die Quere kommen; ebenso für den Lesestand-Cache (Task 19).
-    for ordner in (settings.data_dir / "rechnungen", settings.data_dir / "lesestand"):
+    for ordner in (
+        settings.data_dir / "rechnungen",
+        settings.data_dir / "lesestand",
+        settings.data_dir / "postausgang",
+    ):
         if ordner.exists():
             shutil.rmtree(ordner)
     stelle_extensions_sicher(engine)

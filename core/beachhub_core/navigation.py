@@ -7,6 +7,8 @@ sichtbar, sobald sie hier eingetragen ist – nicht erst, wenn jemand sie von Ha
 
 from dataclasses import dataclass, field
 
+from beachhub_core.config import settings
+
 
 @dataclass(frozen=True)
 class Punkt:
@@ -74,6 +76,12 @@ NAVIGATION: list[Bereich] = [
             Punkt("Klärung Mitgliedschaft", "/admin/system/klaerung"),
             Punkt("Änderungsprotokoll", "/admin/system/audit"),
             Punkt("Halle", "/admin/halle"),
+            # Nur im Testsystem, siehe `beachhub_core.postausgang`.
+            *(
+                [Punkt("Postausgang", "/admin/system/postausgang")]
+                if settings.app_env != "production"
+                else []
+            ),
         ],
     ),
 ]

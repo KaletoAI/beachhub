@@ -18,6 +18,7 @@ from beachhub_core.routes import (
     gutscheine,
     hall,
     kunden,
+    postausgang,
     rechnungen,
     stammdaten,
     system,
@@ -98,6 +99,7 @@ app.include_router(belegung.router, prefix="/admin", dependencies=csrf)
 app.include_router(rechnungen.router, prefix="/admin", dependencies=csrf)
 app.include_router(gutscheine.router, prefix="/admin", dependencies=csrf)
 app.include_router(system.router, prefix="/admin", dependencies=csrf)
+app.include_router(postausgang.router, prefix="/admin", dependencies=csrf)
 app.include_router(hall.router)  # eigener Token statt Admin-Session/CSRF
 
 

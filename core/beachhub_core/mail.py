@@ -6,6 +6,7 @@ from typing import Any
 
 import aiosmtplib
 
+from beachhub_core import postausgang
 from beachhub_core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -32,12 +33,15 @@ async def _senden(m: EmailMessage) -> None:
     )
 
 
-def _sende_und_logge(m: EmailMessage, an: str) -> None:
+def _sende_und_logge(m: EmailMessage, an: str, ablage: str | None = None) -> None:
     """Mailversand darf einen Buchungs-/Rechnungsvorgang nie zum Absturz bringen."""
     try:
         asyncio.run(_senden(m))
     except Exception:  # noqa: BLE001 -- Mailversand darf aufrufende Abläufe nie stören
         logger.exception("Mailversand an %s fehlgeschlagen", an)
+        postausgang.setze_status(ablage, postausgang.FEHLER)
+    else:
+        postausgang.setze_status(ablage, postausgang.GESENDET)
 
 
 def sende(
@@ -49,13 +53,22 @@ def sende(
             {"an": an, "betreff": betreff, "text": text, "anhaenge": [n for n, _ in anhaenge]}
         )
         return
+    m = _nachricht(an, betreff, text, anhaenge)
+    ablage = None
+    if postausgang.aktiv():
+        if not postausgang.versand_an():
+            postausgang.ablegen(m, postausgang.ZURUECKGEHALTEN)
+            logger.info("Mail an %s (%s) nur im Postausgang", an, betreff)
+            return
+        ablage = postausgang.ablegen(
+            m, postausgang.WIRD_GESENDET if settings.smtp_host else postausgang.KEIN_SMTP
+        )
     if not settings.smtp_host:
         logger.warning("kein SMTP konfiguriert – Mail an %s (%s) nicht gesendet", an, betreff)
         return
-    m = _nachricht(an, betreff, text, anhaenge)
     try:
         asyncio.get_running_loop()
     except RuntimeError:
-        _sende_und_logge(m, an)
+        _sende_und_logge(m, an, ablage)
         return
-    threading.Thread(target=_sende_und_logge, args=(m, an), daemon=True).start()
+    threading.Thread(target=_sende_und_logge, args=(m, an, ablage), daemon=True).start()

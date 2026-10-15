@@ -1,0 +1,46 @@
+{% extends "base.html" %}{% block title %}Postausgang{% endblock %}
+{% block content %}
+<h1>Postausgang</h1>
+<p class="small">Nur im Testsystem: Hier steht jede Mail, die das Hauptsystem erzeugt, so wie sie beim Kunden ankommt. Mails des Portals (Anmeldecodes) erscheinen hier nicht.</p>
+
+<div class="karte schmal">
+  <h2>Versand</h2>
+  {% if versand %}
+  <p><span class="badge ja">an</span> Mails werden an die Empfänger verschickt{% if not smtp %}, sobald SMTP konfiguriert ist. Ohne <code>SMTP_HOST</code> bleiben sie vorerst hier{% endif %}.</p>
+  {% else %}
+  <p><span class="badge nein">aus</span> Mails landen nur hier und gehen an niemanden hinaus.</p>
+  {% endif %}
+  {% if admin.rolle == "admin" %}
+  <form method="post" action="/admin/system/postausgang/versand">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="an" value="{{ '0' if versand else '1' }}">
+    <button{% if not versand %} class="gefahr"{% endif %}>{{ "Versand ausschalten" if versand else "Versand einschalten" }}</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="karte">
+  <h2>Mails</h2>
+  {% if mails %}
+  <table>
+    <tr><th>Zeit</th><th>An</th><th>Betreff</th><th>Anhänge</th><th>Status</th><th></th></tr>
+    {% for e in mails %}<tr>
+      <td>{{ e.zeitpunkt|lokal }}</td>
+      <td>{{ e.an }}</td>
+      <td>{{ e.betreff }}</td>
+      <td>{{ e.anhaenge|length or "" }}</td>
+      <td><span class="badge{% if e.status == 'gesendet' %} ja{% endif %}">{{ e.statustext }}</span></td>
+      <td><a class="aktion" href="/admin/system/postausgang/{{ e.id }}">anzeigen</a></td>
+    </tr>{% endfor %}
+  </table>
+  {% if admin.rolle == "admin" %}
+  <form method="post" action="/admin/system/postausgang/leeren">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="gefahr">Postausgang leeren</button>
+  </form>
+  {% endif %}
+  {% else %}
+  <p class="small">Noch keine Mails.</p>
+  {% endif %}
+</div>
+{% endblock %}

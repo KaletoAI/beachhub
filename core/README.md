@@ -87,6 +87,17 @@ ruff check . && ruff format --check .
   wird mit dem Kunden verknüpft; ohne SMTP zeigt das Portal im Dev-Betrieb den Anmeldecode an.
   Der Befehl verweigert sich bei `APP_ENV=production` und sobald Kunden existieren.
 
+## Postausgang im Testsystem
+
+Außerhalb von `APP_ENV=production` legt das Hauptsystem jede Mail als Originalnachricht unter
+`DATA_DIR/postausgang/` ab (die neuesten 500). Unter System → Postausgang erscheinen Kopfzeilen,
+der Text mit seinen Zeilenumbrüchen, die PDF-Anhänge zum Öffnen und die `.eml`-Datei zum
+Herunterladen. Der Schalter **Versand** ist anfangs aus: Mails gehen dann an niemanden hinaus.
+Eingeschaltet werden sie zusätzlich über SMTP verschickt, der Status zeigt „gesendet“ oder
+„Versand fehlgeschlagen“. Umschalten dürfen Admins mit Rolle `admin`; es wird protokolliert.
+Mails des Portals (Anmeldecodes) laufen nicht über das Hauptsystem und erscheinen dort nicht. Im
+Produktivbetrieb gibt es weder Ablage noch Seite; Mails gehen wie bisher direkt per SMTP hinaus.
+
 ## Saisonrechnung und Guthaben
 
 Neue Dauerbuchungen erhalten ihre Saisonrechnung atomar bei der Anlage; einen Monatslauf gibt es

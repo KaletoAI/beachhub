@@ -180,3 +180,13 @@ code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9e
   .hauptnav { order:3; width:100%; }
   table { font-size:.88rem; }
 }
+
+/* ---------- Postausgang (Testsystem) ---------- */
+/* Die Mails sind reiner Text: Zeilenumbrüche und Leerzeilen so zeigen, wie ein Mailprogramm sie
+   darstellt, in einer gut lesbaren Zeilenlänge. */
+.mail { max-width:52rem; }
+.mail h1 { font-size:1.25rem; }
+.mail-kopf { margin-bottom:1rem; }
+.mail-kopf th { width:6rem; text-align:left; color:var(--gedaempft); font-weight:500; }
+.mail-text { white-space:pre-wrap; overflow-wrap:anywhere; max-width:72ch; padding:1rem 1.1rem; border:1px solid var(--rand); border-radius:6px; background:var(--bg); line-height:1.5; margin-bottom:1rem; }
+.mail-anhaenge { margin:0 0 1rem; padding-left:1.2rem; }

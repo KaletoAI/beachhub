@@ -675,6 +675,8 @@ sudo systemctl daemon-reload
   `EMAIL_FROM`). Anwendungslogs auf SMTP-Fehler prüfen (`docker compose logs -f app`). Ist
   `SMTP_HOST` leer, werden Mails nur geloggt und nicht tatsächlich versendet – für den
   Produktivbetrieb muss ein echter SMTP-Zugang eingetragen sein.
+  Auf einem Testsystem (`APP_ENV` nicht `production`) zuerst unter System → Postausgang
+  nachsehen: Ist dort der Versand aus, bleiben alle Mails absichtlich im Postausgang.
 - **Caddy startet nicht: WireGuard-Interface fehlt** (meist nach einem Reboot, wenn die
   systemd-Abhängigkeit aus diesem Abschnitt fehlt oder `wg-quick@wg0` selbst nicht hochkam):
   `systemctl status wg-quick@wg0` prüfen und bei Bedarf starten (`systemctl start wg-quick@wg0`),
