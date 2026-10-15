@@ -72,6 +72,19 @@ ruff check . && ruff format --check .
 
 - `beachhub-core keygen` – erzeugt das Ed25519-Schlüsselpaar für die Signatur des Lesestands.
 - `beachhub-core create-admin --name <name> [--rolle admin|lesend]` – legt einen Admin-Benutzer an.
+- `beachhub-core demodaten` – füllt eine Entwicklungsdatenbank ohne Kunden für den manuellen
+  Test. Fehlende Stammdaten werden im bisherigen Entwicklungsstand ergänzt: Feld 1–3, Raster
+  120 Minuten für Feld 3, Betriebszeit montags 14:45–21:30 und ein Tarif mit 40,00 € je Slot.
+  Vorhandene Stammdaten bleiben unverändert. An den nächsten beiden Tagen mit drei Slots auf
+  Feld 3 entstehen:
+  - Anna: Online-Buchung, über den Fakeanbieter bezahlt.
+  - Ben: zwei Betreiberbuchungen mit offener Rechnung.
+  - Carla: Mitglied und Rechnungskunde, Abo über acht Wochen mit Saisonrechnung.
+  - Dora: 50,00 € Guthaben.
+
+  Alle Demokunden haben Adressen `…@example.org`. Wer sich im Portal mit einer davon anmeldet,
+  wird mit dem Kunden verknüpft; ohne SMTP zeigt das Portal im Dev-Betrieb den Anmeldecode an.
+  Der Befehl verweigert sich bei `APP_ENV=production` und sobald Kunden existieren.
 
 ## Saisonrechnung und Guthaben
 

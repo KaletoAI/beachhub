@@ -14,6 +14,7 @@ def main() -> None:
     z = sub.add_parser("zertifikate", help="interne CA und Client-Zertifikate für mTLS")
     z.add_argument("--ziel", default="data/zertifikate")
     z.add_argument("--name", action="append", help="Zertifikatsname (mehrfach möglich)")
+    sub.add_parser("demodaten", help="Demodaten für den manuellen Test (nur leere Dev-Datenbank)")
     args = p.parse_args()
     if args.cmd == "create-admin":
         from beachhub_core import auth
@@ -30,6 +31,15 @@ def main() -> None:
         from beachhub_core.services import lesestand
 
         print(lesestand.erzeuge_schluessel())
+    elif args.cmd == "demodaten":
+        from beachhub_core import demodaten
+
+        with SessionLocal() as db:
+            try:
+                zeilen = demodaten.main(db)
+            except demodaten.DemodatenFehler as e:
+                p.error(str(e))
+        print("\n".join(zeilen))
     elif args.cmd == "zertifikate":
         from pathlib import Path
 
