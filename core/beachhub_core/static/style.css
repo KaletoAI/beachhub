@@ -159,6 +159,11 @@ code { font-family:ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.9e
 .kalender .sperre { background:var(--warn-bg); color:var(--warn); border-color:var(--warn); display:flex; justify-content:space-between; align-items:center; gap:.3rem; }
 .kalender .sperre form.inline { margin:0; }
 .kalender .storno { opacity:.5; text-decoration:line-through; }
+.kalender .leer { color:var(--gedaempft); background:transparent; border-style:dashed; text-align:center; }
+/* Feldauswahl im Wochenplan: Häkchen nebeneinander, umbrechend bei vielen Feldern. */
+.feldauswahl { display:flex; flex-wrap:wrap; gap:.25rem 1rem; margin:0; padding:0; border:0; }
+.feldauswahl legend { width:100%; padding-bottom:.25rem; }
+.feldauswahl label { margin:0; color:var(--fg); }
 
 .zeile { display:flex; gap:1rem; flex-wrap:wrap; align-items:start; }
 .zeile > * { flex:1; min-width:160px; }

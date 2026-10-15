@@ -137,6 +137,12 @@ Betrieb beginnt:
 
 ## 5. Laufender Betrieb
 
+**Belegungsplan.** Unter Belegung → Wochenplan haken Sie die Felder an, die Sie sehen möchten;
+jedes Feld erscheint mit seinem eigenen Wochenplan untereinander. Ohne Auswahl zeigt der Plan die
+ersten fünf aktiven Felder in ihrer Reihenfolge. Die Auswahl bleibt beim Wochenwechsel erhalten.
+Ein Klick auf einen freien Slot legt dort eine Buchung an. Laufende und beendete Abos finden Sie
+unter Belegung → Dauerbuchungen.
+
 **Rechnungen.** Es gibt keinen Monatslauf mehr. Jede neue Dauerbuchung bekommt bei ihrer Anlage
 in derselben Transaktion genau eine **Saisonrechnung** über alle erzeugten Termine
 (Zahlungsziel `saison_zahlungsziel_tage`, Vorgabe 14 Tage). Vorhandenes Guthaben wird dabei

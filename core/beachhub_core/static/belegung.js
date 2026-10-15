@@ -1,12 +1,14 @@
-// Belegungsplan: bequemer Feldwechsel ohne den (immer sichtbaren) "Anzeigen"-Button zu
+// Belegungsplan: Feldauswahl wirkt sofort, ohne den (immer sichtbaren) "Anzeigen"-Button zu
 // erfordern. Rein progressive Verbesserung – ohne JavaScript funktioniert das Formular
 // unverändert über den Button.
 document.addEventListener("DOMContentLoaded", function () {
   var form = document.getElementById("belegung-feld-form");
-  var auswahl = form ? form.querySelector("select[name='feld']") : null;
-  if (auswahl) {
-    auswahl.addEventListener("change", function () {
+  if (!form) {
+    return;
+  }
+  form.querySelectorAll("input[name='feld']").forEach(function (haken) {
+    haken.addEventListener("change", function () {
       form.submit();
     });
-  }
+  });
 });

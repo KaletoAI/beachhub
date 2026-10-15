@@ -6,19 +6,24 @@
 {% else %}
 <div class="karte werkzeuge">
   <form method="get" action="/admin/belegung" id="belegung-feld-form" class="werkzeuge">
-    <label>Feld <select name="feld">
-      {% for x in felder %}<option value="{{ x.id }}" {% if x.id == feld.id %}selected{% endif %}>{{ x.name }}</option>{% endfor %}
-    </select></label>
+    <fieldset class="feldauswahl">
+      <legend>Felder</legend>
+      {% for x in felder %}<label><input type="checkbox" name="feld" value="{{ x.id }}" {% if x.id in auswahl %}checked{% endif %}> {{ x.name }}</label>
+      {% endfor %}
+    </fieldset>
     <input type="hidden" name="woche" value="{{ montag.isoformat() }}">
     <button>Anzeigen</button>
   </form>
   <nav class="aktionen" aria-label="Woche wechseln">
-    <a class="aktion" href="/admin/belegung?feld={{ feld.id }}&woche={{ vorher.isoformat() }}">« Vorherige Woche</a>
-    <a class="aktion" href="/admin/belegung?feld={{ feld.id }}&woche={{ nachher.isoformat() }}">Nächste Woche »</a>
+    <a class="aktion" href="/admin/belegung?{{ auswahl_query }}woche={{ vorher.isoformat() }}">« Vorherige Woche</a>
+    <a class="aktion" href="/admin/belegung?{{ auswahl_query }}woche={{ nachher.isoformat() }}">Nächste Woche »</a>
   </nav>
 </div>
+{% if felder|length > auswahl|length and not auswahl_query %}<p class="small">Ohne Auswahl werden die ersten {{ auswahl|length }} Felder angezeigt.</p>{% endif %}
 
+{% for feld, tage in plaene %}
 <div class="karte">
+  <h2>{{ feld.name }}</h2>
   <div class="kalender">
     {% for tag in tage %}
     <div class="tag">
@@ -37,11 +42,14 @@
           </form>
         </div>
         {% endif %}
+      {% else %}
+        <div class="zelle leer">geschlossen</div>
       {% endfor %}
     </div>
     {% endfor %}
   </div>
 </div>
+{% endfor %}
 {% endif %}
 <script src="/static/belegung.js"></script>
 {% endblock %}

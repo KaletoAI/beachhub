@@ -2,10 +2,10 @@ import logging
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Annotated, Any
 
 from beachhub_shared.zeit import BERLIN, kombiniere
-from fastapi import APIRouter, Depends, Form, Request
+from fastapi import APIRouter, Depends, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -99,9 +99,16 @@ def _lokal(v: str) -> datetime:
     return kombiniere(naiv.date(), naiv.time())
 
 
-def _woche_url(feld_id: uuid.UUID, tag: datetime) -> str:
+# Ohne Auswahl zeigt der Wochenplan so viele Felder nebeneinander bzw. untereinander.
+STANDARD_FELDER = 5
+
+
+def _woche_url(db: Session, feld_id: uuid.UUID, tag: datetime) -> str:
+    """Zurück zur Woche; das Feld wird nur genannt, wenn es nicht ohnehin angezeigt wird."""
     lokal = tag.astimezone(BERLIN).date()
     montag = lokal - timedelta(days=lokal.weekday())
+    if feld_id in {f.id for f in _aktive_felder(db)[:STANDARD_FELDER]}:
+        return f"/admin/belegung?woche={montag.isoformat()}"
     return f"/admin/belegung?feld={feld_id}&woche={montag.isoformat()}"
 
 
@@ -143,24 +150,22 @@ def _belege_der_buchungen(db: Session, buchung_ids: list[uuid.UUID]) -> list[uui
 @router.get("/belegung", response_class=HTMLResponse)
 def woche(
     request: Request,
-    feld: str = "",
+    feld: Annotated[list[str] | None, Query()] = None,
     woche: str = "",
     admin: AdminUser = Depends(auth.aktueller_admin),
     db: Session = Depends(get_db),
 ) -> HTMLResponse:
+    """Wochenplan der angehakten Felder; ohne gültige Auswahl die ersten `STANDARD_FELDER`."""
     felder = _aktive_felder(db)
     if not felder:
         return render(
-            request, "belegung/woche.html", admin=admin, felder=[], feld=None, tage=[], montag=None
+            request, "belegung/woche.html", admin=admin, felder=[], plaene=[], montag=None
         )
-    f = felder[0]
-    if feld:
-        try:
-            gefunden = db.get(Feld, uuid.UUID(feld))
-        except ValueError:
-            gefunden = None
-        if gefunden is not None:
-            f = gefunden
+    gewaehlt = set(feld or [])
+    auswahl = [f for f in felder if str(f.id) in gewaehlt]
+    explizit = bool(auswahl)
+    if not auswahl:
+        auswahl = felder[:STANDARD_FELDER]
     heute = clock.today(db)
     montag = t_datum(woche) or heute
     montag -= timedelta(days=montag.weekday())
@@ -169,9 +174,10 @@ def woche(
         "belegung/woche.html",
         admin=admin,
         felder=felder,
-        feld=f,
+        auswahl={f.id for f in auswahl},
+        auswahl_query="".join(f"feld={f.id}&" for f in auswahl) if explizit else "",
+        plaene=[(f, belegung.wochenplan(db, f, montag)) for f in auswahl],
         montag=montag,
-        tage=belegung.wochenplan(db, f, montag),
         vorher=montag - timedelta(days=7),
         nachher=montag + timedelta(days=7),
         iso_lokal=_iso_lokal,
@@ -271,7 +277,7 @@ def buchung_anlegen(
         else:
             benachrichtigung.rechnung(db, r)
     return mit_flash(
-        RedirectResponse(_woche_url(b.feld_id, b.beginn), status_code=303), "Buchung angelegt"
+        RedirectResponse(_woche_url(db, b.feld_id, b.beginn), status_code=303), "Buchung angelegt"
     )
 
 
@@ -281,7 +287,7 @@ def _buchung_ctx(db: Session, b: Buchung) -> dict[str, Any]:
         "b": b,
         "pin": pin.entschluessele(b.pin_verschluesselt) if b.pin_verschluesselt else None,
         "position": position,
-        "zurueck": _woche_url(b.feld_id, b.beginn),
+        "zurueck": _woche_url(db, b.feld_id, b.beginn),
     }
 
 
@@ -466,7 +472,7 @@ async def sperre_anlegen(
     if ziel_feld is None:
         return mit_flash(RedirectResponse("/admin/belegung", status_code=303), "Sperre angelegt")
     return mit_flash(
-        RedirectResponse(_woche_url(ziel_feld, beginn), status_code=303), "Sperre angelegt"
+        RedirectResponse(_woche_url(db, ziel_feld, beginn), status_code=303), "Sperre angelegt"
     )
 
 

@@ -636,3 +636,55 @@ def test_review2_6_daueranlage_bestaetigt_verdraengten_kunden(
     an_a = [m["betreff"] for m in mail.TEST_AUSGANG if m["an"] == "a@x.de"]
     assert an_a[0] == "Stornierung Ihrer Buchung"
     assert len(an_a) == 2 and an_a[1].startswith("Stornorechnung ")
+
+
+def test_woche_zeigt_mehrere_felder_per_haken(eingeloggt: TestClient, db: Session, welt) -> None:
+    f, a, _ = welt
+    weitere = []
+    for i in range(2, 7):
+        x = Feld(name=f"F{i}", reihenfolge=i)
+        x.raster.append(FeldRaster(wochentag=None, modus="dauer", slot_minuten=60, fenster_json=[]))
+        weitere.append(x)
+    ohne_raster = weitere[1]
+    ohne_raster.raster.clear()
+    db.add_all(weitere)
+    db.commit()
+    c = eingeloggt
+
+    def ueberschriften(html: str) -> list[str]:
+        return [n for n in ["F1", "F2", "F3", "F4", "F5", "F6"] if f"<h2>{n}</h2>" in html]
+
+    # Ohne Auswahl die ersten fünf Felder, jedes mit eigenem Plan; ohne Raster „geschlossen“.
+    seite = c.get("/admin/belegung?woche=2027-11-29").text
+    assert ueberschriften(seite) == ["F1", "F2", "F3", "F4", "F5"]
+    assert seite.count('type="checkbox" name="feld"') == 6
+    assert seite.count("checked") == 5 and "ersten 5 Felder" in seite
+    assert 'class="zelle leer">geschlossen' in seite
+    # Explizite Auswahl bleibt beim Blättern erhalten.
+    sechs = weitere[-1]
+    seite = c.get(f"/admin/belegung?feld={f.id}&feld={sechs.id}&woche=2027-11-29").text
+    assert ueberschriften(seite) == ["F1", "F6"]
+    assert f'href="/admin/belegung?feld={f.id}&amp;feld={sechs.id}&amp;woche=2027-12-06"' in seite
+    assert f"/admin/belegung/buchung/neu?feld={sechs.id}&beginn=" in seite
+    # Ungültige Angaben fallen auf die Standardauswahl zurück.
+    assert ueberschriften(c.get("/admin/belegung?feld=kaputt").text) == [
+        "F1",
+        "F2",
+        "F3",
+        "F4",
+        "F5",
+    ]
+    # Nach dem Buchen geht es zur Standardansicht, solange das Feld darin enthalten ist.
+    for ziel, erwartet in [(f, "/admin/belegung?woche=2027-11-29"), (sechs, f"feld={sechs.id}")]:
+        r = c.post(
+            "/admin/belegung/buchung",
+            data={
+                "csrf_token": c.csrf,
+                "feld_id": str(ziel.id),
+                "kunde_id": str(a.id),
+                "beginn": "2027-12-01T19:00",
+                "ende": "2027-12-01T20:00",
+            },
+            follow_redirects=False,
+        )
+        assert r.status_code == 303 and erwartet in r.headers["location"]
