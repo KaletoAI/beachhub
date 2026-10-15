@@ -120,3 +120,15 @@ Verkaufs- und Codeeingabeoberfläche einschließlich IP-Limit folgen in Stufe 2.
 Der echte Zahlungsanbieter und die echte Hallentechnik sind noch anzubinden; E2E nutzt den
 Fakeanbieter, Hallentests Simulatoren. Der aktuelle Plan vom 05.10.2026 ersetzt den historischen
 Gutscheinplan vom 03.10.2026. Stand bei Folgeaufgaben erneut anhand von Code und Dokumentation prüfen.
+
+## Nachreview Stufe 1a-II am 15.10.2026
+
+Befunde in `docs/superpowers/reviews/2026-10-15-stufe-1a-II-nachreview.md`, alle behoben:
+Vollstorno einer Einzelrechnung stellt weiter abrechenbare Buchungen sofort neu aus und verrechnet
+den erstatteten Anteil; `rechnungen.storniere` liefert `Vollstorno(beleg, neu)`. Beleglose
+Stornogutschriften vor 0014 werden beim Nachholen des Belegs angerechnet. Die Datenmigration
+`0016_upgrade_1a_ii` folgt auf `0015_gutscheine`, markiert Konto-Dokumente und setzt den
+Saisonende-Marker beim Upgrade. Sperre, Daueranlage und
+Abo-Ende verschicken Stornobestätigungen für die tatsächlich erzeugten Stornos
+(mit Gutschein-Rückabwicklungshinweis und Gutschein-Korrekturbelegen). Der Kanal meldet
+bei Abo-Absagen `korrekturbeleg`; Portal vor Hauptsystem aktualisieren.

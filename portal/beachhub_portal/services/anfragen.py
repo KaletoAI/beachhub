@@ -308,6 +308,14 @@ MELDUNGEN: dict[str, str] = {
     "abo_storniert_kostenpflichtig": (
         "Dein Abo-Termin ist storniert und der Platz wieder frei. Der Termin bleibt berechnet."
     ),
+    "abo_storniert_gutgeschrieben": (
+        "Dein Abo-Termin ist storniert. Er war bereits gutgeschrieben; die Absage verbraucht "
+        "keine freie Absage."
+    ),
+    "abo_storniert_unberechnet": (
+        "Dein Abo-Termin ist storniert. Die Absage ist kostenfrei; der Termin wird nicht "
+        "berechnet."
+    ),
 }
 
 
@@ -413,6 +421,11 @@ def stand(
         art = "storniert_kostenfrei" if antwort.get("kostenfrei") else "storniert_kostenpflichtig"
         if antwort.get("freie_absage") is not None:
             art = f"abo_{art}"
+            # Die Geldwirkung meldet das Hauptsystem; ältere Versionen senden sie nicht.
+            if art == "abo_storniert_kostenfrei" and antwort.get("freie_absage") is False:
+                art = "abo_storniert_gutgeschrieben"
+            elif art == "abo_storniert_kostenfrei" and antwort.get("korrekturbeleg") is False:
+                art = "abo_storniert_unberechnet"
         text = MELDUNGEN[art]
         rest = antwort.get("verbleibende_freie_absagen")
         if rest is not None:

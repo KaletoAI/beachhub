@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Buchung, Sperre
+from beachhub_core.models import Buchung, Sperre, Storno
 from beachhub_core.services import audit, gutschein_sperren
 
 
@@ -43,7 +43,10 @@ def lege_an(
     grund: str,
     admin_user_id: uuid.UUID | None,
     entscheidungen: dict[uuid.UUID, str],
+    stornos: list[Storno] | None = None,
 ) -> list[Sperre]:
+    """Legt die Sperre an und storniert die zu stornierenden betroffenen Buchungen kostenfrei.
+    `stornos` sammelt die dabei erzeugten Stornos für Mail und Belege nach dem Commit."""
     if ende <= beginn:
         raise SperrenFehler("zeitraum_ungueltig")
     # Check for overlapping Sperren before writing anything
@@ -79,7 +82,7 @@ def lege_an(
         ergebnis.append(s)
     for b in betroffen:
         if entscheidungen[b.id] == "stornieren":
-            STORNIERE(
+            st = STORNIERE(
                 db,
                 b,
                 durch="betreiber",
@@ -88,6 +91,8 @@ def lege_an(
                 sperrkontext=sperrkontext,
                 admin_user_id=admin_user_id,
             )
+            if stornos is not None:
+                stornos.append(st)
     from beachhub_core.services import lesestand
 
     lesestand.markiere_geaendert(db, "belegung")

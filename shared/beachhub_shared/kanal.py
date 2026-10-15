@@ -143,6 +143,9 @@ class Antwort(BaseModel):
     # Abo-Absage: zählt sie zum Kontingent, und wie viele freie Absagen bleiben?
     freie_absage: bool | None = None
     verbleibende_freie_absagen: int | None = None
+    # Abo-Absage: Hat ein Korrekturbeleg die Rechnung gemindert? False heißt ohne Geldwirkung
+    # (Termin unberechnet oder bereits gutgeschrieben). Ältere Hauptsysteme senden nichts.
+    korrekturbeleg: bool | None = None
     pdf_base64: str | None = None
     dateiname: str | None = None
 

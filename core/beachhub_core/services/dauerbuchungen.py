@@ -7,7 +7,15 @@ from beachhub_shared.zeit import kombiniere
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from beachhub_core.models import Buchung, Dauerbuchung, Kunde, Rechnung, Sperre, utcnow
+from beachhub_core.models import (
+    Buchung,
+    Dauerbuchung,
+    Kunde,
+    Rechnung,
+    Sperre,
+    Storno,
+    utcnow,
+)
 from beachhub_core.services import (
     audit,
     buchungen,
@@ -93,6 +101,7 @@ def lege_an(
     auslassen: set[date],
     entscheidungen: dict[uuid.UUID, str],
     rechnungskunde_setzen: bool = False,
+    stornos: list[Storno] | None = None,
 ) -> Dauerbuchung:
     termine = [
         t
@@ -160,7 +169,7 @@ def lege_an(
     db.flush()
     for t in termine:
         for k in t.kollisionen:
-            sperren.STORNIERE(
+            s = sperren.STORNIERE(
                 db,
                 k,
                 durch="betreiber",
@@ -169,6 +178,8 @@ def lege_an(
                 sperrkontext=sperrkontext,
                 admin_user_id=admin_user_id,
             )
+            if stornos is not None:
+                stornos.append(s)
         buchungen.lege_an(
             db,
             feld_id=feld_id,
@@ -183,7 +194,7 @@ def lege_an(
         )
     db.flush()
     db.refresh(dauer)
-    rechnungen.erzeuge_saisonrechnung(db, dauer, quelle="admin")
+    rechnungen.erzeuge_saisonrechnung(db, dauer, quelle="admin", admin_user_id=admin_user_id)
     audit.protokolliere(
         db,
         quelle="admin",
@@ -197,11 +208,17 @@ def lege_an(
 
 
 def beende(
-    db: Session, dauer: Dauerbuchung, *, ab: date, admin_user_id: uuid.UUID | None
+    db: Session,
+    dauer: Dauerbuchung,
+    *,
+    ab: date,
+    admin_user_id: uuid.UUID | None,
+    stornos: list[Storno] | None = None,
 ) -> list[Rechnung]:
     """Beendet eine Dauerbuchung ab einem Datum: künftige Termine werden kostenfrei storniert
     (A-DAUER-4) und die Saisonrechnung mit einem Korrekturbeleg über alle betroffenen Termine
-    korrigiert (A-RECH-7). Liefert die Belege für den Versand nach dem Commit."""
+    korrigiert (A-RECH-7). Liefert die Belege für den Versand nach dem Commit; `stornos`
+    sammelt die Stornos für die Stornobestätigung."""
     from beachhub_core.services import storno
 
     grenze = kombiniere(ab, time(0, 0))
@@ -233,7 +250,7 @@ def beende(
     vorher = audit.als_dict(dauer)
     betroffen = [b for b in dauer.buchungen if b.beginn >= grenze and b.aktiv]
     for b in betroffen:
-        storno.storniere(
+        s = storno.storniere(
             db,
             b,
             durch="betreiber",
@@ -243,6 +260,8 @@ def beende(
             korrigieren=False,
             sperrkontext=sperrkontext,
         )
+        if stornos is not None:
+            stornos.append(s)
     belege = storno.gutschreiben_alle(
         db,
         betroffen,

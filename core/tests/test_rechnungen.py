@@ -206,7 +206,7 @@ def test_einzelrechnung_mit_ust(db: Session, welt) -> None:
         rechnungen.erzeuge_einzelrechnung(db, b)
 
 
-def test_stornorechnung_gibt_buchungen_frei(db: Session, welt) -> None:
+def test_stornorechnung_stellt_einzelrechnung_neu_aus(db: Session, welt) -> None:
     f, _, v1 = welt
     b = buchungen.lege_an(
         db,
@@ -217,14 +217,15 @@ def test_stornorechnung_gibt_buchungen_frei(db: Session, welt) -> None:
     )
     r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
     db.commit()
-    s = rechnungen.storniere(db, r, admin_user_id=None, grund="Falscher Preis")
+    erg = rechnungen.storniere(db, r, admin_user_id=None, grund="Falscher Preis")
     db.commit()
+    s = erg.beleg
     assert s.art == "storno" and s.brutto == Decimal("-30.00") and s.storniert_durch_id is None
     assert s.korrigiert_rechnung_id == r.id
-    assert (
-        r.status == "storniert" and r.storniert_durch_id == s.id and b.rechnung_position_id is None
-    )
-    assert db.query(Rechnung).count() == 2
+    assert r.status == "storniert" and r.storniert_durch_id == s.id
+    (neu,) = erg.neu
+    assert neu.status == "offen" and b.rechnung_position_id == neu.positionen[0].id
+    assert db.query(Rechnung).count() == 3
 
 
 def test_csv_export(db: Session, welt) -> None:
@@ -293,7 +294,7 @@ def test_setze_bezahlt_und_nicht_offen(db: Session, welt) -> None:
     assert db.query(Audit).filter_by(objekt_typ="rechnung", objekt_id=r.id).count() > 0
 
 
-def test_nach_stornorechnung_kann_buchung_neu_berechnet_werden(db: Session, welt) -> None:
+def test_nach_stornorechnung_ist_buchung_genau_einmal_berechnet(db: Session, welt) -> None:
     f, a, _ = welt
     b = buchungen.lege_an(
         db,
@@ -304,12 +305,12 @@ def test_nach_stornorechnung_kann_buchung_neu_berechnet_werden(db: Session, welt
     )
     r = rechnungen.erzeuge_einzelrechnung(db, b)
     db.commit()
-    rechnungen.storniere(db, r, admin_user_id=None, grund="Falscher Preis")
+    (r2,) = rechnungen.storniere(db, r, admin_user_id=None, grund="Falscher Preis").neu
     db.commit()
-    r2 = rechnungen.erzeuge_einzelrechnung(db, b)
-    db.commit()
-    assert r2.nummer != r.nummer
+    assert r2.nummer != r.nummer and r2.status == "bezahlt"
     assert b.rechnung_position_id == r2.positionen[0].id
+    with pytest.raises(rechnungen.RechnungsFehler, match="bereits_berechnet"):
+        rechnungen.erzeuge_einzelrechnung(db, b)
     assert db.query(Rechnung).count() == 3
 
 
@@ -381,7 +382,7 @@ def test_rundung_je_position(db: Session, welt) -> None:
 
 def test_storno_negiert_je_satz(db: Session, welt) -> None:
     r = _zwei_saetze(db, welt)
-    s = rechnungen.storniere(db, r, admin_user_id=None, grund="Test")
+    s = rechnungen.storniere(db, r, admin_user_id=None, grund="Test").beleg
     db.commit()
     assert [(z.ust_satz, z.netto, z.ust) for z in rechnungen.steuer_je_satz(s)] == [
         (Decimal("7.00"), Decimal("-28.04"), Decimal("-1.96")),

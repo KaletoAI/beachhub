@@ -13,6 +13,7 @@
     <td>
       <form method="post" action="/admin/kunden/guthabenliste/{{ k.id }}/auszahlung" class="zeile">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="stand" value="{{ k.guthaben }}">
         <label>Betrag <input name="betrag" value="{{ k.guthaben|wert }}" required></label>
         <label>Notiz <input name="notiz" placeholder="überwiesen am …"></label>
         <button>Ausgezahlt</button>

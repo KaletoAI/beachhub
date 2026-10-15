@@ -1,4 +1,3 @@
-import logging
 import uuid
 from datetime import date
 
@@ -18,7 +17,6 @@ from beachhub_core.services.rechnungen import RechnungsFehler
 from beachhub_core.templating import mit_flash, render
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 GRUND = {
     "gutschein_fachvorgang": (
@@ -207,7 +205,9 @@ def storno(
             RedirectResponse("/admin/rechnungen", status_code=303), "Nicht gefunden", "fehler"
         )
     try:
-        s = rechnungen.storniere(db, r, admin_user_id=admin.id, grund=grund)
+        erg = rechnungen.storniere(db, r, admin_user_id=admin.id, grund=grund)
+        beleg_id, nummer = erg.beleg.id, erg.beleg.nummer
+        neu = [(n.id, n.nummer) for n in erg.neu]
         db.commit()
     except (RechnungsFehler, ValueError, IntegrityError) as e:
         db.rollback()
@@ -216,18 +216,11 @@ def storno(
             fehlertext(e, GRUND),
             "fehler",
         )
-    try:
-        rechnung_pdf.erzeuge(db, s)
-        db.commit()
-    except RechnungsFehler:
-        logger.exception("PDF-Erzeugung für Stornorechnung %s fehlgeschlagen", s.nummer)
-        db.rollback()
-    else:
-        benachrichtigung.rechnung(db, s)
-    return mit_flash(
-        RedirectResponse(f"/admin/rechnungen/{s.id}", status_code=303),
-        f"Stornorechnung {s.nummer} erzeugt",
-    )
+    benachrichtigung.belege_versenden(db, [beleg_id, *(i for i, _ in neu)])
+    meldung = f"Stornorechnung {nummer} erzeugt"
+    if neu:
+        meldung += ", neu ausgestellt: " + ", ".join(n for _, n in neu)
+    return mit_flash(RedirectResponse(f"/admin/rechnungen/{beleg_id}", status_code=303), meldung)
 
 
 @router.post("/rechnungen/{rechnung_id}/teilstorno", response_model=None)

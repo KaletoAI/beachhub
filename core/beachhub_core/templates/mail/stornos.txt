@@ -1,0 +1,15 @@
+Hallo {{ kunde.name }},
+
+folgende Buchungen wurden storniert:
+{% for s in stornos %}
+- Feld {{ s.buchung.feld.name }}, {{ s.buchung.beginn|lokal }} bis {{ s.buchung.ende|uhrzeit }} Uhr{% if not s.kostenfrei %} (bleibt berechnet){% endif %}
+{%- endfor %}
+
+{% if stornos|selectattr("kostenfrei")|list|length == stornos|length -%}
+Die Stornierung ist für Sie kostenfrei.
+{%- else -%}
+Termine mit dem Hinweis „bleibt berechnet“ werden weiter berechnet; der Platz ist trotzdem frei.
+{%- endif %}
+
+Viele Grüße
+{{ betreiber }}

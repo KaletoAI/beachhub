@@ -59,6 +59,15 @@ class Posten:
 
 
 @dataclass(frozen=True)
+class Vollstorno:
+    """Ergebnis von `storniere`: der Korrekturbeleg und die in derselben Transaktion neu
+    ausgestellten Einzelrechnungen."""
+
+    beleg: Rechnung
+    neu: list[Rechnung]
+
+
+@dataclass(frozen=True)
 class SteuerZeile:
     ust_satz: Decimal
     netto: Decimal
@@ -415,35 +424,51 @@ def _neue_rechnung(
 
 
 def erzeuge_einzelrechnung(
-    db: Session, buchung: Buchung, *, quelle: str = "system", status: str = "bezahlt"
+    db: Session,
+    buchung: Buchung,
+    *,
+    quelle: str = "system",
+    status: str = "bezahlt",
+    admin_user_id: uuid.UUID | None = None,
 ) -> Rechnung:
     """Online bezahlte Buchungen bekommen eine bezahlte Rechnung (A-RECH-2), Betreiberbuchungen
     eine offene mit Zahlungsziel (A-ZAHL-1)."""
     if buchung.rechnung_position_id is not None:
         raise RechnungsFehler("bereits_berechnet")
     d = lokales_datum(buchung.beginn)
+    zusatz = "" if buchung.aktiv else " (kostenpflichtig storniert)"
     return _neue_rechnung(
         db,
         buchung.kunde,
         "einzel",
-        [Posten(buchung, _positionstext(buchung), buchung.preis, buchung.ust_satz)],
+        [Posten(buchung, _positionstext(buchung, zusatz), buchung.preis, buchung.ust_satz)],
         d,
         d,
         status,
         quelle=quelle,
+        admin_user_id=admin_user_id,
     )
 
 
-def verrechne_guthaben(db: Session, r: Rechnung, *, quelle: str) -> Decimal:
+def verrechne_guthaben(
+    db: Session,
+    r: Rechnung,
+    *,
+    quelle: str,
+    hoechstens: Decimal | None = None,
+    admin_user_id: uuid.UUID | None = None,
+) -> Decimal:
     """Verrechnet Guthaben des Kunden mit dem offenen Betrag – als Zahlung, nicht als
     Preisminderung (A-ZAHL-4). Deckt es alles, ist die Rechnung bezahlt. Einmal je Rechnung
-    (provider_ref ist eindeutig)."""
+    (provider_ref ist eindeutig). `hoechstens` begrenzt den verrechneten Betrag."""
     sperre(db, r)
     kunde = r.kunde
     db.refresh(kunde)
     if db.scalar(select(Zahlung.id).where(Zahlung.provider_ref == f"guthaben:{r.id}")):
         return NULL
     betrag = min(kunde.guthaben, offener_betrag(db, r))
+    if hoechstens is not None:
+        betrag = min(betrag, hoechstens)
     if betrag <= NULL:
         return NULL
     guthaben.buche(
@@ -453,6 +478,7 @@ def verrechne_guthaben(db: Session, r: Rechnung, *, quelle: str) -> Decimal:
         art="verrechnung",
         bezug_id=r.id,
         notiz=f"Verrechnung mit Rechnung {r.nummer}",
+        admin_user_id=admin_user_id,
         quelle=quelle,
     )
     db.add(
@@ -477,12 +503,14 @@ def verrechne_guthaben(db: Session, r: Rechnung, *, quelle: str) -> Decimal:
             objekt_id=r.id,
             vorher=vorher,
             nachher={**audit.als_dict(r), "bezahlt_durch": "guthaben"},
+            admin_user_id=admin_user_id,
         )
     return betrag
 
 
 def saison_abrechenbar(buchung: Buchung) -> bool:
-    """Unberechnet und aktiv oder nachweisbar kostenpflichtig abgesagt."""
+    """Unberechnet und aktiv oder nachweisbar kostenpflichtig abgesagt. Gilt auch für die
+    Neuausstellung von Einzelrechnungen."""
     return buchung.rechnung_position_id is None and (
         buchung.aktiv
         or (
@@ -493,7 +521,13 @@ def saison_abrechenbar(buchung: Buchung) -> bool:
     )
 
 
-def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "admin") -> Rechnung:
+def erzeuge_saisonrechnung(
+    db: Session,
+    dauer: Dauerbuchung,
+    *,
+    quelle: str = "admin",
+    admin_user_id: uuid.UUID | None = None,
+) -> Rechnung:
     """Vorausrechnung über die abrechenbaren unberechneten Termine einer Dauerbuchung
     (A-RECH-3): Leistungszeitraum erster bis letzter Termin, Zahlungsziel
     `saison_zahlungsziel_tage`. Ist es eingestellt, wird Guthaben sofort verrechnet (A-ZAHL-4).
@@ -547,9 +581,10 @@ def erzeuge_saisonrechnung(db: Session, dauer: Dauerbuchung, *, quelle: str = "a
         quelle=quelle,
         zahlungsziel_tage=konfiguration.hole(db, "saison_zahlungsziel_tage"),
         dauerbuchung_id=dauer.id,
+        admin_user_id=admin_user_id,
     )
     if konfiguration.hole(db, "guthaben_auf_saisonrechnung"):
-        verrechne_guthaben(db, r, quelle=quelle)
+        verrechne_guthaben(db, r, quelle=quelle, admin_user_id=admin_user_id)
     return r
 
 
@@ -578,10 +613,15 @@ def setze_bezahlt(db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID |
 
 def storniere(
     db: Session, rechnung: Rechnung, *, admin_user_id: uuid.UUID | None, grund: str
-) -> Rechnung:
+) -> Vollstorno:
     """Voll-Storno zur Korrektur mit Neuausstellung (A-RECH-4): korrigiert alle noch nicht
     korrigierten Positionen und gibt die Buchungen zur Neuberechnung frei. Der verbleibende
-    bezahlte Anteil wird mit Korrekturbeleg als Guthaben zurückgegeben."""
+    bezahlte Anteil wird mit Korrekturbeleg als Guthaben zurückgegeben.
+
+    Saisonrechnungen stellt der Betreiber ausdrücklich neu aus (`erzeuge_saisonrechnung`).
+    Einzelrechnungen haben keine eigene Aktion dafür: Weiter abrechenbare Buchungen bekommen in
+    derselben Transaktion eine neue Einzelrechnung, auf die der eben erstattete Anteil
+    verrechnet wird. Sonst behielte der Kunde Leistung und Erstattung."""
     pruefe_allgemeinen_rechnungsvorgang(rechnung, "storno")
     sperre(db, rechnung)
     pruefe_allgemeinen_rechnungsvorgang(rechnung, "storno")
@@ -590,6 +630,7 @@ def storniere(
     offen = [p for p in rechnung.positionen if p.korrigiert_durch_id is None]
     if not offen:
         raise RechnungsFehler("nicht_stornierbar")
+    from beachhub_core.models import GuthabenBuchung
     from beachhub_core.services import storno
 
     beleg = storno.gutschreiben_positionen(
@@ -597,17 +638,52 @@ def storniere(
     )
     # Nur die vor diesem Vollstorno unberichtigten Positionen werden freigegeben.
     # Frühere Teilkorrekturen bleiben am aktiven Termin als Abrechnungsausschluss erhalten.
+    frei: list[Buchung] = []
     for p in offen:
         if p.buchung_id:
             b = db.get(Buchung, p.buchung_id)
             if b is not None and b.rechnung_position_id == p.id:
+                vorher = audit.als_dict(b)
                 b.rechnung_position_id = None
+                audit.protokolliere(
+                    db,
+                    quelle="admin",
+                    objekt_typ="buchung",
+                    objekt_id=b.id,
+                    vorher=vorher,
+                    nachher={**audit.als_dict(b), "grund": f"Vollstorno: {grund}"},
+                    admin_user_id=admin_user_id,
+                )
+                frei.append(b)
             p.buchung_id = None
     db.flush()
+    neu: list[Rechnung] = []
+    if rechnung.art == "einzel":
+        erstattet = Decimal(
+            str(
+                db.scalar(
+                    select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0)).where(
+                        GuthabenBuchung.bezug_id == beleg.id,
+                        GuthabenBuchung.art == "storno_gutschrift",
+                    )
+                )
+            )
+        )
+        for b in frei:
+            db.refresh(b)
+            if not saison_abrechenbar(b):
+                continue
+            r = erzeuge_einzelrechnung(
+                db, b, quelle="admin", status="offen", admin_user_id=admin_user_id
+            )
+            erstattet -= verrechne_guthaben(
+                db, r, quelle="admin", hoechstens=erstattet, admin_user_id=admin_user_id
+            )
+            neu.append(r)
     from beachhub_core.services import lesestand
 
     lesestand.markiere_geaendert(db, f"konto:{rechnung.kunde_id}")
-    return beleg
+    return Vollstorno(beleg, neu)
 
 
 def _de(v: Decimal) -> str:

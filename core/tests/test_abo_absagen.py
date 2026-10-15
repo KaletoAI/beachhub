@@ -304,3 +304,122 @@ def test_parallele_absagen_verbrauchen_die_letzte_freie_nur_einmal(db: Session, 
     assert zweite.verbleibende_freie_absagen == 0
     assert len(db.scalars(select(Storno).where(Storno.freie_absage.is_(True))).all()) == 1
     assert rechnungen.offener_betrag(db, r) == Decimal("120.00")
+
+
+@pytest.mark.parametrize("nach_frist", [False, True])
+def test_review2_7_gutgeschriebener_termin_bleibt_ohne_kontingent_kostenfrei(
+    db: Session, welt, nach_frist: bool
+) -> None:
+    """A-DAUER-3: Ein bereits gutgeschriebener Termin bleibt kostenfrei, auch ohne Kontingent
+    und nach der Frist – es gibt nichts mehr zu berechnen."""
+    from beachhub_core import mail
+
+    konfiguration.setze(db, "abo_freie_absagen", 0)
+    f, k = welt
+    d, r = _abo(db, f, k)
+    if nach_frist:
+        konfiguration.setze(db, "storno_frist_stunden", 240)
+    storno.gutschreiben_positionen(db, [r.positionen[0]], grund="Ausfall", quelle="admin")
+    db.commit()
+    belege = db.query(Rechnung).count()
+    erg = _absagen(db, k, d.buchungen[0])
+    assert erg.antwort.kostenfrei is True and erg.antwort.freie_absage is False
+    assert erg.antwort.korrekturbeleg is False
+    assert db.query(Rechnung).count() == belege
+    mail.TEST_AUSGANG.clear()
+    for nachlauf in erg.nach_commit:
+        nachlauf(db)
+    (m,) = mail.TEST_AUSGANG
+    assert "kostenfrei" in m["text"] and "keine kostenfreien Absagen" not in m["text"]
+
+
+def _anlage(db: Session, objekt_id):
+    """Anlage-Audit eines Objekts (vorher ist JSON-null, nicht SQL-NULL)."""
+    from beachhub_core.models import Audit
+
+    (eintrag,) = [
+        a
+        for a in db.scalars(select(Audit).where(Audit.objekt_id == objekt_id))
+        if a.vorher_json is None
+    ]
+    return eintrag
+
+
+def test_review2_9_saisonrechnung_verrechnung_und_beenden_mit_admin(db: Session, welt) -> None:
+    import uuid
+
+    from beachhub_core.models import Audit, Storno
+    from beachhub_core.services import guthaben
+
+    f, k = welt
+    admin = uuid.uuid4()
+    guthaben.buche(db, kunde=k, betrag=Decimal("10"), art="manuell")
+    d = dauerbuchungen.lege_an(
+        db,
+        kunde_id=k.id,
+        feld_id=f.id,
+        wochentag=2,
+        start=time(19),
+        ende=time(20),
+        gueltig_von=date(2027, 12, 1),
+        gueltig_bis=date(2027, 12, 29),
+        admin_user_id=admin,
+        auslassen=set(),
+        entscheidungen={},
+    )
+    db.commit()
+    r = db.scalars(select(Rechnung).where(Rechnung.dauerbuchung_id == d.id)).one()
+    anlage = _anlage(db, r.id)
+    assert anlage.admin_user_id == admin
+    assert anlage.nachher_json["dauerbuchung_id"] == str(d.id)
+    verrechnung = [
+        a
+        for a in db.scalars(select(Audit).where(Audit.objekt_typ == "guthaben"))
+        if a.nachher_json["art"] == "verrechnung"
+    ]
+    assert [a.admin_user_id for a in verrechnung] == [admin]
+    belege = dauerbuchungen.beende(db, d, ab=date(2027, 12, 20), admin_user_id=admin)
+    db.commit()
+    (beleg,) = belege
+    for s in db.scalars(select(Storno)):
+        letzter = db.scalars(
+            select(Audit)
+            .where(Audit.objekt_typ == "storno", Audit.objekt_id == s.id)
+            .order_by(Audit.zeitpunkt.desc())
+        ).first()
+        assert letzter.nachher_json["korrektur_rechnung_id"] == str(beleg.id)
+
+
+@pytest.mark.parametrize("heute,marker", [(date(2027, 11, 25), "2027"), (date(2027, 3, 1), None)])
+def test_review2_3_5_migration_0016_markiert_konten_und_saisonende(
+    db: Session, welt, heute: date, marker: str | None
+) -> None:
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+    from beachhub_core.models import AppSetting, LesestandVersion
+
+    f, k = welt
+    _abo(db, f, k)
+    for zeile in db.scalars(select(LesestandVersion)):
+        zeile.geaendert = False
+    clock.set_override(db, heute)
+    db.commit()
+    cfg = Config(str(Path(__file__).parents[1] / "alembic.ini"))
+    cfg.set_main_option("script_location", str(Path(__file__).parents[1] / "alembic"))
+    cfg.config_file_name = None
+    command.stamp(cfg, "head")
+    command.downgrade(cfg, "0015")
+    command.upgrade(cfg, "0016")
+    db.expire_all()
+    assert db.get(LesestandVersion, f"konto:{k.id}").geaendert
+    zeile = db.get(AppSetting, "guthabenliste_letzter")
+    assert (zeile.value if zeile else None) == marker
+
+
+def test_review2_8_antwort_meldet_korrekturbeleg(db: Session, welt) -> None:
+    f, k = welt
+    d, _ = _abo(db, f, k)
+    a = _absagen(db, k, d.buchungen[0]).antwort
+    assert a.freie_absage is True and a.korrekturbeleg is True

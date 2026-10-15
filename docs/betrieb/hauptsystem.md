@@ -169,6 +169,16 @@ in der Rechnungsliste berücksichtigt Zahlungen und Korrekturen. Beim vollständ
 zur Neuausstellung wird der verbleibende bereits bezahlte Anteil ebenfalls als Guthaben
 zurückgegeben. Frühere Teilgutschriften werden nicht nochmals
 erstattet; bereits korrigierte aktive Termine bleiben von einer Neuausstellung ausgeschlossen.
+Bei einer **Einzelrechnung** gibt es keine eigene Aktion zur Neuausstellung: Das Vollstorno
+stellt für jede weiter abrechenbare Buchung (aktiv oder kostenpflichtig abgesagt) sofort eine neue
+Einzelrechnung mit den aktuellen Kundendaten aus und verrechnet den eben erstatteten Anteil darauf.
+Eine online bezahlte Buchung bleibt so bezahlt, ohne dass Guthaben übrig bleibt; Stornorechnung und
+neue Rechnung gehen beide per Mail an den Kunden. Ändern Sie deshalb zuerst die Kundendaten und
+stornieren Sie danach. Soll eine Leistung gar nicht mehr berechnet werden, nutzen Sie die
+Teil-Stornorechnung oder stornieren Sie die Buchung selbst.
+Vor dem Upgrade auf 0014 entstand bei kostenfreien Stornos von Onlinebuchungen Guthaben ohne
+Korrekturbeleg. Holen Sie den Beleg für einen solchen Fall per Teil- oder Vollstorno nach, rechnet
+das System die damalige Gutschrift an und erstattet nicht ein zweites Mal.
 Die neuen Belege verrechnen Guthaben entsprechend Ihrer Einstellung; historische Zahlungen
 bleiben an der alten Rechnung. Stornoguthaben entsteht immer zusammen mit einem Korrekturbeleg;
 PDF und Mail werden erst nach erfolgreichem Commit versandt.
@@ -179,11 +189,12 @@ nach der Frist geben den Platz frei, der Termin bleibt aber berechnet. `0` schal
 Kundenabsagen aus. Jede kostenfreie Kundenabsage verbraucht Kontingent, auch für einen noch
 unberechneten Termin (etwa zwischen Vollstorno und Neuausstellung): Er wird danach nicht mehr
 berechnet. Nur ein bereits gutgeschriebener Termin (Teil-Stornorechnung) bleibt kostenfrei, ohne
-Kontingent zu verbrauchen. Kulanz, Sperren und Beenden durch den Betreiber verbrauchen ebenfalls
+Kontingent zu verbrauchen, auch nach der Frist oder ohne Kontingent. Kulanz, Sperren und Beenden durch den Betreiber verbrauchen ebenfalls
 kein Kontingent. Eine kostenpflichtige
 Betreiberentscheidung wird in der Stornomail als solche benannt.
-Die Portalbestätigung zeigt das verbleibende Kontingent aus dem signierten Kontostand und erklärt
-die Bedingungen und finanziellen Folgen. Über die Absage entscheidet das Hauptsystem bei der
+Die Portalbestätigung zeigt das verbleibende Kontingent aus dem signierten Kontostand, die
+Absagefrist des Termins und erklärt die Bedingungen und finanziellen Folgen; nach der Absage nennt
+sie die tatsächliche Wirkung (Gutschrift, nicht berechnet oder bereits gutgeschrieben). Über die Absage entscheidet das Hauptsystem bei der
 Verarbeitung; eine ausführlichere Abo-Übersicht im Portal bleibt für den weiteren Ausbau vorgesehen.
 
 **Guthabenliste.** Unter Kunden → Guthabenliste sehen Sie jederzeit positive Guthaben nicht
@@ -193,7 +204,17 @@ Marker-Commit ausgefallener Lauf wird am nächsten täglichen Lauf nachgeholt. D
 Anzahl, Summe und einen Link zur Liste, keine vollständige Kundenliste. `BASE_URL` muss auf die
 richtige Verwaltungsadresse zeigen. Der Jahresmarker wird vor dem Mailversand gespeichert:
 Scheitert danach SMTP, wird der Fehler protokolliert und die Mail im selben Jahr nicht automatisch
-wiederholt; die Liste bleibt erreichbar.
+wiederholt; die Liste bleibt erreichbar. Migration 0016 setzt den Marker für das laufende Jahr,
+wenn der Stichtag beim Upgrade schon vorbei ist; die erste Erinnerung kommt dann zum nächsten
+Stichtag.
+
+**Stornobestätigungen bei Sperren und Abos.** Storniert eine Sperre, eine neue Dauerbuchung oder
+das Beenden eines Abos Buchungen, bekommt jeder betroffene Kunde nach dem Speichern eine
+Stornobestätigung (mehrere Termine in einer Mail) und anschließend seine Stornorechnung.
+
+**Auszahlung abhaken** prüft, ob das angezeigte Guthaben noch stimmt. Hat es sich inzwischen
+geändert, etwa durch einen doppelten Klick, wird nichts gebucht und die Liste zeigt den aktuellen
+Stand.
 
 Auszahlungen führen Sie auf Wunsch des Kunden selbst per Überweisung aus und haken danach den
 positiven Betrag in der Liste ab. Teilbeträge sind möglich, höchstens bis zum verfügbaren Guthaben.
@@ -577,6 +598,18 @@ Die atomare Kanaleinlösung und getrennte Belege sind implementiert; Kauf, Rück
 und die Portalbedienung sind noch keine vollständigen Betriebsabläufe. Ein Downgrade auf `0014` wird bei vorhandenem
 Gutscheinbestand, Gutscheinbelegen oder bereits verbrauchten Gutschein-Nummernkreisen
 mit einer klaren Fehlermeldung abgewiesen; diese Daten werden dabei nicht gelöscht.
+
+**Reihenfolge Portal und Hauptsystem.** Ändert ein Update den Kanal oder den Lesestand (etwa
+Stufe 1a-II mit Abo-Absagen im Portal), aktualisieren Sie **zuerst das Portal** und danach das
+Hauptsystem. Ein altes Portal kennt neue Felder nicht und würde Kunden sonst falsche Zusagen
+machen (etwa kostenfreie Abo-Absagen ohne Kontingent). Ein neues Portal kommt mit einem alten
+Hauptsystem zurecht, weil neue Felder dort fehlen dürfen.
+
+**Upgrade auf Stufe 1a-II (Migrationen 0014 und 0016).** Migration `0016_upgrade_1a_ii`
+(nach der Gutscheinmigration `0015`) markiert die
+Konto-Dokumente aller Abo-Kunden und alle bereits veröffentlichten Kontostände zur
+Neuveröffentlichung; der nächste Kanal-Lauf überträgt sie ins Portal. Prüfen Sie anschließend
+Bestandsabos auf unberechnete Termine (Abschnitt 5, „Bestandsabos und Neuausstellung“).
 
 ## 8. Störungen
 

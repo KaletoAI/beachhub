@@ -522,3 +522,117 @@ def test_ui_abo_vorschau_prueft_nur_verbleibende_termine(
     r = eingeloggt.post("/admin/belegung/dauer/planen", data=daten)
     assert r.status_code == 200
     assert ("Mitgliedschaft auf der Kundenseite verlängern" in r.text) is hinweis
+
+
+def _betreiberbuchung(c: TestClient, f: Feld, k: Kunde, beginn: str, ende: str) -> None:
+    r = c.post(
+        "/admin/belegung/buchung",
+        data={
+            "csrf_token": c.csrf,
+            "feld_id": str(f.id),
+            "kunde_id": str(k.id),
+            "beginn": beginn,
+            "ende": ende,
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+
+
+def test_review2_6_sperre_bestaetigt_storno_und_verschickt_nur_neue_belege(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, a, _ = welt
+    c = eingeloggt
+    _betreiberbuchung(c, f, a, "2027-12-01T19:00", "2027-12-01T20:00")
+    _betreiberbuchung(c, f, a, "2027-12-02T19:00", "2027-12-02T20:00")
+    alt, neu = sorted(db.query(Buchung).all(), key=lambda b: b.beginn)
+    r = c.post(
+        f"/admin/belegung/buchung/{alt.id}/storno",
+        data={"csrf_token": c.csrf, "grund": "Kunde", "kostenfrei": "ja"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    mail.TEST_AUSGANG.clear()
+    r = c.post(
+        "/admin/belegung/sperre",
+        data={
+            "csrf_token": c.csrf,
+            "alle_felder": "1",
+            "beginn": "2027-12-01T18:00",
+            "ende": "2027-12-02T22:00",
+            "grund": "Turnier",
+            # Veraltete Entscheidung zu einer inzwischen stornierten Buchung.
+            f"entscheidung_{alt.id}": "stornieren",
+            f"entscheidung_{neu.id}": "stornieren",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    db.expire_all()
+    beleg = db.get(Storno, db.get(Buchung, neu.id).storno.id).korrektur_rechnung_id
+    nummer = db.get(Rechnung, beleg).nummer
+    assert [(m["an"], m["betreff"]) for m in mail.TEST_AUSGANG] == [
+        ("a@x.de", "Stornierung Ihrer Buchung"),
+        ("a@x.de", f"Stornorechnung {nummer}"),
+    ]
+
+
+def test_review2_6_abo_ende_eine_stornomail_mit_allen_terminen(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, _, v1 = welt
+    c = eingeloggt
+    daten = {
+        "csrf_token": c.csrf,
+        "kunde_id": str(v1.id),
+        "feld_id": str(f.id),
+        "wochentag": "1",
+        "start": "19:00",
+        "ende": "21:00",
+        "gueltig_von": "2027-12-01",
+        "gueltig_bis": "2027-12-31",
+    }
+    assert c.post("/admin/belegung/dauer", data=daten, follow_redirects=False).status_code == 303
+    d = db.query(Dauerbuchung).one()
+    mail.TEST_AUSGANG.clear()
+    r = c.post(
+        f"/admin/belegung/dauer/{d.id}/beenden",
+        data={"csrf_token": c.csrf, "ab": "2027-12-20"},
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    betreffe = [m["betreff"] for m in mail.TEST_AUSGANG]
+    assert betreffe[0] == "Stornierung Ihrer Buchungen"
+    assert "21.12.2027" in mail.TEST_AUSGANG[0]["text"]
+    assert "28.12.2027" in mail.TEST_AUSGANG[0]["text"]
+    assert len(betreffe) == 2 and betreffe[1].startswith("Stornorechnung ")
+
+
+def test_review2_6_daueranlage_bestaetigt_verdraengten_kunden(
+    eingeloggt: TestClient, db: Session, welt
+) -> None:
+    f, a, v1 = welt
+    c = eingeloggt
+    _betreiberbuchung(c, f, a, "2027-12-07T19:00", "2027-12-07T21:00")
+    fremd = db.query(Buchung).one()
+    mail.TEST_AUSGANG.clear()
+    r = c.post(
+        "/admin/belegung/dauer",
+        data={
+            "csrf_token": c.csrf,
+            "kunde_id": str(v1.id),
+            "feld_id": str(f.id),
+            "wochentag": "1",
+            "start": "19:00",
+            "ende": "21:00",
+            "gueltig_von": "2027-12-01",
+            "gueltig_bis": "2027-12-31",
+            f"entscheidung_{fremd.id}": "stornieren",
+        },
+        follow_redirects=False,
+    )
+    assert r.status_code == 303
+    an_a = [m["betreff"] for m in mail.TEST_AUSGANG if m["an"] == "a@x.de"]
+    assert an_a[0] == "Stornierung Ihrer Buchung"
+    assert len(an_a) == 2 and an_a[1].startswith("Stornorechnung ")

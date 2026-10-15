@@ -152,6 +152,52 @@ def test_abo_stornoerfolg_nennt_kosten_ohne_falschen_fristgrund(
         assert "Da die Stornofrist abgelaufen war" not in seite
 
 
+def test_review2_8_abo_stornoseite_nennt_frist_des_termins(
+    angemeldet: TestClient, db: Session
+) -> None:
+    frueh = {**_b(UEBERMORGEN, 19), "abo": True, "freie_absagen_rest": 2}
+    spaet = {**_b(MORGEN, 9), "abo": True, "freie_absagen_rest": 2}  # 23 h vorher
+    speichere(db, "belegung", belegung())
+    speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[frueh, spaet]))
+    seite = angemeldet.get(f"/buchungen/{frueh['id']}/stornieren").text
+    assert "für diesen Termin bis" in seite and "26.11.2027 19:00 Uhr" in seite
+    seite = angemeldet.get(f"/buchungen/{spaet['id']}/stornieren").text
+    assert "für diesen Termin am" in seite and "25.11.2027 09:00 Uhr abgelaufen" in seite
+    assert "bleibt aber berechnet" in seite
+    assert "entscheidet das Buchungssystem" not in seite
+
+
+@pytest.mark.parametrize(
+    "antwort,erwartet,falsch",
+    [
+        ({"freie_absage": False, "korrekturbeleg": False}, "bereits gutgeschrieben", "Forderung"),
+        ({"freie_absage": True, "korrekturbeleg": False}, "nicht berechnet", "Forderung"),
+        ({"freie_absage": True, "korrekturbeleg": True}, "offene Forderung", "gutgeschrieben;"),
+        ({"freie_absage": True}, "offene Forderung", "nicht berechnet"),
+    ],
+)
+def test_review2_8_abo_stornoerfolg_nennt_tatsaechliche_wirkung(
+    angemeldet: TestClient, db: Session, antwort: dict, erwartet: str, falsch: str
+) -> None:
+    a = anfragen.stelle(
+        db,
+        typ="buchung_stornieren",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"buchung_id": str(uuid.uuid4())},
+    )
+    a.status = Anfrage.BEANTWORTET
+    a.antwort_json = {
+        "status": "ok",
+        "kostenfrei": True,
+        "verbleibende_freie_absagen": 2,
+        **antwort,
+    }
+    db.commit()
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand").json()
+    assert erwartet in stand["text"] and falsch not in stand["text"]
+    assert erwartet in angemeldet.get(stand["ziel"]).text
+
+
 def test_stornieren_legt_anfrage_an(angemeldet: TestClient, db: Session) -> None:
     b = _b(UEBERMORGEN, 19)
     speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[b]))

@@ -1,6 +1,6 @@
 import logging
 import uuid
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -249,7 +249,7 @@ def buchung_anlegen(
             ust_satz=_satz(db, ust_satz),
         )
         # Betreiberbuchungen werden nicht online bezahlt: sofort eine offene Rechnung (A-ZAHL-1).
-        r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen")
+        r = rechnungen.erzeuge_einzelrechnung(db, b, status="offen", admin_user_id=admin.id)
         db.commit()
     except FORM_FEHLER as e:
         db.rollback()
@@ -427,9 +427,10 @@ async def sperre_anlegen(
             for k, v in form.items()
             if k.startswith("entscheidung_")
         }
-        gutschein_sperren.fuehre_transaktion_aus(
-            db,
-            lambda: sperren.lege_an(
+
+        def sperre_vorgang() -> list[uuid.UUID]:
+            stornos: list[Storno] = []
+            sperren.lege_an(
                 db,
                 feld_ids=feld_ids,
                 beginn=beginn,
@@ -437,8 +438,11 @@ async def sperre_anlegen(
                 grund=grund,
                 admin_user_id=admin.id,
                 entscheidungen=entscheidungen,
-            ),
-        )
+                stornos=stornos,
+            )
+            return [s.id for s in stornos]
+
+        storno_ids = gutschein_sperren.fuehre_transaktion_aus(db, sperre_vorgang)
     except FORM_FEHLER as e:
         db.rollback()
         betroffen = (
@@ -455,9 +459,7 @@ async def sperre_anlegen(
             werte={**dict(form), "feld_ids": form.getlist("feld_ids")},
             fehler=fehlertext(e, GRUND),
         )
-    stornierte = [bid for bid, wahl in entscheidungen.items() if wahl == "stornieren"]
-    benachrichtigung.rueckabwicklung_hinweise(db, stornierte)
-    benachrichtigung.belege_versenden(db, _belege_der_buchungen(db, stornierte))
+    benachrichtigung.stornos_versenden(db, storno_ids)
     ziel_feld = (
         feld_ids[0] if feld_ids else db.scalars(select(Feld.id).order_by(Feld.reihenfolge)).first()
     )
@@ -613,17 +615,21 @@ async def dauer_anlegen(
             for k, v in form.items()
             if k.startswith("entscheidung_")
         }
-        d = gutschein_sperren.fuehre_transaktion_aus(
-            db,
-            lambda: dauerbuchungen.lege_an(
+
+        def dauer_vorgang() -> tuple[Dauerbuchung, list[uuid.UUID]]:
+            stornos: list[Storno] = []
+            d = dauerbuchungen.lege_an(
                 db,
                 **args,
                 admin_user_id=admin.id,
                 auslassen=auslassen,
                 entscheidungen=entscheidungen,
                 rechnungskunde_setzen=form.get("rechnungskunde_setzen") == "1",
-            ),
-        )
+                stornos=stornos,
+            )
+            return d, [s.id for s in stornos]
+
+        d, storno_ids = gutschein_sperren.fuehre_transaktion_aus(db, dauer_vorgang)
     except FORM_FEHLER as e:
         db.rollback()
         try:
@@ -645,9 +651,7 @@ async def dauer_anlegen(
                 fehler=fehlertext(e, GRUND),
             ),
         )
-    stornierte = [bid for bid, wahl in entscheidungen.items() if wahl == "stornieren"]
     saison = db.scalars(select(Rechnung.id).where(Rechnung.dauerbuchung_id == d.id)).all()
-    beleg_ids = [*_belege_der_buchungen(db, stornierte), *saison]
     dauer_id = d.id
     try:
         benachrichtigung.dauerbuchung_angelegt(db, d)
@@ -662,10 +666,11 @@ async def dauer_anlegen(
             )
         except Exception:
             logger.exception("Betreiber-Alarm für Dauerbuchung %s fehlgeschlagen", dauer_id)
-    benachrichtigung.rueckabwicklung_hinweise(db, stornierte)
-    benachrichtigung.belege_versenden(db, beleg_ids)
+    benachrichtigung.belege_versenden(db, saison)
+    benachrichtigung.stornos_versenden(db, storno_ids)
     return mit_flash(
-        RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung angelegt"
+        RedirectResponse(f"/admin/belegung/dauer/{dauer_id}", status_code=303),
+        "Dauerbuchung angelegt",
     )
 
 
@@ -723,7 +728,7 @@ def dauer_rechnung(
             RedirectResponse("/admin/belegung", status_code=303), "Nicht gefunden", "fehler"
         )
     try:
-        r = rechnungen.erzeuge_saisonrechnung(db, d)
+        r = rechnungen.erzeuge_saisonrechnung(db, d, admin_user_id=admin.id)
         beleg_id = r.id
         db.commit()
     except FORM_FEHLER as e:
@@ -757,15 +762,14 @@ def dauer_beenden(
         frisch = db.get(Dauerbuchung, dauer_id)
         if frisch is None:
             raise ValueError("Dauerbuchung nicht gefunden")
-        ab_datum = date.fromisoformat(ab)
-        kandidaten = [
-            b.id for b in frisch.buchungen if b.aktiv and b.beginn >= kombiniere(ab_datum, time(0))
-        ]
-        belege = dauerbuchungen.beende(db, frisch, ab=ab_datum, admin_user_id=admin.id)
-        return kandidaten, [b.id for b in belege]
+        stornos: list[Storno] = []
+        belege = dauerbuchungen.beende(
+            db, frisch, ab=date.fromisoformat(ab), admin_user_id=admin.id, stornos=stornos
+        )
+        return [s.id for s in stornos], [b.id for b in belege]
 
     try:
-        kandidaten, beleg_ids = gutschein_sperren.fuehre_transaktion_aus(db, vorgang)
+        storno_ids, beleg_ids = gutschein_sperren.fuehre_transaktion_aus(db, vorgang)
     except FORM_FEHLER as e:
         db.rollback()
         return mit_flash(
@@ -773,8 +777,8 @@ def dauer_beenden(
             fehlertext(e, GRUND),
             "fehler",
         )
-    benachrichtigung.rueckabwicklung_hinweise(db, kandidaten)
-    benachrichtigung.belege_versenden(db, beleg_ids)
+    benachrichtigung.stornos_versenden(db, storno_ids, belege=beleg_ids)
     return mit_flash(
-        RedirectResponse(f"/admin/belegung/dauer/{d.id}", status_code=303), "Dauerbuchung beendet"
+        RedirectResponse(f"/admin/belegung/dauer/{dauer_id}", status_code=303),
+        "Dauerbuchung beendet",
     )

@@ -10,6 +10,7 @@ from beachhub_core import clock
 from beachhub_core.models import (
     Buchung,
     Dauerbuchung,
+    GuthabenBuchung,
     GutscheinEinloesung,
     Rechnung,
     RechnungPosition,
@@ -32,6 +33,24 @@ NULL = Decimal("0.00")
 
 class StornoFehler(Exception):  # noqa: N818
     pass
+
+
+def _altgutschriften(db: Session, positionen: Sequence[RechnungPosition]) -> Decimal:
+    """Vor 0014 schrieb ein kostenfreies Storno einer Onlinebuchung Guthaben ohne
+    Korrekturbeleg gut; die Guthabenbuchung verweist dort auf das Storno statt auf einen Beleg.
+    Holt der Betreiber den Beleg nach, ist dieser Betrag bereits erstattet."""
+    buchung_ids = [p.buchung_id for p in positionen if p.buchung_id is not None]
+    if not buchung_ids:
+        return NULL
+    summe = db.scalar(
+        select(func.coalesce(func.sum(GuthabenBuchung.betrag), 0))
+        .join(Storno, GuthabenBuchung.bezug_id == Storno.id)
+        .where(
+            GuthabenBuchung.art == "storno_gutschrift",
+            Storno.buchung_id.in_(buchung_ids),
+        )
+    )
+    return Decimal(str(summe))
 
 
 def gutschreiben_positionen(
@@ -68,6 +87,7 @@ def _gutschreiben_positionen(
     gut. Ohne
     Korrekturbeleg bliebe Umsatzsteuer auf eine nicht erbrachte Leistung abgeführt (§ 17 UStG).
     Bei offener Rechnung sinkt zuerst die Forderung (A-RECH-7, Abweichung B-3).
+    Gutschriften ohne Beleg aus der Zeit vor 0014 werden angerechnet (`_altgutschriften`).
     Interner Finanzweg für vollständig vorbereitete koordinierte Gutschein-Stornos.
     Öffentliche Aktionsguards gehören an die aufrufenden allgemeinen Dienste."""
     if not positionen:
@@ -76,11 +96,12 @@ def _gutschreiben_positionen(
     rechnung = positionen[0].rechnung
     rechnungen.sperre(db, rechnung)
     offen_vorher = rechnungen.offener_betrag(db, rechnung)
+    bereits_erstattet = _altgutschriften(db, positionen)
     beleg = rechnungen._korrigiere_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )
     betrag = sum((p.brutto for p in positionen), NULL)
-    gutschrift = max(NULL, betrag - offen_vorher)
+    gutschrift = max(NULL, betrag - offen_vorher - bereits_erstattet)
     if gutschrift > NULL:
         guthaben.buche(
             db,
@@ -152,7 +173,17 @@ def gutschreiben_alle(
         for b, _ in paare:
             s = db.scalar(select(Storno).where(Storno.buchung_id == b.id))
             if s is not None:
+                vorher = audit.als_dict(s)
                 s.korrektur_rechnung_id = beleg.id
+                audit.protokolliere(
+                    db,
+                    quelle=quelle,
+                    objekt_typ="storno",
+                    objekt_id=s.id,
+                    vorher=vorher,
+                    nachher=audit.als_dict(s),
+                    admin_user_id=admin_user_id,
+                )
         belege.append(beleg)
     db.flush()
     return belege
@@ -228,16 +259,18 @@ def storniere(
                 .with_for_update()
                 .execution_options(populate_existing=True)
             )
-            kostenfrei = bool(kostenfrei and dauer and freie_absagen_rest(db, dauer) > 0)
-            # Ein bereits gutgeschriebener Termin verbraucht kein Kontingent. Ein unberechneter
-            # schon: Er wird nach der Absage nie mehr berechnet (`saison_abrechenbar`).
-            freie_absage = bool(
-                kostenfrei
-                and (
-                    buchung.rechnung_position_id is None
-                    or _offene_position(db, buchung) is not None
-                )
+            # Ein bereits gutgeschriebener Termin bleibt kostenfrei und verbraucht kein
+            # Kontingent (A-DAUER-3); es gibt nichts mehr zu berechnen. Ein unberechneter
+            # verbraucht Kontingent: Er wird nach der Absage nie mehr berechnet
+            # (`saison_abrechenbar`).
+            gutgeschrieben = (
+                buchung.rechnung_position_id is not None and _offene_position(db, buchung) is None
             )
+            if gutgeschrieben:
+                kostenfrei = True
+            elif kostenfrei:
+                kostenfrei = bool(dauer and freie_absagen_rest(db, dauer) > 0)
+                freie_absage = kostenfrei
     s = Storno(
         buchung_id=buchung.id,
         durch=durch,
@@ -251,15 +284,6 @@ def storniere(
         db, buchung, Buchung.STORNIERT, quelle=quelle, admin_user_id=admin_user_id
     )
     db.flush()
-    if kostenfrei and korrigieren:
-        gutschreiben(
-            db,
-            buchung,
-            sperrkontext=sperrkontext,
-            grund=f"Storno: {grund}" if grund else "Storno",
-            quelle=quelle,
-            admin_user_id=admin_user_id,
-        )
     audit.protokolliere(
         db,
         quelle=quelle,
@@ -269,6 +293,16 @@ def storniere(
         nachher=audit.als_dict(s),
         admin_user_id=admin_user_id,
     )
+    # Die Verknüpfung mit dem Korrekturbeleg protokolliert `gutschreiben_alle`.
+    if kostenfrei and korrigieren:
+        gutschreiben(
+            db,
+            buchung,
+            sperrkontext=sperrkontext,
+            grund=f"Storno: {grund}" if grund else "Storno",
+            quelle=quelle,
+            admin_user_id=admin_user_id,
+        )
     return s
 
 
