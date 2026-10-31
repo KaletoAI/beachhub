@@ -19,6 +19,10 @@ dependencies = [
   "pynacl==1.5.0",
   "cryptography==44.0.0",
   "weasyprint==63.1",
+  # Kommt über weasyprint -> fonttools[woff] und wird sonst nicht gepinnt. Vor 1.2.1 hat der
+  # Brotli-Decoder einen Out-of-bounds-Write (CVE-2026-111497, "Node2Shell"); mit Brotli
+  # installiert entpackt auch httpx Antworten mit Content-Encoding: br.
+  "brotli==1.2.1",
   "apscheduler==3.11.0",
   "aiosmtplib==5.1.2",
   "httpx==0.28.1",
