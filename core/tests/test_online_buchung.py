@@ -351,8 +351,8 @@ def test_storno_bestaetigt_vor_frist_mit_gutschrift(db: Session, welt, mail_ausg
     assert any(m["betreff"].startswith("Stornorechnung ") for m in mail_ausgang)
 
 
-def test_storno_dauerbuchungstermin_ist_freie_absage(db: Session, welt) -> None:
-    # Eine freie Abo-Absage senkt die offene Saisonforderung ohne Guthaben.
+def test_storno_dauerbuchungstermin_wird_abo_gutschrift(db: Session, welt) -> None:
+    # Eine rechtzeitige Abo-Absage wird Guthaben; die Saisonrechnung bleibt unverändert.
     f, k, _ = welt
     k.mitglied_bis = date(2028, 4, 30)
     dauer = dauerbuchungen.lege_an(
@@ -375,11 +375,11 @@ def test_storno_dauerbuchungstermin_ist_freie_absage(db: Session, welt) -> None:
     erg = online_buchung.storniere_fuer_kunde(db, kunde=k, buchung_id=termin.id)
     db.commit()
     assert erg.antwort.status == "ok" and erg.antwort.kostenfrei is True
-    assert erg.antwort.freie_absage is True
-    assert erg.antwort.verbleibende_freie_absagen == 2
+    assert erg.antwort.freie_absage is None and erg.antwort.verbleibende_freie_absagen is None
+    assert erg.antwort.abo_gutschrift == termin.preis and erg.antwort.korrekturbeleg is False
     assert db.get(Buchung, termin.id).status == "storniert"
-    assert k.guthaben == Decimal("0.00")
-    assert db.scalars(select(GuthabenBuchung)).all() == []
+    assert k.guthaben == termin.preis
+    assert [g.art for g in db.scalars(select(GuthabenBuchung))] == ["abo_gutschrift"]
 
 
 def test_storno_betreiberbuchung_nicht_stornierbar(db: Session, welt) -> None:

@@ -19,6 +19,7 @@ from beachhub_core.models import (
     Nummernkreis,
     Rechnung,
     RechnungPosition,
+    Storno,
     Zahlung,
     utcnow,
 )
@@ -236,6 +237,20 @@ def pruefe_allgemeinen_rechnungsvorgang(rechnung: Rechnung, vorgang: str) -> Non
         ursprung = ursprung.korrigiert
 
 
+def pruefe_keine_abo_gutschrift(db: Session, positionen: Sequence[RechnungPosition]) -> None:
+    """Eine Position, deren Abo-Termin bereits als Guthaben gutgeschrieben ist, darf keine
+    Teil-Stornorechnung bekommen: Sonst erhielte der Kunde Guthaben und Forderungsminderung.
+    Das Vollstorno zur Neuausstellung bleibt möglich; die Neuausstellung berechnet den Termin
+    wieder (`saison_abrechenbar`)."""
+    buchung_ids = [p.buchung_id for p in positionen if p.buchung_id is not None]
+    if buchung_ids and db.scalar(
+        select(Storno.id).where(
+            Storno.buchung_id.in_(buchung_ids), Storno.abo_gutschrift.is_not(None)
+        )
+    ):
+        raise RechnungsFehler("abo_gutgeschrieben")
+
+
 def korrigiere(
     db: Session,
     positionen: Sequence[RechnungPosition],
@@ -253,6 +268,7 @@ def korrigiere(
     if positionen:
         sperre(db, positionen[0].rechnung)
         pruefe_allgemeinen_rechnungsvorgang(positionen[0].rechnung, "teilstorno")
+        pruefe_keine_abo_gutschrift(db, positionen)
     return _korrigiere_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )
@@ -522,16 +538,25 @@ def verrechne_guthaben(
 
 
 def saison_abrechenbar(buchung: Buchung) -> bool:
-    """Unberechnet und aktiv oder nachweisbar kostenpflichtig abgesagt. Gilt auch für die
-    Neuausstellung von Einzelrechnungen."""
+    """Unberechnet und aktiv, nachweisbar kostenpflichtig abgesagt oder als Abo-Termin bereits
+    gutgeschrieben (dessen Betrag ist schon Guthaben, er bleibt Teil der Saison). Gilt auch für
+    die Neuausstellung von Einzelrechnungen."""
     return buchung.rechnung_position_id is None and (
         buchung.aktiv
         or (
             buchung.status == Buchung.STORNIERT
             and buchung.storno is not None
-            and not buchung.storno.kostenfrei
+            and (not buchung.storno.kostenfrei or buchung.storno.abo_gutschrift is not None)
         )
     )
+
+
+def _abrechnungszusatz(b: Buchung) -> str:
+    if b.aktiv:
+        return ""
+    if b.storno is not None and b.storno.abo_gutschrift is not None:
+        return " (abgesagt, als Guthaben gutgeschrieben)"
+    return " (kostenpflichtig storniert)"
 
 
 def erzeuge_saisonrechnung(
@@ -582,7 +607,7 @@ def erzeuge_saisonrechnung(
         [
             Posten(
                 b,
-                _positionstext(b, " (kostenpflichtig storniert)" if not b.aktiv else ""),
+                _positionstext(b, _abrechnungszusatz(b)),
                 b.preis,
                 b.ust_satz,
             )
@@ -646,7 +671,9 @@ def storniere(
     from beachhub_core.models import GuthabenBuchung
     from beachhub_core.services import storno
 
-    beleg = storno.gutschreiben_positionen(
+    # Ohne Abo-Gutschrift-Sperre: Das Vollstorno korrigiert die ganze Rechnung, die
+    # Neuausstellung berechnet gutgeschriebene Abo-Termine wieder.
+    beleg = storno._gutschreiben_positionen(
         db, offen, grund=grund, quelle="admin", admin_user_id=admin_user_id
     )
     # Nur die vor diesem Vollstorno unberichtigten Positionen werden freigegeben.

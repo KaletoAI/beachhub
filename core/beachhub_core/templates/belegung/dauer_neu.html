@@ -25,6 +25,7 @@
   {% if termine is not none %}
   <div class="karte">
     <h2>Termine</h2>
+    <p class="small">Termine, die der Kunde schon bei der Anfrage absagt (etwa Ferien), hier auslassen. Sie werden weder gebucht noch berechnet. Ein kostenfreies Absagekontingent während des Abos gibt es nicht.</p>
     <table>
       <tr><th>Auslassen</th><th>Datum</th><th>Preis</th><th>Kollision</th></tr>
       {% for t in termine %}

@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from beachhub_core import clock, zahlung
 from beachhub_core.models import (
     Buchung,
-    Dauerbuchung,
     Gutschein,
     Kunde,
     Storno,
@@ -397,18 +396,14 @@ def storniere_fuer_kunde(db: Session, *, kunde: Kunde, buchung_id: uuid.UUID) ->
     )
     if war_reserviert:
         guthaben._buche_reservierung_zurueck(db, b, quelle="portal", sperrkontext=kontext)
-    rest = None
-    if b.dauerbuchung_id is not None:
-        dauer = db.get(Dauerbuchung, b.dauerbuchung_id)
-        rest = storno.freie_absagen_rest(db, dauer) if dauer is not None else None
+    abo = b.dauerbuchung_id is not None
     antwort = kanal.Antwort(
         status="ok",
         kostenfrei=s.kostenfrei,
-        freie_absage=s.freie_absage if b.dauerbuchung_id is not None else None,
-        verbleibende_freie_absagen=rest,
-        korrekturbeleg=(
-            s.korrektur_rechnung_id is not None if b.dauerbuchung_id is not None else None
-        ),
+        # Abo-Termine: Guthaben ohne Korrekturbeleg; 0 heißt ohne Geldwirkung (unberechnet,
+        # bereits korrigiert oder zu spät abgesagt).
+        abo_gutschrift=(s.abo_gutschrift or Decimal("0.00")) if abo else None,
+        korrekturbeleg=(s.korrektur_rechnung_id is not None) if abo else None,
     )
     return Ergebnis(antwort, [_storno_mail(s.id)])
 

@@ -102,31 +102,55 @@ def test_stornieren_kostenfrei_und_kostenpflichtig(angemeldet: TestClient, db: S
 
 
 @pytest.mark.parametrize("rest", [0, 2, None])
-def test_abo_stornoseite_zeigt_kontingent_und_bedingte_korrektur(
+def test_abo_stornoseite_erklaert_gutschrift_ohne_kontingent(
     angemeldet: TestClient, db: Session, rest: int | None
 ) -> None:
+    """Kein Absagekontingent mehr; ein Rest aus älteren Kontoständen wird ignoriert."""
     b = {**_b(UEBERMORGEN, 19), "abo": True, "freie_absagen_rest": rest}
     speichere(db, "belegung", belegung())
     speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[b]))
     seite = angemeldet.get(f"/buchungen/{b['id']}/stornieren").text
     assert "Verbindlich stornieren" in seite
-    assert "Der Betrag wird deinem Guthaben gutgeschrieben" not in seite
-    if rest == 0:
-        assert "keine kostenfreien Absagen" in seite
-        assert "bleibt berechnet" in seite
-        assert "Stornofrist von 24 Stunden ist abgelaufen" not in seite
-    else:
-        assert "innerhalb der Stornofrist" in seite
-        assert "offene Forderung" in seite and "bezahlte Anteil" in seite
-        assert "entscheidet das Buchungssystem" in seite
-        if rest is not None:
-            assert "Kostenfreie Absagen übrig: 2" in seite
+    assert "Absagen übrig" not in seite and "keine kostenfreien Absagen" not in seite
+    assert "Terminpreis wird deinem Guthaben gutgeschrieben" in seite
+    assert "Saisonrechnung bleibt unverändert" in seite
+    assert "offene Forderung" not in seite
+    assert "wenn ein anderer Kunde den Platz bucht" in seite
+    assert "entscheidet das Buchungssystem" in seite
+
+
+@pytest.mark.parametrize(
+    "antwort,erwartet,falsch",
+    [
+        ({"kostenfrei": True, "abo_gutschrift": "30.00"}, "Guthaben gutgeschrieben", "berechnet"),
+        ({"kostenfrei": True, "abo_gutschrift": "0.00"}, "nicht berechnet", "Guthaben"),
+        ({"kostenfrei": False, "abo_gutschrift": "0.00"}, "anderer Kunde", "Stornofrist"),
+    ],
+)
+def test_abo_stornoerfolg_nennt_gutschrift(
+    angemeldet: TestClient, db: Session, antwort: dict, erwartet: str, falsch: str
+) -> None:
+    a = anfragen.stelle(
+        db,
+        typ="buchung_stornieren",
+        konto_id=angemeldet.konto_id,
+        nutzlast={"buchung_id": str(uuid.uuid4())},
+    )
+    a.status = Anfrage.BEANTWORTET
+    a.antwort_json = {"status": "ok", "korrekturbeleg": False, **antwort}
+    db.commit()
+    stand = angemeldet.get(f"/anfrage/{a.id}/stand").json()
+    assert stand["zustand"] == "fertig"
+    assert erwartet in stand["text"] and falsch not in stand["text"]
+    assert "freie Absage" not in stand["text"]
+    assert erwartet in angemeldet.get(stand["ziel"]).text
 
 
 @pytest.mark.parametrize("kostenfrei", [False, True])
 def test_abo_stornoerfolg_nennt_kosten_ohne_falschen_fristgrund(
     angemeldet: TestClient, db: Session, kostenfrei: bool
 ) -> None:
+    """Antworten älterer Hauptsysteme mit Absagekontingent bleiben verständlich."""
     a = anfragen.stelle(
         db,
         typ="buchung_stornieren",
@@ -160,7 +184,7 @@ def test_review2_8_abo_stornoseite_nennt_frist_des_termins(
     speichere(db, "belegung", belegung())
     speichere(db, f"konto:{KUNDE_ID}", konto(buchungen=[frueh, spaet]))
     seite = angemeldet.get(f"/buchungen/{frueh['id']}/stornieren").text
-    assert "für diesen Termin bis" in seite and "26.11.2027 19:00 Uhr" in seite
+    assert "26.11.2027 19:00 Uhr (24 Stunden vor Beginn)" in seite
     seite = angemeldet.get(f"/buchungen/{spaet['id']}/stornieren").text
     assert "für diesen Termin am" in seite and "25.11.2027 09:00 Uhr abgelaufen" in seite
     assert "bleibt aber berechnet" in seite

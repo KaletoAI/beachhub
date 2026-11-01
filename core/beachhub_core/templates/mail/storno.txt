@@ -4,13 +4,10 @@ Ihre Buchung wurde storniert:
 Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
 
 {% if s.kostenfrei -%}
-Die Stornierung ist für Sie kostenfrei.{% if s.freie_absage %} Das war eine der kostenfreien Absagen in Ihrem Abo; es bleiben {{ rest }}.{% endif %}
+Die Stornierung ist für Sie kostenfrei.{% if s.abo_gutschrift %} Der Terminpreis von {{ s.abo_gutschrift|euro }} wurde Ihrem Guthaben gutgeschrieben; die Saisonrechnung bleibt unverändert.{% endif %}
 {%- else -%}
 Der Termin bleibt berechnet: {{ kostenpflichtiger_grund }} Der Platz ist trotzdem wieder frei.
-{%- endif %}
-{%- if b.dauerbuchung_id and not s.freie_absage %}
-
-Kostenfreie Absagen im Abo übrig: {{ rest }}.
+{%- if b.dauerbuchung_id and s.durch == "kunde" %} Bucht ein anderer Kunde den Platz, schreiben wir Ihnen den Terminpreis nach dem Termin als Guthaben gut.{% endif %}
 {%- endif %}
 
 Viele Grüße

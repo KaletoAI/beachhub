@@ -16,7 +16,6 @@ from beachhub_core.models import (
     Ausnahmetag,
     Betriebszeit,
     Buchung,
-    Dauerbuchung,
     Feld,
     Gutschein,
     GutscheinEinloesung,
@@ -182,15 +181,12 @@ def baue_tarife(db: Session) -> schema.TarifeInhalt:
 
 
 def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
-    from beachhub_core.services import storno as storno_dienst
-
     jetzt = clock.now(db)
     buchungen = db.scalars(
         select(Buchung)
         .where(Buchung.kunde_id == kunde.id, Buchung.beginn >= jetzt - timedelta(days=90))
         .order_by(Buchung.beginn)
     ).all()
-    rest_je_abo: dict[uuid.UUID, int] = {}
     out = []
     for b in buchungen:
         s = db.scalar(select(Storno).where(Storno.buchung_id == b.id))
@@ -207,14 +203,6 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
             if b.status == Buchung.RESERVIERT
             else None
         )
-        rest = None
-        if b.dauerbuchung_id is not None:
-            if b.dauerbuchung_id not in rest_je_abo:
-                dauer = db.get(Dauerbuchung, b.dauerbuchung_id)
-                rest_je_abo[b.dauerbuchung_id] = (
-                    storno_dienst.freie_absagen_rest(db, dauer) if dauer is not None else 0
-                )
-            rest = rest_je_abo[b.dauerbuchung_id]
         out.append(
             schema.KontoBuchung(
                 id=str(b.id),
@@ -230,7 +218,6 @@ def baue_konto(db: Session, kunde: Kunde) -> schema.KontoInhalt:
                 reserviert_bis=b.reserviert_bis if offene_zahlung else None,
                 stornierbar=b.im_portal_stornierbar,
                 abo=b.dauerbuchung_id is not None,
-                freie_absagen_rest=rest,
                 gutschein_modelle=sorted(
                     set(
                         db.scalars(
@@ -492,18 +479,6 @@ def markiere_rechnungskunden(db: Session) -> None:
     """Markiert die Konto-Dokumente aller Rechnungskunden – sie tragen online_buchen."""
     ids = db.scalars(
         select(Kunde.id).where(Kunde.rechnungskunde.is_(True), Kunde.anonymisiert_am.is_(None))
-    ).all()
-    if ids:
-        markiere_geaendert(db, *(f"konto:{i}" for i in ids))
-
-
-def markiere_abo_kunden(db: Session) -> None:
-    """Markiert auch Abo-Inhaber mit inzwischen entferntem Rechnungskundenkennzeichen."""
-    ids = db.scalars(
-        select(Kunde.id).where(
-            Kunde.anonymisiert_am.is_(None),
-            Kunde.id.in_(select(Dauerbuchung.kunde_id)),
-        )
     ).all()
     if ids:
         markiere_geaendert(db, *(f"konto:{i}" for i in ids))

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from beachhub_core import auth
 from beachhub_core.database import get_db
-from beachhub_core.models import AdminUser, Kunde, Rechnung
+from beachhub_core.models import AdminUser, Kunde, Rechnung, RechnungPosition, Storno
 from beachhub_core.routes._form import fehlertext, t_datum, t_uuid
 from beachhub_core.services import benachrichtigung, rechnung_pdf, rechnungen
 from beachhub_core.services import storno as storno_dienst
@@ -28,6 +28,10 @@ GRUND = {
     "bereits_korrigiert": "Eine der Positionen wurde bereits korrigiert",
     "keine_positionen": "Bitte mindestens eine Position auswählen",
     "verschiedene_rechnungen": "Die Positionen gehören nicht zu dieser Rechnung",
+    "abo_gutgeschrieben": (
+        "Der Abo-Termin einer Position ist bereits als Guthaben gutgeschrieben; eine "
+        "Teil-Stornorechnung würde ihn doppelt erstatten."
+    ),
 }
 
 
@@ -120,6 +124,18 @@ def detail(
             .order_by(Rechnung.nummer)
         ).all(),
         integritaet=rechnung_pdf.pruefe_integritaet(r),
+        abo_gutgeschrieben=_abo_gutgeschriebene_positionen(db, r),
+    )
+
+
+def _abo_gutgeschriebene_positionen(db: Session, r: Rechnung) -> set[uuid.UUID]:
+    """Positionen, deren Abo-Termin ohne Beleg als Guthaben gutgeschrieben wurde."""
+    return set(
+        db.scalars(
+            select(RechnungPosition.id)
+            .join(Storno, Storno.buchung_id == RechnungPosition.buchung_id)
+            .where(RechnungPosition.rechnung_id == r.id, Storno.abo_gutschrift.is_not(None))
+        )
     )
 
 

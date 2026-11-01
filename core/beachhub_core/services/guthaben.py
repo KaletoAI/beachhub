@@ -20,6 +20,9 @@ ARTEN = {
     # Verrechnetes Guthaben einer Reservierung, die ohne Zahlung endet (Storno, Verfall).
     # Keine storno_gutschrift: Es gab keine Rechnung, also braucht es keinen Korrekturbeleg.
     "rueckbuchung",
+    # Kostenfrei gewordener Abo-Termin während des Abos: Guthaben ohne Korrekturbeleg, die
+    # Saisonrechnung bleibt unverändert (storno.abo_gutschreiben, Bezug ist das Storno).
+    "abo_gutschrift",
 }
 ABGEHEND = {"verrechnung", "auszahlung"}
 

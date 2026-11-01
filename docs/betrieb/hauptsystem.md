@@ -125,7 +125,7 @@ Betrieb beginnt:
    `mitgliedschaft_ablauf` (30.04.), `mitglieder_abgleich` (31.08., muss vor dem ersten
    Buchungsfenster der Saison liegen – die Seite warnt sonst), `mitglied_erinnerung_tage` (14)
    und `rechnungskunden_online_buchen` (nein). Für Abos außerdem `saison_zahlungsziel_tage` (14),
-   `guthaben_auf_saisonrechnung` (ja), `abo_freie_absagen` (3), `abo_nur_mitglieder` (ja)
+   `guthaben_auf_saisonrechnung` (ja), `abo_nur_mitglieder` (ja)
    und `saisonende_guthabenliste` (30.04.) prüfen.
 6. Einen **Testkunden** anlegen.
 7. Eine **Testbuchung** für den Testkunden durchführen und die Bestätigungsmail (PIN) prüfen.
@@ -142,6 +142,10 @@ jedes Feld erscheint mit seinem eigenen Wochenplan untereinander. Ohne Auswahl z
 ersten fünf aktiven Felder in ihrer Reihenfolge. Die Auswahl bleibt beim Wochenwechsel erhalten.
 Ein Klick auf einen freien Slot legt dort eine Buchung an. Laufende und beendete Abos finden Sie
 unter Belegung → Dauerbuchungen.
+
+**Abo anlegen.** Termine, die der Kunde schon bei der Anfrage absagt (etwa Ferien), setzen Sie
+nach „Termine prüfen“ in der Terminliste auf **auslassen**. Diese Termine werden weder gebucht
+noch berechnet. Ein Kontingent für kostenfreie Absagen während des Abos gibt es nicht.
 
 **Rechnungen.** Es gibt keinen Monatslauf mehr. Jede neue Dauerbuchung bekommt bei ihrer Anlage
 in derselben Transaktion genau eine **Saisonrechnung** über alle erzeugten Termine
@@ -163,9 +167,10 @@ Saisonrechnung je Abo geben. Nach vollständigem Storno ist über dieselbe Aktio
 für freigegebene aktive oder kostenpflichtig abgesagte, unberechnete Termine möglich; auch das
 geschieht nicht automatisch.
 
-**Korrekturen.** Wird eine berechnete Buchung kostenfrei storniert (innerhalb der Frist, als freie
-Abo-Absage, per Kulanz, durch eine Sperre oder weil ein Abo endet), entsteht automatisch ein
-Korrekturbeleg über ihre Position. War die Rechnung bezahlt, wird der Betrag Guthaben; war sie
+**Korrekturen.** Wird eine berechnete Buchung kostenfrei storniert (innerhalb der Frist, per
+Kulanz, durch eine Sperre oder weil ein Abo endet), entsteht automatisch ein
+Korrekturbeleg über ihre Position. Ausnahme sind einzelne Abo-Termine während des Abos: Sie
+werden nur als Guthaben gutgeschrieben (siehe „Abo-Absagen“). War die Rechnung bezahlt, wird der Betrag Guthaben; war sie
 unbezahlt, sinkt die Forderung. Bei teilweiser Zahlung sinkt zuerst die offene Forderung; nur der
 darüber hinausgehende Betrag wird Guthaben. Sind alle Positionen korrigiert, ist die Rechnung
 storniert. Ist der Restbetrag vollständig gedeckt und bleiben Positionen bestehen, gilt die Rechnung
@@ -187,13 +192,15 @@ Vor dem Upgrade auf 0014 entstand bei kostenfreien Stornos von Onlinebuchungen G
 Korrekturbeleg. Holen Sie den Beleg für einen solchen Fall per Teil- oder Vollstorno nach, rechnet
 das System die damalige Gutschrift an und erstattet nicht ein zweites Mal.
 Die neuen Belege verrechnen Guthaben entsprechend Ihrer Einstellung; historische Zahlungen
-bleiben an der alten Rechnung. Stornoguthaben entsteht immer zusammen mit einem Korrekturbeleg;
+bleiben an der alten Rechnung. Stornoguthaben entsteht immer zusammen mit einem Korrekturbeleg,
+außer bei Abo-Gutschriften während des Abos;
 PDF und Mail werden erst nach erfolgreichem Commit versandt.
 
 **Welche Korrektur wofür.** Die Rechnungsseite erklärt die Wege jeweils am Formular:
 - *Termin fällt aus oder wird abgesagt:* Buchung stornieren (Positionstext oder Belegungsplan),
   Sperre anlegen oder das Abo auf der Abo-Seite ab einem Datum **beenden**. Der Platz wird frei,
-  die Stornorechnung entsteht automatisch.
+  die Stornorechnung entsteht automatisch. Einzelne Abo-Termine werden dabei nur als Guthaben
+  gutgeschrieben; nur das Beenden erzeugt eine Stornorechnung.
 - *Kulanz oder falscher Betrag, Termin bleibt:* **Teil-Stornorechnung** für ausgewählte
   Positionen. Auch mit allen Positionen entsteht keine neue Rechnung; die Rechnung steht danach
   auf „storniert“, die Buchungen bleiben bestehen.
@@ -203,19 +210,44 @@ PDF und Mail werden erst nach erfolgreichem Commit versandt.
 Eine Stornorechnung steht mit ihrer Erstellung auf „bezahlt“: Sie ist ein erledigter
 Korrekturbeleg, ihr Betrag ist bereits als Guthaben oder als Minderung der Forderung gebucht.
 
-**Abo-Absagen.** Kunden sagen Abo-Termine im Portal bis zum Beginn ab. Bis zu `abo_freie_absagen`
-(Vorgabe 3) Absagen je Abo innerhalb der Stornofrist sind kostenfrei; weitere Absagen und Absagen
-nach der Frist geben den Platz frei, der Termin bleibt aber berechnet. `0` schaltet freie
-Kundenabsagen aus. Jede kostenfreie Kundenabsage verbraucht Kontingent, auch für einen noch
-unberechneten Termin (etwa zwischen Vollstorno und Neuausstellung): Er wird danach nicht mehr
-berechnet. Nur ein bereits gutgeschriebener Termin (Teil-Stornorechnung) bleibt kostenfrei, ohne
-Kontingent zu verbrauchen, auch nach der Frist oder ohne Kontingent. Kulanz, Sperren und Beenden durch den Betreiber verbrauchen ebenfalls
-kein Kontingent. Eine kostenpflichtige
-Betreiberentscheidung wird in der Stornomail als solche benannt.
-Die Portalbestätigung zeigt das verbleibende Kontingent aus dem signierten Kontostand, die
-Absagefrist des Termins und erklärt die Bedingungen und finanziellen Folgen; nach der Absage nennt
-sie die tatsächliche Wirkung (Gutschrift, nicht berechnet oder bereits gutgeschrieben). Über die Absage entscheidet das Hauptsystem bei der
-Verarbeitung; eine ausführlichere Abo-Übersicht im Portal bleibt für den weiteren Ausbau vorgesehen.
+**Abo-Absagen.** Kunden sagen Abo-Termine im Portal bis zum Beginn ab. Ein Absagekontingent
+gibt es nicht; Termine, die der Kunde nicht nimmt, lassen Sie schon beim Anlegen aus. Während des
+Abos ist jede kostenfreie Absage eines Abo-Termins **nur eine Gutschrift**: Der Positionsbetrag
+wird dem Guthabenkonto des Kunden gutgeschrieben (Guthabenart `abo_gutschrift`). Es entsteht
+keine Stornorechnung, die Saisonrechnung bleibt unverändert und voll fällig. Das Guthaben wird
+mit der nächsten Saisonrechnung verrechnet, solange `guthaben_auf_saisonrechnung` an ist, oder
+zum Saisonende auf Wunsch ausgezahlt.
+
+- *Rechtzeitige Kundenabsage* (bis `storno_frist_stunden` vor Beginn): Gutschrift sofort.
+- *Zu späte Kundenabsage:* Der Platz wird frei, der Termin bleibt berechnet. Bucht ein anderer
+  Kunde den Platz, prüft das Hauptsystem nach dem Ende des Termins (Lauf alle 15 Minuten),
+  ob die andere Buchung bestätigt, durchgeführt, nicht erschienen oder kostenpflichtig storniert
+  ist. Dann wird die Absage kostenfrei („Platz wieder vergeben“), der Termin gutgeschrieben und
+  der Kunde per Mail informiert. Es genügt jede Überschneidung auf demselben Feld; eigene
+  Buchungen des Abo-Kunden und kostenfrei stornierte Buchungen zählen nicht.
+- *Kulanz, Betreiberstorno und Sperren* auf einen Abo-Termin: ebenfalls nur Gutschrift.
+- *Abo beenden* bleibt dagegen eine Vertragsänderung: Alle Termine ab dem Datum erhalten wie
+  bisher eine Stornorechnung zur Saisonrechnung.
+
+Jeder Termin wird höchstens einmal gutgeschrieben. Unberechnete Termine (etwa zwischen Vollstorno
+und Neuausstellung) und bereits per Teil-Storno korrigierte Termine ergeben keine Gutschrift; ein
+bereits korrigierter Termin bleibt auch nach der Frist kostenfrei. Eine gutgeschriebene Position
+ist auf der Rechnungsseite als „als Guthaben gutgeschrieben“ markiert und kann keine
+Teil-Stornorechnung mehr bekommen, sonst würde doppelt erstattet. Ein Vollstorno zur
+Neuausstellung bleibt möglich; die neue Saisonrechnung berechnet gutgeschriebene Termine wieder
+mit, weil ihr Betrag bereits Guthaben ist. Abo-Detailseite und Buchungsseite zeigen den
+gutgeschriebenen Betrag. Eine kostenpflichtige Betreiberentscheidung wird in der Stornomail als
+solche benannt.
+
+**Umsatzsteuer.** Die Gutschrift mindert die Saisonrechnung nicht; deren Umsatzsteuer bleibt
+unverändert ausgewiesen. Wird das Guthaben später mit einer neuen Rechnung verrechnet, enthält
+diese ihre eigene Umsatzsteuer. Diese Behandlung ist eine Betreiberentscheidung (01.11.2026) und
+sollte mit dem Steuerberater abgestimmt sein.
+
+Die Portalbestätigung erklärt die Absagefrist des Termins und die Folgen (Gutschrift bzw.
+Gutschrift nur bei Wiedervergabe); nach der Absage nennt sie die tatsächliche Wirkung. Über die
+Absage entscheidet das Hauptsystem bei der Verarbeitung; eine ausführlichere Abo-Übersicht im
+Portal bleibt für den weiteren Ausbau vorgesehen.
 
 **Guthabenliste.** Unter Kunden → Guthabenliste sehen Sie jederzeit positive Guthaben nicht
 anonymisierter Kunden und deren Gesamtsumme. Ab dem Stichtag `saisonende_guthabenliste` (Vorgabe
@@ -230,7 +262,9 @@ Stichtag.
 
 **Stornobestätigungen bei Sperren und Abos.** Storniert eine Sperre, eine neue Dauerbuchung oder
 das Beenden eines Abos Buchungen, bekommt jeder betroffene Kunde nach dem Speichern eine
-Stornobestätigung (mehrere Termine in einer Mail) und anschließend seine Stornorechnung.
+Stornobestätigung (mehrere Termine in einer Mail) und anschließend seine Stornorechnung. Bei
+Abo-Terminen, die eine Sperre oder eine neue Dauerbuchung verdrängt, nennt die Bestätigung die
+Gutschrift; eine Stornorechnung gibt es dafür nicht.
 
 **Auszahlung abhaken** prüft, ob das angezeigte Guthaben noch stimmt. Hat es sich inzwischen
 geändert, etwa durch einen doppelten Klick, wird nichts gebucht und die Liste zeigt den aktuellen
@@ -622,8 +656,14 @@ mit einer klaren Fehlermeldung abgewiesen; diese Daten werden dabei nicht gelös
 **Reihenfolge Portal und Hauptsystem.** Ändert ein Update den Kanal oder den Lesestand (etwa
 Stufe 1a-II mit Abo-Absagen im Portal), aktualisieren Sie **zuerst das Portal** und danach das
 Hauptsystem. Ein altes Portal kennt neue Felder nicht und würde Kunden sonst falsche Zusagen
-machen (etwa kostenfreie Abo-Absagen ohne Kontingent). Ein neues Portal kommt mit einem alten
+machen (etwa ein Absagekontingent, das es seit Migration 0017 nicht mehr gibt). Ein neues Portal kommt mit einem alten
 Hauptsystem zurecht, weil neue Felder dort fehlen dürfen.
+
+**Upgrade auf Abo-Gutschriften (Migration 0017).** Fügt `storno.abo_gutschrift` hinzu, entfernt
+die Einstellung `abo_freie_absagen` und markiert die Konto-Dokumente aller Abo-Kunden zur
+Neuveröffentlichung. Bereits früher entstandene Stornorechnungen aus freien Absagen bleiben
+unverändert. Ein Downgrade auf `0016` wird abgewiesen, sobald es Abo-Gutschriften gibt.
+Portal vor Hauptsystem aktualisieren.
 
 **Upgrade auf Stufe 1a-II (Migrationen 0014 und 0016).** Migration `0016_upgrade_1a_ii`
 (nach der Gutscheinmigration `0015`) markiert die

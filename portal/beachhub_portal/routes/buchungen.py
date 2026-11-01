@@ -95,8 +95,8 @@ def stornieren_seite(
         )
     belegung = lesestand.belegung(db)
     frist = belegung.storno_frist_stunden if belegung else 24
-    # Bei Abos wird nur der signierte Kontostand und die Frist angezeigt; über die freie
-    # Absage entscheidet das Hauptsystem bei der Verarbeitung der Anfrage.
+    # Bei Abos werden nur Frist und Folgen erklärt; über Gutschrift und Kosten entscheidet das
+    # Hauptsystem bei der Verarbeitung der Anfrage.
     frist_ende = b.beginn - timedelta(hours=frist)
     kostenfrei = None
     if not b.abo:

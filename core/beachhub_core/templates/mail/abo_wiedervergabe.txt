@@ -1,0 +1,13 @@
+Hallo {{ b.kunde.name }},
+
+Ihren abgesagten Abo-Termin hat ein anderer Kunde gebucht:
+Feld {{ b.feld.name }}, {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr
+
+{% if s.abo_gutschrift -%}
+Wir haben Ihnen den Terminpreis von {{ s.abo_gutschrift|euro }} als Guthaben gutgeschrieben. Die Saisonrechnung bleibt unverändert.
+{%- else -%}
+Die Absage ist damit für Sie kostenfrei; der Termin wird nicht berechnet.
+{%- endif %}
+
+Viele Grüße
+{{ betreiber }}

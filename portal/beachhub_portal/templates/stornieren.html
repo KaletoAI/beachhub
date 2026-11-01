@@ -4,14 +4,11 @@
 <div class="karte">
   <p><strong>{{ b.feld_name }}</strong> · {{ b.beginn|lokal }} bis {{ b.ende|uhrzeit }} Uhr · {{ b.preis|euro }}</p>
   {% if b.abo %}
-  {% if b.freie_absagen_rest is not none %}<p>Kostenfreie Absagen übrig: {{ b.freie_absagen_rest }}</p>{% endif %}
   {% if frist_abgelaufen %}
-  <p>Die Stornofrist von {{ frist }} Stunden ist für diesen Termin am {{ frist_ende|lokal }} Uhr abgelaufen. Der Termin wird freigegeben, <strong>bleibt aber berechnet</strong>. War er bereits gutgeschrieben, bleibt die Absage kostenfrei.</p>
-  {% elif b.freie_absagen_rest == 0 %}
-  <p>Laut aktuellem Kontostand stehen keine kostenfreien Absagen zur Verfügung. Der Termin wird freigegeben, <strong>bleibt berechnet</strong>.</p>
+  <p>Die Stornofrist von {{ frist }} Stunden ist für diesen Termin am {{ frist_ende|lokal }} Uhr abgelaufen. Der Termin wird freigegeben, <strong>bleibt aber berechnet</strong>. Bucht ein anderer Kunde den Platz, wird dir der Terminpreis nach dem Termin als Guthaben gutgeschrieben. War der Termin bereits gutgeschrieben, bleibt die Absage kostenfrei.</p>
   {% else %}
-  <p>Eine Abo-Absage ist nur innerhalb der Stornofrist von {{ frist }} Stunden und mit verbleibendem Kontingent kostenfrei; für diesen Termin bis {{ frist_ende|lokal }} Uhr. Ob die Absage kostenfrei ist, entscheidet das Buchungssystem bei der Bearbeitung.</p>
-  <p>Bei einer kostenfreien Absage sinkt die offene Forderung; der bereits bezahlte Anteil wird Guthaben. Andernfalls bleibt der Termin berechnet. Der Platz wird in jedem Fall freigegeben.</p>
+  <p>Bis {{ frist_ende|lokal }} Uhr ({{ frist }} Stunden vor Beginn) ist die Absage kostenfrei: Der Terminpreis wird deinem Guthaben gutgeschrieben, die Saisonrechnung bleibt unverändert. Ob die Absage rechtzeitig ist, entscheidet das Buchungssystem bei der Bearbeitung.</p>
+  <p>Nach der Frist bleibt der Termin berechnet; gutgeschrieben wird er dann nur, wenn ein anderer Kunde den Platz bucht. Der Platz wird in jedem Fall freigegeben.</p>
   {% endif %}
   {% elif kostenfrei %}
   <p>Die Stornierung ist <strong>kostenfrei</strong>.{% if b.status == "bestaetigt" and not b.gutschein_modelle %} Der Betrag wird deinem Guthaben gutgeschrieben und mit der nächsten Buchung verrechnet.{% endif %}</p>

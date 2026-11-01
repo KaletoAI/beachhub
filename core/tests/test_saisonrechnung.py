@@ -124,7 +124,7 @@ def test_review_10_anlageaudit_enthaelt_dauerbuchung(db: Session, welt, wallet: 
     assert len(audits) == (2 if Decimal(wallet) else 1)
 
 
-@pytest.mark.parametrize("absage", ["spaet", "ohne_kontingent"])
+@pytest.mark.parametrize("absage", ["spaet", "betreiber"])
 def test_review_3_neuausstellung_behaelt_kostenpflichtige_absage(
     db: Session, welt, monkeypatch, absage: str
 ) -> None:
@@ -132,9 +132,9 @@ def test_review_3_neuausstellung_behaelt_kostenpflichtige_absage(
     r = _saison(db, d)
     if absage == "spaet":
         monkeypatch.setattr(storno.clock, "now", lambda db: kombiniere(date(2027, 12, 1), time(10)))
+        s = storno.storniere(db, d.buchungen[0], durch="kunde")
     else:
-        konfiguration.setze(db, "abo_freie_absagen", 0)
-    s = storno.storniere(db, d.buchungen[0], durch="kunde")
+        s = storno.storniere(db, d.buchungen[0], durch="betreiber", kostenfrei=False)
     assert not s.kostenfrei
     rechnungen.storniere(db, r, admin_user_id=None, grund="Adresskorrektur")
     neu = rechnungen.erzeuge_saisonrechnung(db, d)
@@ -658,15 +658,23 @@ def test_alter_buchungsstand_korrigiert_neu_ausgestellte_saisonrechnung(
         storno.kulanz(db, s, admin_user_id=None, grund="Kulanz")
     db.commit()
     db.expire_all()
-    korrektur = db.scalars(select(Rechnung).where(Rechnung.korrigiert_rechnung_id == rid)).one()
-    assert korrektur.brutto == Decimal("-30.00") and len(korrektur.positionen) == 1
     assert db.get(Buchung, bid).rechnung_position_id == neue_position
-    assert rechnungen.offener_betrag(db, db.get(Rechnung, rid)) == Decimal(
-        "0.00" if bezahlt else "90.00"
-    )
-    assert db.get(Kunde, kid).guthaben == Decimal("30.00" if bezahlt else "0.00")
     if weg in ("storno", "kulanz"):
-        assert db.get(Buchung, bid).storno.korrektur_rechnung_id == korrektur.id
+        # Abo-Termine: Gutschrift über die neue Position, die Saisonrechnung bleibt unverändert.
+        assert db.query(Rechnung).filter_by(korrigiert_rechnung_id=rid).count() == 0
+        frisch = db.get(Buchung, bid).storno
+        assert frisch.abo_gutschrift == Decimal("30.00") and frisch.korrektur_rechnung_id is None
+        assert rechnungen.offener_betrag(db, db.get(Rechnung, rid)) == Decimal(
+            "0.00" if bezahlt else "120.00"
+        )
+        assert db.get(Kunde, kid).guthaben == Decimal("30.00")
+    else:
+        korrektur = db.scalars(select(Rechnung).where(Rechnung.korrigiert_rechnung_id == rid)).one()
+        assert korrektur.brutto == Decimal("-30.00") and len(korrektur.positionen) == 1
+        assert rechnungen.offener_betrag(db, db.get(Rechnung, rid)) == Decimal(
+            "0.00" if bezahlt else "90.00"
+        )
+        assert db.get(Kunde, kid).guthaben == Decimal("30.00" if bezahlt else "0.00")
     if weg == "storno":
         with pytest.raises(storno.StornoFehler, match="nicht_aktiv"):
             storno.storniere(db, b, durch="betreiber", kostenfrei=True)
@@ -677,8 +685,12 @@ def test_alter_buchungsstand_korrigiert_neu_ausgestellte_saisonrechnung(
     else:
         storno.kulanz(db, db.get(Storno, sid), admin_user_id=None, grund="Wiederholung")
         db.commit()
-    assert db.query(Rechnung).filter_by(korrigiert_rechnung_id=rid).count() == 1
-    assert db.query(GuthabenBuchung).filter_by(art="storno_gutschrift").count() == int(bezahlt)
+    if weg in ("storno", "kulanz"):
+        assert db.query(Rechnung).filter_by(korrigiert_rechnung_id=rid).count() == 0
+        assert db.query(GuthabenBuchung).filter_by(art="abo_gutschrift").count() == 1
+    else:
+        assert db.query(Rechnung).filter_by(korrigiert_rechnung_id=rid).count() == 1
+        assert db.query(GuthabenBuchung).filter_by(art="storno_gutschrift").count() == int(bezahlt)
 
 
 def test_alter_aktiver_buchungsstand_wird_nicht_erneut_storniert(db: Session, welt) -> None:

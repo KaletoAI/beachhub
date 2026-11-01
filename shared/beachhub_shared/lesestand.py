@@ -114,7 +114,8 @@ class KontoBuchung(BaseModel):
     # Portal-Buchungen und Dauerbuchungstermine können Kunden im Portal absagen.
     # Mit Vorgabe, damit ältere gespeicherte Dokumente gültig bleiben.
     stornierbar: bool = True
-    # Termin einer Dauerbuchung und verbleibende freie Absagen dieses Abos (A-DAUER-3).
+    # Termin einer Dauerbuchung (A-DAUER-3). `freie_absagen_rest` stammt aus dem früheren
+    # Absagekontingent; Hauptsysteme ab 0017 senden es nicht mehr.
     abo: bool = False
     freie_absagen_rest: int | None = None
     # Modelle der tatsächlichen Deckung, ohne fremde Codes oder Kaufbelegrechte.

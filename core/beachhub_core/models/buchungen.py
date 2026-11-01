@@ -132,8 +132,13 @@ class Storno(UUIDMixin, Base):
     durch: Mapped[str] = mapped_column(String(10), nullable=False)  # kunde | betreiber | system
     kostenfrei: Mapped[bool] = mapped_column(Boolean, nullable=False)
     grund: Mapped[str] = mapped_column(String(300), default="", nullable=False)
-    # Kostenfreie Absage eines Abo-Termins durch den Kunden (A-DAUER-3); nur diese zählen.
+    # Historisch (bis 0016): kostenfreie Kundenabsage aus dem früheren Absagekontingent je Abo.
+    # Seit 0017 gibt es kein Kontingent mehr; neue Stornos setzen den Wert nicht.
     freie_absage: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    # Abo-Gutschrift (seit 0017): Ein während des Abos kostenfrei gewordener Termin korrigiert
+    # die Saisonrechnung nicht, sein Positionsbetrag wird ohne Beleg Guthaben. Der Termin bleibt
+    # Teil der Saisonrechnung und wird bei einer Neuausstellung wieder berechnet.
+    abo_gutschrift: Mapped[Decimal | None] = mapped_column(DECIMAL(10, 2))
     # Korrekturbeleg, mit dem das Storno die Rechnung der Buchung korrigiert hat (A-STORNO-6).
     korrektur_rechnung_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("rechnung.id")

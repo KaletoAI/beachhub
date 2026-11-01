@@ -112,7 +112,13 @@ Vollstorno für weiter abrechenbare Buchungen in derselben Transaktion neu aus u
 erstatteten Anteil darauf; beleglose Stornogutschriften aus der Zeit vor 0014 werden beim
 Nachholen des Belegs angerechnet. Beim Upgrade
 muss der Betreiber solche Bestandsabos prüfen; Migrationen rechnen sie nicht automatisch ab.
-Details zu Korrekturbelegen, freien Abo-Absagen und manuellen Auszahlungen stehen im
+Abo-Absagen während des Abos korrigieren die Saisonrechnung nicht: Rechtzeitige Absagen,
+Kulanz, Betreiberstornos und Sperren schreiben den Positionsbetrag ohne Beleg als Guthaben gut
+(`storno.abo_gutschrift`, Guthabenart `abo_gutschrift`); zu späte Kundenabsagen erst, wenn ein
+anderer Kunde den Platz gebucht hat (Lauf `abo_wiedervergabe` alle 15 Minuten nach Terminende).
+Nur das Beenden eines Abos erzeugt eine Stornorechnung. Ein Absagekontingent gibt es seit 0017
+nicht mehr; nicht genommene Termine werden bei der Anlage ausgelassen.
+Details zu Korrekturbelegen, Abo-Gutschriften und manuellen Auszahlungen stehen im
 [Betriebshandbuch](../docs/betrieb/hauptsystem.md#5-laufender-betrieb).
 
 Bei Buchungsanlagen gilt die Sperrreihenfolge Kunde vor Feld, auch für Portal-Einzelbuchungen.

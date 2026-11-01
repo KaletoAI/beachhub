@@ -132,3 +132,15 @@ Saisonende-Marker beim Upgrade. Sperre, Daueranlage und
 Abo-Ende verschicken Stornobestätigungen für die tatsächlich erzeugten Stornos
 (mit Gutschein-Rückabwicklungshinweis und Gutschein-Korrekturbelegen). Der Kanal meldet
 bei Abo-Absagen `korrekturbeleg`; Portal vor Hauptsystem aktualisieren.
+
+## Abo-Absagen als Gutschrift am 01.11.2026
+
+Betreiberentscheidung: Es gibt kein Kontingent freier Abo-Absagen mehr (`abo_freie_absagen`
+entfällt mit Revision `0017_abo_gutschrift`). Nicht genommene Termine werden bei der Anlage
+ausgelassen. Während des Abos sind kostenfreie Abo-Absagen nur Gutschriften: Der Positionsbetrag
+wird ohne Korrekturbeleg Guthaben (`storno.abo_gutschrift`, Guthabenart `abo_gutschrift`), die
+Saisonrechnung bleibt unverändert. Das gilt für rechtzeitige Kundenabsagen, Kulanz,
+Betreiberstornos und Sperren. Zu späte Kundenabsagen werden erst gutgeschrieben, wenn ein anderer
+Kunde den Platz gebucht hat (Lauf nach Terminende). Das Beenden eines Abos erzeugt weiter eine
+Stornorechnung. Gutgeschriebene Positionen sind für Teil-Stornos gesperrt; eine Neuausstellung
+berechnet sie wieder. Die Kontingent-Angaben oben (1a-II) sind damit überholt.
