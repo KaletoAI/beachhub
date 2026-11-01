@@ -8,7 +8,6 @@
   <p>Gültig: {{ d.gueltig_von|datum }} – {{ d.gueltig_bis|datum }}</p>
   <p>PIN: <strong class="pin-gross">{{ pin }}</strong></p>
   {% if saison %}<p>Saisonrechnung: <a href="/admin/rechnungen/{{ saison.id }}">{{ saison.nummer }}</a> · {{ saison.status }}{% if offen %} · offen {{ offen|euro }}{% endif %}</p>{% endif %}
-  <p>Kostenfreie Absagen übrig: {{ freie_absagen }} von {{ freie_absagen_max }}</p>
   {% if rechnung_erstellbar and admin.rolle == "admin" %}
   <form method="post" action="/admin/belegung/dauer/{{ d.id }}/rechnung">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -25,7 +24,7 @@
     {% for b in d.buchungen %}
     <tr>
       <td>{{ b.beginn|lokal }}</td>
-      <td>{{ b.status }}</td>
+      <td>{{ b.status }}{% if b.storno %} · {% if b.storno.abo_gutschrift is not none %}gutgeschrieben {{ b.storno.abo_gutschrift|euro }}{% elif b.storno.kostenfrei %}kostenfrei{% else %}berechnet{% endif %}{% endif %}</td>
       <td><a class="aktion" href="/admin/belegung/buchung/{{ b.id }}">anzeigen</a></td>
     </tr>
     {% endfor %}
@@ -35,7 +34,7 @@
 {% if not d.beendet_am %}
 <div class="karte schmal">
   <h2>Beenden</h2>
-  <p class="small">Alle Termine ab dem gewählten Tag (einschließlich) werden kostenfrei storniert, ohne das Absagekontingent zu verbrauchen. Berechnete Termine erhalten einen Korrekturbeleg; der Kunde bekommt eine Stornobestätigung.</p>
+  <p class="small">Alle Termine ab dem gewählten Tag (einschließlich) werden kostenfrei storniert. Anders als bei Absagen während des Abos erhalten berechnete Termine hier eine Stornorechnung zur Saisonrechnung; der Kunde bekommt eine Stornobestätigung.</p>
   <form method="post" action="/admin/belegung/dauer/{{ d.id }}/beenden">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>Beenden ab <input type="date" name="ab" required></label>

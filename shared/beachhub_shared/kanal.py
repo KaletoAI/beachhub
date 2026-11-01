@@ -140,12 +140,17 @@ class Antwort(BaseModel):
     # Zeitzonenbewusst: Zeiten im Kanal-Schema sind durchgehend AwareDatetime (Global Constraint).
     reserviert_bis: AwareDatetime | None = None
     kostenfrei: bool | None = None
-    # Abo-Absage: zählt sie zum Kontingent, und wie viele freie Absagen bleiben?
+    # Nur von Hauptsystemen vor 0017 gesendet (früheres Absagekontingent je Abo); das Portal
+    # wertet sie für deren Antworten weiter aus.
     freie_absage: bool | None = None
     verbleibende_freie_absagen: int | None = None
-    # Abo-Absage: Hat ein Korrekturbeleg die Rechnung gemindert? False heißt ohne Geldwirkung
-    # (Termin unberechnet oder bereits gutgeschrieben). Ältere Hauptsysteme senden nichts.
+    # Abo-Absage: Hat ein Korrekturbeleg die Rechnung gemindert? Seit 0017 bei Abo-Absagen
+    # immer False, die Geldwirkung steht in `abo_gutschrift`. Ältere Hauptsysteme senden nichts.
     korrekturbeleg: bool | None = None
+    # Abo-Absage seit 0017: als Guthaben gutgeschriebener Terminbetrag, die Saisonrechnung
+    # bleibt unverändert. 0 heißt ohne Geldwirkung (zu spät, unberechnet oder bereits
+    # korrigiert). Nur bei Abo-Terminen gesetzt; ältere Hauptsysteme senden nichts.
+    abo_gutschrift: Decimal | None = None
     pdf_base64: str | None = None
     dateiname: str | None = None
 

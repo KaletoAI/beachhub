@@ -10,6 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Any, Literal
 from urllib.parse import urlparse
 
@@ -301,12 +302,19 @@ MELDUNGEN: dict[str, str] = {
     "storniert_kostenpflichtig": (
         "Deine Buchung ist storniert. Da die Stornofrist abgelaufen war, bleibt der Betrag fällig."
     ),
+    "abo_storniert_gutschrift": (
+        "Dein Abo-Termin ist storniert. Der Terminpreis wird deinem Guthaben gutgeschrieben; "
+        "die Saisonrechnung bleibt unverändert."
+    ),
+    "abo_storniert_kostenpflichtig": (
+        "Dein Abo-Termin ist storniert und der Platz wieder frei. Der Termin bleibt berechnet. "
+        "Bucht ein anderer Kunde den Platz, wird dir der Terminpreis nach dem Termin "
+        "gutgeschrieben."
+    ),
+    # Antworten von Hauptsystemen vor 0017 (früheres Absagekontingent).
     "abo_storniert_kostenfrei": (
         "Dein Abo-Termin ist storniert. Die Absage ist kostenfrei. Die offene Forderung sinkt; "
         "der bereits bezahlte Anteil wird Guthaben."
-    ),
-    "abo_storniert_kostenpflichtig": (
-        "Dein Abo-Termin ist storniert und der Platz wieder frei. Der Termin bleibt berechnet."
     ),
     "abo_storniert_gutgeschrieben": (
         "Dein Abo-Termin ist storniert. Er war bereits gutgeschrieben; die Absage verbraucht "
@@ -419,6 +427,15 @@ def stand(
         return _nach_zahlung(db, antwort, kunde_id, weiter)
     if a.typ == "buchung_stornieren":
         art = "storniert_kostenfrei" if antwort.get("kostenfrei") else "storniert_kostenpflichtig"
+        gutschrift = antwort.get("abo_gutschrift")
+        if gutschrift is not None:
+            if not antwort.get("kostenfrei"):
+                art = "abo_storniert_kostenpflichtig"
+            elif Decimal(str(gutschrift)) > 0:
+                art = "abo_storniert_gutschrift"
+            else:
+                art = "abo_storniert_unberechnet"
+            return Stand("fertig", MELDUNGEN[art], ziel=f"/buchungen?meldung={art}")
         if antwort.get("freie_absage") is not None:
             art = f"abo_{art}"
             # Die Geldwirkung meldet das Hauptsystem; ältere Versionen senden sie nicht.

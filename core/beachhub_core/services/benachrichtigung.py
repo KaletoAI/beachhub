@@ -56,26 +56,25 @@ def buchung_bestaetigt(db: Session, b: Buchung) -> None:
 
 
 def storno(db: Session, s: Storno) -> None:
-    rest = None
-    if s.buchung.dauerbuchung_id is not None:
-        from beachhub_core.services import storno as storno_dienst
-
-        dauer = db.get(Dauerbuchung, s.buchung.dauerbuchung_id)
-        rest = storno_dienst.freie_absagen_rest(db, dauer) if dauer is not None else None
     if s.durch == "betreiber":
         kostenpflichtiger_grund = "Der Betreiber hat den Termin kostenpflichtig storniert."
     elif s.durch == "system":
         kostenpflichtiger_grund = "Der Termin wurde kostenpflichtig storniert."
-    elif rest == 0:
-        kostenpflichtiger_grund = "Es stehen keine kostenfreien Absagen im Abo zur Verfügung."
     else:
         kostenpflichtiger_grund = "Die Absagefrist war bereits abgelaufen."
     mail.sende(
         s.buchung.kunde.email,
         "Stornierung Ihrer Buchung",
-        _text(
-            "storno", s=s, b=s.buchung, rest=rest, kostenpflichtiger_grund=kostenpflichtiger_grund
-        ),
+        _text("storno", s=s, b=s.buchung, kostenpflichtiger_grund=kostenpflichtiger_grund),
+    )
+
+
+def abo_wiedervergabe(db: Session, s: Storno) -> None:
+    """Zu spät abgesagter Abo-Termin, dessen Platz ein anderer Kunde gebucht hat."""
+    mail.sende(
+        s.buchung.kunde.email,
+        "Gutschrift für Ihren abgesagten Abo-Termin",
+        _text("abo_wiedervergabe", s=s, b=s.buchung),
     )
 
 

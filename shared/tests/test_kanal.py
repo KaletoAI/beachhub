@@ -123,7 +123,15 @@ def test_mitgliedschaft_beantragen_validiert() -> None:
             kanal.MitgliedschaftBeantragen.model_validate(falsch)
 
 
+def test_antwort_kennt_abo_gutschrift() -> None:
+    a = kanal.Antwort(status="ok", kostenfrei=True, abo_gutschrift=Decimal("30.00"))
+    d = kanal.Antwort.model_validate_json(a.model_dump_json()).model_dump(exclude_none=True)
+    assert d["abo_gutschrift"] == Decimal("30.00") and "freie_absage" not in d
+    assert "abo_gutschrift" not in kanal.Antwort(status="ok").model_dump(exclude_none=True)
+
+
 def test_antwort_und_konto_kennen_freie_absagen() -> None:
+    """Felder älterer Hauptsysteme (Absagekontingent) bleiben lesbar."""
     a = kanal.Antwort(status="ok", kostenfrei=True, freie_absage=True, verbleibende_freie_absagen=2)
     d = a.model_dump(mode="json", exclude_none=True)
     assert d["freie_absage"] is True and d["verbleibende_freie_absagen"] == 2

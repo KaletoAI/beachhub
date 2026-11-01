@@ -3,13 +3,13 @@ from collections.abc import Sequence
 from datetime import timedelta
 from decimal import Decimal
 
-from sqlalchemy import func, select
-from sqlalchemy.orm import Session
+from beachhub_shared.zeit import BERLIN
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.orm import Session, aliased
 
 from beachhub_core import clock
 from beachhub_core.models import (
     Buchung,
-    Dauerbuchung,
     GuthabenBuchung,
     GutscheinEinloesung,
     Rechnung,
@@ -70,6 +70,7 @@ def gutschreiben_positionen(
     if positionen:
         rechnungen.sperre(db, positionen[0].rechnung)
         rechnungen.pruefe_allgemeinen_rechnungsvorgang(positionen[0].rechnung, "teilstorno")
+        rechnungen.pruefe_keine_abo_gutschrift(db, positionen)
     return _gutschreiben_positionen(
         db, positionen, grund=grund, quelle=quelle, admin_user_id=admin_user_id
     )
@@ -209,14 +210,140 @@ def gutschreiben(
     return belege[0] if belege else None
 
 
-def freie_absagen_rest(db: Session, dauer: Dauerbuchung) -> int:
-    """Kontingent je Abo abzüglich freier Kundenabsagen; Kulanz und Betreiber zählen nicht."""
-    genutzt = db.scalar(
-        select(func.count(Storno.id))
-        .join(Buchung, Storno.buchung_id == Buchung.id)
-        .where(Buchung.dauerbuchung_id == dauer.id, Storno.freie_absage.is_(True))
+def ist_abo_termin(buchung: Buchung) -> bool:
+    """Abo-Termine werden während des Abos nur gutgeschrieben, ihre Saisonrechnung bleibt."""
+    return buchung.dauerbuchung_id is not None
+
+
+def abo_gutschreiben(
+    db: Session,
+    s: Storno,
+    *,
+    quelle: str,
+    admin_user_id: uuid.UUID | None = None,
+) -> Decimal:
+    """Abo-Gutschrift für einen kostenfrei gewordenen Abo-Termin: Der Positionsbetrag wird ohne
+    Korrekturbeleg Guthaben, die Saisonrechnung bleibt unverändert und voll fällig. Genau einmal
+    je Storno. Unberechnete Termine (etwa zwischen Vollstorno und Neuausstellung) und bereits
+    korrigierte Positionen ergeben keine Gutschrift; ein kostenfreier unberechneter Termin wird
+    nicht mehr berechnet (`saison_abrechenbar`)."""
+    buchung = s.buchung
+    # Saisonrechnung/Neuausstellung kann den zuvor geladenen Zeiger ersetzt haben.
+    db.refresh(buchung)
+    # Sperrreihenfolge wie bei Korrekturen: Kunde, dann Rechnung (`_offene_position`), dann Storno.
+    pos = _offene_position(db, buchung)
+    db.refresh(s, with_for_update=True)
+    if s.abo_gutschrift is not None or pos is None:
+        return NULL
+    vorher = audit.als_dict(s)
+    betrag = pos.brutto
+    s.abo_gutschrift = betrag
+    if betrag > NULL:
+        guthaben.buche(
+            db,
+            kunde=buchung.kunde,
+            betrag=betrag,
+            art="abo_gutschrift",
+            bezug_id=s.id,
+            notiz=(
+                f"Abo-Termin {buchung.beginn.astimezone(BERLIN):%d.%m.%Y} abgesagt "
+                f"(Rechnung {pos.rechnung.nummer})"
+            ),
+            admin_user_id=admin_user_id,
+            quelle=quelle,
+        )
+    db.flush()
+    audit.protokolliere(
+        db,
+        quelle=quelle,
+        objekt_typ="storno",
+        objekt_id=s.id,
+        vorher=vorher,
+        nachher=audit.als_dict(s),
+        admin_user_id=admin_user_id,
     )
-    return max(0, int(konfiguration.hole(db, "abo_freie_absagen")) - int(genutzt or 0))
+    return betrag
+
+
+def _wiedervergeben(db: Session, buchung: Buchung) -> bool:
+    """Hat ein anderer Kunde den Platz des abgesagten Termins gebucht und bezahlt oder schuldet
+    ihn? Zählen bestätigte, durchgeführte und nicht erschienene Buchungen sowie
+    kostenpflichtig stornierte; jede Überschneidung auf demselben Feld genügt."""
+    andere = aliased(Buchung)
+    andere_storno = aliased(Storno)
+    return (
+        db.scalar(
+            select(andere.id)
+            .outerjoin(andere_storno, andere_storno.buchung_id == andere.id)
+            .where(
+                andere.id != buchung.id,
+                andere.feld_id == buchung.feld_id,
+                andere.kunde_id != buchung.kunde_id,
+                andere.beginn < buchung.ende,
+                andere.ende > buchung.beginn,
+                or_(
+                    andere.status.in_(
+                        (Buchung.BESTAETIGT, Buchung.DURCHGEFUEHRT, Buchung.NICHT_ERSCHIENEN)
+                    ),
+                    and_(
+                        andere.status == Buchung.STORNIERT,
+                        andere_storno.kostenfrei.is_(False),
+                    ),
+                ),
+            )
+            .limit(1)
+        )
+        is not None
+    )
+
+
+def wiedervergabe_kandidaten(db: Session) -> list[uuid.UUID]:
+    """Zu spät abgesagte Abo-Termine, deren Zeit vorbei ist und deren Platz ein anderer Kunde
+    gebucht hat (A-DAUER-3 in der Fassung vom 01.11.2026)."""
+    jetzt = clock.now(db)
+    zeilen = db.execute(
+        select(Storno.id, Buchung)
+        .join(Buchung, Storno.buchung_id == Buchung.id)
+        .where(
+            Storno.durch == "kunde",
+            Storno.kostenfrei.is_(False),
+            Buchung.dauerbuchung_id.is_not(None),
+            Buchung.status == Buchung.STORNIERT,
+            Buchung.ende <= jetzt,
+        )
+        .order_by(Buchung.beginn)
+    ).all()
+    return [sid for sid, b in zeilen if _wiedervergeben(db, b)]
+
+
+def wiedervergabe_gutschreiben(db: Session, storno_id: uuid.UUID) -> Storno | None:
+    """Stellt eine zu spät abgesagte Abo-Absage nachträglich frei, weil der Platz wieder vergeben
+    wurde, und schreibt den Termin gut. Liefert das Storno nur, wenn es jetzt frei wurde."""
+    s = db.get(Storno, storno_id)
+    if s is None:
+        return None
+    # Vollständige Kundenmenge vorbereiten wie bei jedem Storno-Finanzvorgang.
+    gutschein_sperren.bereite_buchungen_vor(db, [s.buchung_id])
+    db.refresh(s, with_for_update=True)
+    if s.kostenfrei or not ist_abo_termin(s.buchung) or not _wiedervergeben(db, s.buchung):
+        return None
+    vorher = audit.als_dict(s)
+    s.kostenfrei = True
+    s.grund = (s.grund + " | " if s.grund else "") + "Platz wieder vergeben"
+    db.flush()
+    audit.protokolliere(
+        db,
+        quelle="system",
+        objekt_typ="storno",
+        objekt_id=s.id,
+        vorher=vorher,
+        nachher=audit.als_dict(s),
+    )
+    abo_gutschreiben(db, s, quelle="system")
+    from beachhub_core.services import lesestand
+
+    lesestand.markiere_geaendert(db, f"konto:{s.buchung.kunde_id}")
+    return s
 
 
 def storniere(
@@ -232,7 +359,9 @@ def storniere(
 ) -> Storno:
     """Storniert eine Buchung. Ist das Storno kostenfrei, korrigiert es die Rechnung der Buchung
     (`gutschreiben`) – außer mit `korrigieren=False`: Dann bündelt der Aufrufer die Belege mit
-    `gutschreiben_alle`."""
+    `gutschreiben_alle`. Abo-Termine korrigieren die Saisonrechnung während des Abos nicht; ihr
+    Betrag wird Guthaben (`abo_gutschreiben`). Das Beenden eines Abos korrigiert dagegen mit
+    `korrigieren=False` und `gutschreiben_alle`."""
     if sperrkontext is None:
         sperrkontext = gutschein_sperren.bereite_buchungen_vor(db, [buchung.id])
     db.refresh(buchung, with_for_update=True)
@@ -246,36 +375,20 @@ def storniere(
         raise StornoFehler("zu_spaet")
     if buchung.ende <= jetzt:
         raise StornoFehler("zu_spaet")
-    freie_absage = False
     if kostenfrei is None:
         frist = timedelta(hours=konfiguration.hole(db, "storno_frist_stunden"))
         kostenfrei = jetzt <= buchung.beginn - frist
-        if buchung.dauerbuchung_id is not None and durch == "kunde":
-            # Kunde ist bereits gesperrt. Prüfung und Verbrauch erfolgen in derselben
-            # Transaktion unter der Abo-Sperre, auch bei gleichzeitig letzter freier Absage.
-            dauer = db.scalar(
-                select(Dauerbuchung)
-                .where(Dauerbuchung.id == buchung.dauerbuchung_id)
-                .with_for_update()
-                .execution_options(populate_existing=True)
-            )
-            # Ein bereits gutgeschriebener Termin bleibt kostenfrei und verbraucht kein
-            # Kontingent (A-DAUER-3); es gibt nichts mehr zu berechnen. Ein unberechneter
-            # verbraucht Kontingent: Er wird nach der Absage nie mehr berechnet
-            # (`saison_abrechenbar`).
-            gutgeschrieben = (
+        if ist_abo_termin(buchung) and not kostenfrei:
+            # Ein bereits korrigierter Termin bleibt auch nach der Frist kostenfrei; es gibt
+            # nichts mehr zu berechnen. Sonst bleibt er berechnet, bis der Platz wieder
+            # vergeben ist (`wiedervergabe_gutschreiben`).
+            kostenfrei = (
                 buchung.rechnung_position_id is not None and _offene_position(db, buchung) is None
             )
-            if gutgeschrieben:
-                kostenfrei = True
-            elif kostenfrei:
-                kostenfrei = bool(dauer and freie_absagen_rest(db, dauer) > 0)
-                freie_absage = kostenfrei
     s = Storno(
         buchung_id=buchung.id,
         durch=durch,
         kostenfrei=kostenfrei,
-        freie_absage=freie_absage,
         grund=grund,
     )
     db.add(s)
@@ -294,7 +407,9 @@ def storniere(
         admin_user_id=admin_user_id,
     )
     # Die Verknüpfung mit dem Korrekturbeleg protokolliert `gutschreiben_alle`.
-    if kostenfrei and korrigieren:
+    if kostenfrei and korrigieren and ist_abo_termin(buchung):
+        abo_gutschreiben(db, s, quelle=quelle, admin_user_id=admin_user_id)
+    elif kostenfrei and korrigieren:
         gutschreiben(
             db,
             buchung,
@@ -318,15 +433,6 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
     s.kostenfrei = True
     s.grund = (s.grund + " | " if s.grund else "") + f"Kulanz: {grund}"
     db.flush()
-    gutschreiben(
-        db,
-        s.buchung,
-        grund=f"Kulanz: {grund}",
-        quelle="admin",
-        admin_user_id=admin_user_id,
-        sperrkontext=sperrkontext,
-    )
-    db.flush()
     audit.protokolliere(
         db,
         quelle="admin",
@@ -336,6 +442,18 @@ def kulanz(db: Session, s: Storno, *, admin_user_id: uuid.UUID | None, grund: st
         nachher=audit.als_dict(s),
         admin_user_id=admin_user_id,
     )
+    if ist_abo_termin(s.buchung):
+        abo_gutschreiben(db, s, quelle="admin", admin_user_id=admin_user_id)
+    else:
+        gutschreiben(
+            db,
+            s.buchung,
+            grund=f"Kulanz: {grund}",
+            quelle="admin",
+            admin_user_id=admin_user_id,
+            sperrkontext=sperrkontext,
+        )
+    db.flush()
     from beachhub_core.services import lesestand
 
     lesestand.markiere_geaendert(db, f"konto:{s.buchung.kunde_id}")

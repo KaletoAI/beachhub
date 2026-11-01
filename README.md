@@ -5,7 +5,7 @@ Drei Teilsysteme in einem Repository: Buchungsportal (`portal/`), Hauptsystem (`
 
 Status: Stufe 1 (Hauptsystem) fertig; Stufe 1a-I (feste Kundengruppen mit Steuersatz,
 Mitgliedschaft mit Antrag, Abgleich und Klärungsliste, Rechnungskunden) und 1a-II
-(Saisonrechnung, freie Abo-Absagen, Korrekturbelege, Guthabenliste) und 1a-III
+(Saisonrechnung, Abo-Absagen als Guthaben-Gutschrift, Korrekturbelege, Guthabenliste) und 1a-III
 (Gutscheine und Freischaltcodes im Hauptsystem) umgesetzt; Portal-Kern mit signiertem
 Gutscheinbestand und Kanalverträgen implementiert. Mitgliedschaftsoberfläche, Gutscheinverkauf,
 Codeeingabe und echter Zahlungsanbieter folgen im weiteren Ausbau der Stufe 2.

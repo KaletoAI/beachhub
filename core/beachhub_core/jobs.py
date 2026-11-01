@@ -18,6 +18,7 @@ from beachhub_core.services import (
     lesestand,
     mitgliedschaft,
     online_buchung,
+    storno,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,6 +33,40 @@ def verfall_ausfuehren(db: Session) -> int:
     for b in verfallen:
         benachrichtigung.zahlungsfrist_abgelaufen(db, b)
     return len(verfallen)
+
+
+def abo_wiedervergabe_ausfuehren(db: Session) -> int:
+    """Zu spät abgesagte Abo-Termine gutschreiben, deren Platz ein anderer Kunde gebucht hat.
+    Je Termin eine eigene Transaktion; die Mail erst nach dem Commit."""
+    anzahl = 0
+    for storno_id in storno.wiedervergabe_kandidaten(db):
+        db.rollback()
+        try:
+            s = gutschein_sperren.fuehre_transaktion_aus(
+                db, lambda sid=storno_id: storno.wiedervergabe_gutschreiben(db, sid)
+            )
+        except Exception:
+            db.rollback()
+            logger.exception(
+                "Abo-Gutschrift nach Wiedervergabe für Storno %s fehlgeschlagen", storno_id
+            )
+            continue
+        if s is None:
+            continue
+        anzahl += 1
+        try:
+            benachrichtigung.abo_wiedervergabe(db, s)
+        except Exception:
+            logger.exception("Mail zur Abo-Gutschrift für Storno %s nicht versandt", storno_id)
+    return anzahl
+
+
+def _job_abo_wiedervergabe() -> None:
+    with SessionLocal() as db:
+        try:
+            abo_wiedervergabe_ausfuehren(db)
+        except Exception:
+            logger.exception("Abo-Gutschriften nach Wiedervergabe fehlgeschlagen")
 
 
 def gutschein_verfall_ausfuehren(db: Session) -> int:
@@ -159,6 +194,12 @@ def starte_scheduler() -> BackgroundScheduler:
         _job_saisonende,
         CronTrigger(hour=7, minute=5, timezone="Europe/Berlin"),
         id="saisonende",
+        replace_existing=True,
+    )
+    s.add_job(
+        _job_abo_wiedervergabe,
+        IntervalTrigger(minutes=15),
+        id="abo_wiedervergabe",
         replace_existing=True,
     )
     s.add_job(

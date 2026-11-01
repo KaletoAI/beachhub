@@ -58,7 +58,7 @@
   <table>
     <tr>{% if auswaehlbar %}<th></th>{% endif %}<th>Text</th><th class="rechts">USt</th><th class="rechts">Menge</th><th class="rechts">Brutto</th></tr>
     {% for p in r.positionen %}<tr>
-      {% if auswaehlbar %}<td>{% if p.korrigiert_durch_id is none %}<input type="checkbox" form="teilstorno" name="positionen" value="{{ p.id }}" aria-label="Position {{ p.reihenfolge }} auswählen">{% else %}<span class="badge">korrigiert</span>{% endif %}</td>{% endif %}
+      {% if auswaehlbar %}<td>{% if p.id in abo_gutgeschrieben %}<span class="badge">als Guthaben gutgeschrieben</span>{% elif p.korrigiert_durch_id is none %}<input type="checkbox" form="teilstorno" name="positionen" value="{{ p.id }}" aria-label="Position {{ p.reihenfolge }} auswählen">{% else %}<span class="badge">korrigiert</span>{% endif %}</td>{% endif %}
       <td>{% if p.buchung_id %}<a href="/admin/belegung/buchung/{{ p.buchung_id }}">{{ p.text }}</a>{% else %}{{ p.text }}{% endif %}</td>
       <td class="rechts">{{ p.ust_satz|prozent }}</td>
       <td class="rechts">{{ p.menge }}</td>
